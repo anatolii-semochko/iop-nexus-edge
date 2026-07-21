@@ -1,0 +1,35 @@
+to-do.txt
+
+# local IDE / tooling settings
+.idea/
+.claude/
+
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build output
+dist/
+build/
+.turbo/
+*.tsbuildinfo
+
+# env / secrets
+.env
+.env.*
+!.env.example
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# editors / OS
+.DS_Store
+*.swp
+
+# docker volumes mounted locally (if any)
+.docker-data/
+
+# source archives kept locally only
+*.zip
