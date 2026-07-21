@@ -1,0 +1,95 @@
+name: nexus-edge
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: nexus-edge-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - nexus-edge-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: nexus-edge-redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${REDIS_PORT}:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - nexus-edge-network
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    container_name: nexus-edge-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+    ports:
+      - "127.0.0.1:${RABBITMQ_PORT}:5672"
+      - "127.0.0.1:${RABBITMQ_MANAGEMENT_PORT}:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      - nexus-edge-network
+
+  orchestrator:
+    build:
+      context: .
+      dockerfile: apps/orchestrator/Dockerfile
+    container_name: nexus-edge-orchestrator
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      - postgres
+      - redis
+      - rabbitmq
+    ports:
+      - "${ORCHESTRATOR_PORT}:${ORCHESTRATOR_PORT}"
+    networks:
+      - nexus-edge-network
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: nexus-edge-api
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      - postgres
+      - redis
+    ports:
+      - "${API_PORT}:${API_PORT}"
+    networks:
+      - nexus-edge-network
+
+  ui:
+    build:
+      context: .
+      dockerfile: apps/ui/Dockerfile
+    container_name: nexus-edge-ui
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "${UI_PORT}:80"
+    networks:
+      - nexus-edge-network
+
+networks:
+  nexus-edge-network: {}
+
+volumes:
+  postgres-data:
+  redis-data:
+  rabbitmq-data:
