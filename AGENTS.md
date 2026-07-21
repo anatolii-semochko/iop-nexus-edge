@@ -5,7 +5,7 @@ Read this file before making changes. Keep it updated: whenever you add an
 important service, module, component, or make an architectural change, update
 this file and `README.md` accordingly.
 
-See `PROJECT_MASTER-1.1.md` for the full architecture vision.
+See `docs/PROJECT_MASTER-1.1.md` for the full architecture vision.
 
 ---
 
@@ -71,7 +71,7 @@ Each app builds and runs only via its `Dockerfile`, orchestrated by
 - Version: **Palau (4.0.2)**, `no-secty` (no-security) profile — security
   stack (API Gateway, Secret Store) is disabled since authn/authz for the
   platform itself is handled by our own layer (JWT/Casbin, see
-  PROJECT_MASTER-1.1.md section 16). Revisit before any external/production
+  docs/PROJECT_MASTER-1.1.md section 16). Revisit before any external/production
   exposure.
 - `docker-compose.edgex.yml` runs only the minimum core needed as a
   protocol/hardware abstraction hub: `core-metadata`, `core-data`,

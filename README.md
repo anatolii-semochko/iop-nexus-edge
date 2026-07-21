@@ -5,7 +5,7 @@ Powered by EdgeCore Runtime.
 Edge-first, modular automation platform for building reliable automation
 systems across domains (smart house, aquarium, industrial, marine, and more).
 The platform itself is not an application — domain solutions are built on top
-of it. See `PROJECT_MASTER-1.1.md` for the full architecture and vision, and
+of it. See `docs/PROJECT_MASTER-1.1.md` for the full architecture and vision, and
 `AGENTS.md` for contribution rules and current implementation notes.
 
 ## Requirements
