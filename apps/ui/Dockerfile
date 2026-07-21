@@ -12,5 +12,5 @@ COPY apps/ui apps/ui
 RUN pnpm --filter @nexus-edge/ui build
 
 FROM nginx:1.27-alpine AS runtime
-COPY --from=build /workspace/apps/ui/dist /usr/share/nginx/html
+COPY --from=build /workspace/apps/ui/build /usr/share/nginx/html
 EXPOSE 80
