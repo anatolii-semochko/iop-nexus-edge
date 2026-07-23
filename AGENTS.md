@@ -317,6 +317,39 @@ own (it has no node-level project to be included into). Empty for now — this
 is the convention to follow once the first real device type is built; no
 folders under `devices/` exist yet.
 
+**Implementation status**: the Postgres side of the Device Registry exists
+now (`apps/api/migrations`, `node-pg-migrate`) - `nodes` and `devices`
+tables, run automatically on every `apps/api` container start (idempotent;
+node-pg-migrate tracks what's applied). This is a first, minimal schema, not
+the final shape: `devices.capabilities` is a bare `{"resources": [...]}`
+list of EdgeX resource names, not the richer contract described above, and
+`devices.edgex_device_name` is how a registry row optionally links to an
+already-provisioned EdgeX device - there is no write-side provisioning flow
+yet (registering a Postgres row does not create the EdgeX device, or vice
+versa). A migration seeds the existing example virtual device (see
+`apps/device-service` section 6) as a standalone row so the API/UI have
+something real to show.
+
+`apps/api` exposes this over HTTP: `GET /nodes`, `GET /nodes/:id` (registry
+only), `GET /devices` (registry rows plus, for any with an
+`edgex_device_name`, that device's live `operatingState`/`adminState` from
+one core-metadata call), `GET /devices/:id` (registry row plus the live
+value of every resource in `capabilities.resources`, read from EdgeX
+core-command), and `PUT /devices/:id/resources/:resource` (proxies a write
+to EdgeX core-command; used today by the UI's dev simulator page to
+override a virtual device's sensor values). No Model State Validator sits in
+front of that write path yet (see section 6) - nothing stops a write that
+would violate a forbidden-state rule, because there are no such rules
+declared anywhere yet.
+
+`apps/ui` has a first "Devices" section: Nodes list, Devices list, a generic
+device detail (production-style, read-only), and a Dev Simulator page
+(virtual devices only, shows and lets you override every resource). The UI
+calls the API via a relative `/api/*` path; nginx (the UI's runtime image)
+reverse-proxies that to the `api` service, with the target port templated
+from `API_PORT` at container start (`apps/ui/nginx.conf.template`) rather
+than hardcoded, so it always matches whatever `.env` actually says.
+
 ## 8. Running the stack
 
 ```

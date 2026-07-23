@@ -79,6 +79,7 @@ services:
       dockerfile: apps/ui/Dockerfile
     container_name: nexus-edge-ui
     restart: unless-stopped
+    env_file: .env
     depends_on:
       - api
     ports:

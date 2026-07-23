@@ -14,15 +14,18 @@ import React from 'react'
 import CIcon from '@coreui/icons-react'
 import {
   cilBell,
+  cilBug,
   cilCalculator,
   cilChartPie,
   cilCursor,
   cilDescription,
+  cilDevices,
   cilDrop,
   cilExternalLink,
   cilNotes,
   cilPencil,
   cilPuzzle,
+  cilSitemap,
   cilSpeedometer,
   cilStar,
 } from '@coreui/icons'
@@ -84,6 +87,28 @@ const _nav = [
       color: 'info',
       text: 'NEW',
     },
+  },
+  {
+    component: CNavTitle,
+    name: 'Devices',
+  },
+  {
+    component: CNavItem,
+    name: 'Nodes',
+    to: '/nodes',
+    icon: <CIcon icon={cilSitemap} customClassName="nav-icon" />,
+  },
+  {
+    component: CNavItem,
+    name: 'Devices',
+    to: '/devices',
+    icon: <CIcon icon={cilDevices} customClassName="nav-icon" />,
+  },
+  {
+    component: CNavItem,
+    name: 'Dev Simulator',
+    to: '/dev-simulator',
+    icon: <CIcon icon={cilBug} customClassName="nav-icon" />,
   },
   {
     component: CNavTitle,

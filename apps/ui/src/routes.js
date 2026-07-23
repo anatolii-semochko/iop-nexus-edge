@@ -20,6 +20,12 @@ const Dashboard = React.lazy(() => import('./views/dashboard/Dashboard'))
 const Colors = React.lazy(() => import('./views/theme/colors/Colors'))
 const Typography = React.lazy(() => import('./views/theme/typography/Typography'))
 
+// Devices
+const NodesList = React.lazy(() => import('./views/devices/NodesList'))
+const DevicesList = React.lazy(() => import('./views/devices/DevicesList'))
+const DeviceDetail = React.lazy(() => import('./views/devices/DeviceDetail'))
+const DevSimulator = React.lazy(() => import('./views/devices/DevSimulator'))
+
 // Base
 const Accordion = React.lazy(() => import('./views/base/accordion/Accordion'))
 const Breadcrumbs = React.lazy(() => import('./views/base/breadcrumbs/Breadcrumbs'))
@@ -92,6 +98,10 @@ export const routes = [
   { path: '/theme', name: 'Theme', element: Colors, exact: true },
   { path: '/theme/colors', name: 'Colors', element: Colors },
   { path: '/theme/typography', name: 'Typography', element: Typography },
+  { path: '/nodes', name: 'Nodes', element: NodesList },
+  { path: '/devices', name: 'Devices', element: DevicesList, exact: true },
+  { path: '/devices/:id', name: 'Device Detail', element: DeviceDetail },
+  { path: '/dev-simulator', name: 'Dev Simulator', element: DevSimulator },
   { path: '/base', name: 'Base', element: Cards, exact: true },
   { path: '/base/accordion', name: 'Accordion', element: Accordion },
   { path: '/base/breadcrumbs', name: 'Breadcrumbs', element: Breadcrumbs },

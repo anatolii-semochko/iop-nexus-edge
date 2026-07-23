@@ -13,4 +13,5 @@ RUN pnpm --filter @nexus-edge/ui build
 
 FROM nginx:1.27-alpine AS runtime
 COPY --from=build /workspace/apps/ui/build /usr/share/nginx/html
+COPY apps/ui/nginx.conf.template /etc/nginx/templates/default.conf.template
 EXPOSE 80

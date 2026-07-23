@@ -29,7 +29,14 @@ export default defineConfig(() => {
     server: {
       port: 3000,
       proxy: {
-        // https://vitejs.dev/config/server-options.html
+        // Mirrors nginx.conf.template's /api reverse proxy, for local
+        // `pnpm dev` (not the containerized workflow, which always goes
+        // through nginx) - see apps/ui/src/api/client.js.
+        '/api': {
+          target: `http://localhost:${process.env.API_PORT ?? 3001}`,
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/api/, ''),
+        },
       },
     },
   }
