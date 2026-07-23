@@ -89,35 +89,89 @@ Each app builds and runs only via its `Dockerfile`, orchestrated by
   physical driver (CANable Pro V1, USB-to-CAN) requires writing a **custom
   EdgeX device service** using the EdgeX Device SDK (Go). This is a
   standalone, non-trivial task — do not assume it comes "for free" with the
-  EdgeX stack above.
+  EdgeX stack above. This same device-service also hosts the Virtual Node
+  Runtime (per-device physical/virtual switch — see section 6), so it is
+  needed earlier than the CAN hardware itself.
 
 ## 6. Dual Devices Model (core domain concept)
 
-Data flow: `Physical Device -> Node -> Bus (CAN first) -> EdgeX -> Device API
-(+ Dual Devices Model) -> Orchestrator <-> UI`.
+Data flow:
+
+```
+Physical Device -> Node -> Bus Transport (CAN first)  --\
+                                                          >-- device-service --> EdgeX --> Device API --> Orchestrator <-> UI
+Virtual Device  -> Virtual Node -> Virtual Node Runtime --/
+```
+
+The UI also reaches Device API directly (telemetry, and commands for devices
+currently in `MANUAL`), and has a direct channel to the Orchestrator for
+managing automation processes themselves (start/stop/pause scenarios and
+workflows) — separate from per-device control.
+
+**EdgeX has no native physical/virtual switching.** Every EdgeX device is
+bound to exactly one device-service; there is no built-in way to swap a
+device's backend at runtime. The switch is our own logic, implemented inside
+the custom **device-service** (Go, EdgeX Device SDK — the same one required
+for CAN, see section 5): per device, a config flag stored in the Postgres
+Device Registry (never hardcoded) selects whether that device's I/O goes to
+the real bus transport or to the **Virtual Node Runtime**. Because a custom
+device-service has to be written from scratch for CAN anyway, the Virtual
+Node Runtime lives in the same Go process rather than as a separate
+bridge/service (e.g. no EdgeX `device-rest` plus a separate simulator app) —
+one process, one language, less overhead on constrained hardware (Raspberry
+Pi).
+
+This physical/virtual flag is **config-time only, not a live UI toggle**.
+Changing it means updating the device's Device Registry entry and restarting
+the device-service container — deliberately not a hot-swap. A device that is
+physically active (e.g. a heater currently on) cannot be safely flipped to
+virtual mid-operation without first forcing it to a known safe state, and
+virtual-to-physical needs the same state resynced to real hardware first;
+building that safety transition is real added complexity for a capability
+nobody actually needs day-to-day (physical/virtual is a rare, deliberate
+per-device commissioning decision, not something to flip repeatedly from the
+UI). A cheap container restart is an acceptable cost for how rarely this
+changes.
+
+**Virtual Node Runtime**: the software model of a physical node/device, used
+by the device-service when a device is switched to virtual. Written first,
+before real hardware exists, and doubles as the reference implementation for
+the STM32 firmware that eventually replaces it on real nodes — kept in Go
+(not TypeScript) specifically so its logic stays close enough to embeddable C
+to port cleanly. This supersedes the "Digital Twin" concept from
+`docs/PROJECT_MASTER-1.1.md` section 8, which modeled simulation as an
+alternate path around Device API/EdgeX rather than a backend swapped in below
+EdgeX. PROJECT_MASTER is a versioned vision document and is not rewritten in
+place for this kind of refinement — this file is the current source of truth
+as the design evolves.
 
 Devices API contains:
 - a command adapter translating high-level calls (e.g.
   `devices.aquarium.maintenanceNode.coValve.on()`) into node-level commands;
-- the Dual Devices Model.
+- the Dual Devices Model (below);
+- the **Model State Validator** — an in-process module, not a separate
+  service (it needs the same Redis-backed state Devices API already holds,
+  and a safety check must not cross a network hop) — that rejects any
+  command that would put the physical system into a forbidden combined state
+  (e.g. heating and cooling active at once) before it is dispatched.
 
 **Dual Devices Model**: holds every device as a logical software twin that
-handles all device API methods. It enforces minimal safety logic for
-critical forbidden states (e.g. heating and cooling must never be active at
-once) — such commands must be rejected with an error, not silently allowed.
+handles all device API methods. It is distinct from the Virtual Node Runtime
+above: Virtual Node Runtime replaces the physical device at the
+device-service/EdgeX boundary, while the Dual Devices Model is Devices API's
+own state machine and command gate sitting above EdgeX, used for every
+device regardless of whether it is currently backed by real hardware or the
+Virtual Node Runtime.
 
 - **States** (per device or system-wide): `AUTO` (orchestrator controls
   everything), `SERVICE` (orchestrator controls, except devices manually
   overridden from the UI), `MANUAL` (UI controls directly).
-- **Modes**: `dev` (no hardware, all interaction stays with the logical
-  twin, no EdgeX calls, heartbeats are synthesized, behavior mirrors
-  physical devices as closely as possible) and `prod` (real hardware via
-  EdgeX).
 - **Persistence**: all device state (both values arriving from physical
   devices and values set by the orchestrator or UI) lives in **Redis**.
   On a state change, the Dual Devices Model persists it first, then Device
-  API syncs it to the physical device (`prod` mode). If sync fails, or a
-  scheduled consistency check finds a mismatch, an error is raised.
+  API syncs it to the device via EdgeX (physical or virtual backend alike).
+  If sync fails, or a scheduled consistency check finds a mismatch, an error
+  is raised.
 - Each device tracks an `AUTO`/`MANUAL` flag plus corresponding Redis
   values. Methods: `setActive(bool)` (orchestrator-driven),
   `setManualActive(bool)` (UI-driven manual override), `getActive()`
@@ -125,14 +179,13 @@ once) — such commands must be rejected with an error, not silently allowed.
   updating `valueAuto` in the background even while a device is in manual
   mode, so that value takes over immediately once the device returns to
   automatic control.
+- Whether a device is physical or virtual is a per-device property owned by
+  the device-service layer (see above), not a Dual Devices Model mode — the
+  previously documented `dev`/`prod` mode split is dropped in favor of this
+  per-device backend flag, a cleaner fit now that EdgeX is always in the
+  path.
 - This model is implemented first and used as the reference for the STM32
   node firmware that will follow.
-
-Digital Twin (as a concept, distinct from the Dual Devices Model above)
-implements the same Device API interface as a physical device, for
-simulation/dev/testing/offline operation — it holds no automation rules,
-business logic, workflows, or safety policies; those stay in the
-Orchestrator/Automation Engine.
 
 ## 7. Running the stack
 
