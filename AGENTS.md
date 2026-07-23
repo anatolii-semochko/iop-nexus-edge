@@ -32,7 +32,8 @@ See `docs/PROJECT_MASTER-1.1.md` for the full architecture vision.
 apps/           deployable applications (orchestrator, api, ui)
 packages/       shared libraries consumed by apps/plugins (empty for now)
 plugins/        protocol/device-driver/UI/storage/AI plugins (empty for now)
-devices/        device/driver definitions for physical & twin devices (empty for now)
+devices/        device/node type definitions for physical & virtual devices,
+                see section 7 (empty for now)
 examples/       example configurations / usage (empty for now)
 docs/           project documentation (empty for now)
 ```
@@ -187,7 +188,74 @@ Virtual Node Runtime.
 - This model is implemented first and used as the reference for the STM32
   node firmware that will follow.
 
-## 7. Running the stack
+## 7. Node & Device entities, `devices/` layout
+
+**Entities**: `Node` and `Device` are both first-class, persisted in the
+Postgres Device Registry.
+
+- `Device` always registers in the Device Registry. `Device.nodeId` is a
+  nullable FK: a device attached to a node (e.g. a sensor/actuator behind an
+  STM32 node on the CAN bus) references it; a directly-connected device
+  (e.g. a standalone USB sensor) has no node and declares its own
+  bus/transport binding directly.
+- `Node` is its own Registry row, not just a config grouping — identity,
+  location, bus/transport binding, health and heartbeat belong to the node
+  itself, independent of any single device behind it.
+
+**`devices/` holds device-*type* definitions (design-time, versioned in
+git), not device *instances*.** An instance is a Postgres Device Registry
+row (id, location, current state) that references a type by name — same
+split already implied by the `Type`/`Driver` fields in the Device Registry
+example in `docs/PROJECT_MASTER-1.1.md` section 6.
+
+Layout:
+
+```
+devices/
+  nodes/
+    <node-type>/                     e.g. aquarium-maintenance-node
+      node.yaml                      node identity schema, bus binding, defaults
+      firmware/                      shared STM32 project for the node (main, build);
+                                      includes the per-device driver modules below
+      devices/
+        <device-type>/                e.g. co-valve
+          contract.schema.ts          single capability/type contract (sensors,
+                                       actuators, commands, units) — source of truth
+                                       that the UI, Virtual Node Runtime and Devices
+                                       API normalization are checked against
+          edgex-device-profile.yaml   EdgeX Device Profile (resources/commands)
+          safety.yaml                 this type's forbidden-state/interlock rules,
+                                       consumed by the central Model State Validator
+          runtime/                    Virtual Node Runtime module (Go), mirrors
+                                       the STM32 behavior
+          firmware/                   STM32 driver module for this device, included
+                                       by the node's firmware/
+          ui/
+            control/                  production control/visualization component,
+                                       integrated into the main UI
+            simulator/                 dev-mode panel: shows internal state, allows
+                                       overriding sensor values for testing
+          config/
+            default-state.yaml        initial virtual state + tunables (no hardcoded
+                                       values)
+          docs/
+            README.md
+            schematics/
+          tests/
+          CHANGELOG.md                 hardware/firmware revision history for this
+                                       type, since it will drift from the original
+                                       definition over time
+  standalone/
+    <device-type>/                    same internal layout, no parent node — its
+                                       own bus binding lives in contract.schema.ts
+```
+
+A device type without a node (`standalone/`) still needs a `firmware/` of its
+own (it has no node-level project to be included into). Empty for now — this
+is the convention to follow once the first real device type is built; no
+folders under `devices/` exist yet.
+
+## 8. Running the stack
 
 ```
 cp .env.example .env      # adjust values
