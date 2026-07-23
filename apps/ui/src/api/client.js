@@ -11,7 +11,11 @@ const BASE = '/api'
 
 async function request(path, options = {}) {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
+    // Only set Content-Type when there's actually a body - Fastify's
+    // default JSON parser rejects an empty body sent with this header
+    // (FST_ERR_CTP_EMPTY_JSON_BODY), which bodyless requests like
+    // releaseResource below otherwise trigger.
+    headers: options.body ? { 'Content-Type': 'application/json' } : {},
     ...options,
   })
   if (!res.ok) {

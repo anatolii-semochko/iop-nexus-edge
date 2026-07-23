@@ -2,7 +2,7 @@ import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 
 import * as dualDevicesModel from "../dualDevicesModel.js";
 import { pool } from "../db.js";
-import { listEdgeXDevices, readResource, writeResource, type EdgeXDeviceStatus } from "../edgex.js";
+import { EdgeXError, listEdgeXDevices, readResource, writeResource, type EdgeXDeviceStatus } from "../edgex.js";
 import { resourcesNeededFor, validateWrite, type ForbiddenRule } from "../validator.js";
 
 interface DeviceRow {
@@ -93,7 +93,7 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const state = await dualDevicesModel.setManualActive(device.id, resource, value);
-      await writeResource(device.edgex_device_name, resource, value);
+      if (!(await writeOrReject(reply, device.edgex_device_name, resource, value))) return;
       return { status: "ok", state };
     },
   );
@@ -122,7 +122,7 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
 
       const state = await dualDevicesModel.setActive(device.id, resource, value);
       if (state.mode === "AUTO") {
-        await writeResource(device.edgex_device_name, resource, value);
+        if (!(await writeOrReject(reply, device.edgex_device_name, resource, value))) return;
       }
       return { status: "ok", state };
     },
@@ -144,7 +144,7 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
         if (!forbidden.ok) {
           return reply.code(409).send({ error: "forbidden state", reason: forbidden.reason });
         }
-        await writeResource(device.edgex_device_name, resource, state.valueAuto);
+        if (!(await writeOrReject(reply, device.edgex_device_name, resource, state.valueAuto))) return;
       }
       return { status: "ok", state };
     },
@@ -166,6 +166,32 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
 async function findDevice(id: string): Promise<DeviceRow | undefined> {
   const result = await pool.query<DeviceRow>("SELECT * FROM devices WHERE id = $1", [id]);
   return result.rows[0];
+}
+
+/**
+ * Writes to EdgeX, translating a rejection (e.g. 405 "this resource is
+ * read-only") into the matching HTTP status instead of letting it fall
+ * through to Fastify's default 500 handler - an EdgeX 4xx reflects a bad
+ * request, not a Devices API failure. Returns false (having already sent
+ * the reply) on rejection, true on success.
+ */
+async function writeOrReject(
+  reply: { code: (statusCode: number) => { send: (payload: unknown) => void } },
+  edgexDeviceName: string,
+  resource: string,
+  value: unknown,
+): Promise<boolean> {
+  try {
+    await writeResource(edgexDeviceName, resource, value);
+    return true;
+  } catch (err) {
+    if (err instanceof EdgeXError) {
+      const status = err.status >= 400 && err.status < 500 ? err.status : 502;
+      reply.code(status).send({ error: "EdgeX rejected the write", reason: err.message });
+      return false;
+    }
+    throw err;
+  }
 }
 
 async function requireEdgeXDevice(
