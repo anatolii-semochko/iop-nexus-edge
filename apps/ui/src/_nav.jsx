@@ -25,6 +25,7 @@ import {
   cilNotes,
   cilPencil,
   cilPuzzle,
+  cilSettings,
   cilSitemap,
   cilSpeedometer,
   cilStar,
@@ -115,6 +116,16 @@ const _nav = [
     name: 'Live Events',
     to: '/live-events',
     icon: <CIcon icon={cilBell} customClassName="nav-icon" />,
+  },
+  {
+    component: CNavTitle,
+    name: 'Orchestration',
+  },
+  {
+    component: CNavItem,
+    name: 'Processes',
+    to: '/processes',
+    icon: <CIcon icon={cilSettings} customClassName="nav-icon" />,
   },
   {
     component: CNavTitle,

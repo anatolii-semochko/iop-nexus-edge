@@ -61,7 +61,9 @@ are separate repositories/projects built on top of this platform.
 
 - `apps/orchestrator` — Node.js Orchestrator. Owns automation/business logic,
   device lifecycle, command execution, plugin lifecycle. Does not talk to
-  hardware protocols directly.
+  hardware protocols directly — nor to Postgres/Redis/EdgeX at all, only to
+  `apps/api` (see section 10, "Processes / Orchestration", for its first
+  real logic: a 1-second tick loop driving/monitoring processes).
 - `apps/api` — Device API / local API. Internal domain abstraction over
   devices (normalization, validation, unit conversion, capabilities).
 - `apps/ui` — local React web interface (CoreUI-based), must remain usable
@@ -272,8 +274,8 @@ valueManual}`.
   switches that resource to `MANUAL` — a UI write *is* what "MANUAL" means.
 - `PUT /devices/:id/resources/:resource/auto` is `setActive` — records
   `valueAuto`, but only reaches EdgeX while the resource is still `AUTO`.
-  Nothing calls this yet (`apps/orchestrator` has no automation logic yet),
-  but it is real, tested Devices API surface, not speculative scaffolding.
+  Dormant until section 10's "Temperature Control" process became the first
+  real caller.
 - `POST /devices/:id/resources/:resource/release` returns a resource from
   `MANUAL` to `AUTO`, immediately pushing whatever `valueAuto` the
   orchestrator kept computing in the background — verified live: set
@@ -599,7 +601,140 @@ Socket.IO (an unneeded protocol layer over plain WebSocket).
 - Every service shares one RabbitMQ user (see Access model above) — fine at
   today's single-tenant, no-auth stage.
 
-## 10. Running the stack
+## 10. Processes / Orchestration
+
+`apps/orchestrator`'s first real logic — it was an empty `/health`-only
+shell until this. A **process** is an automation unit: `START/PAUSE/STOP`
+or `ON/OFF` (whichever apply — see `actions` below), optionally grouped for
+the UI, optionally "permanent" (no actions at all — always running,
+AGENTS.md's original "critical processes that can't be stopped").
+
+**Where things live** (same split as devices — Postgres is the design-time
+registry, Redis is live state that changes every tick):
+
+- `processes` table (`apps/api/migrations`): `id, name, group_name, type
+  (controllable|permanent), kind, actions text[], device_id, config jsonb`.
+  `kind` is a discriminator (e.g. `temperature-control`,
+  `temperature-monitor`) selecting which control-loop function
+  `apps/orchestrator` runs for it — not a generic plugin system yet (that's
+  future work per section 4's "plugin lifecycle"), just a fixed
+  `Record<kind, runner>` map (`apps/orchestrator/src/index.ts`).
+  `config` is loose jsonb like `devices.capabilities` — shape depends on
+  `kind`; today just `{min, max, linkedProcessIds}` for the temperature-\*
+  kinds.
+- Live state — **Redis**, in `apps/api/src/processRegistry.ts` (mirrors
+  `dualDevicesModel.ts`): `process:{id}:status` (`on`/`off`, controllable
+  only — a `permanent` process has no status key at all, meaningless for
+  it), `process:{id}:critical` (bool). Both publish to `nexus.events` on
+  change (domain `process`, routing key
+  `process.<id>.<status|critical>.changed`) — **and only on an actual
+  change**: the orchestrator calls `setCritical`/`setStatus` every tick
+  regardless of whether anything changed, and both are no-ops (no Redis
+  write, no publish) when the value already matches, specifically so a
+  1-second tick loop doesn't flood the bus with identical events forever.
+- `apps/orchestrator` never touches Postgres/Redis/EdgeX directly — only
+  the Devices API (`apps/orchestrator/src/apiClient.ts`), same principle as
+  "does not talk to hardware protocols directly" (section 4), extended to
+  storage too. Its own `config.ts` reaches `apps/api` via the docker-compose
+  *service name* `api` (hardcoded, like `apps/ui/nginx.conf.template`
+  already does) — not `API_HOST`, which is `api`'s own bind address
+  (`0.0.0.0`) and isn't reachable from another container.
+
+**Devices API surface** (`apps/api/src/routes/processes.ts`): `GET
+/processes`, `GET /processes/:id` (registry row + live `status`/`critical`
+merged in, like `GET /devices` does for EdgeX state), `PATCH
+/processes/:id/config` (rejects `max < min`), `POST /processes/:id/action`
+(only `ON`/`OFF` implemented — `START`/`PAUSE`/`STOP` are named in the
+general concept but nothing uses them yet), `POST /processes/:id/critical`
+(orchestrator-only — there is no "make critical" button in the UI).
+
+**The two seeded processes** (`apps/api/migrations/
+..._seed-temperature-control-processes.ts`), both against
+`example-virtual-sensor-01`, group "Temperature Control":
+
+1. **Temperature Control** (`controllable`, `ON`/`OFF`) — every tick while
+   `on`: reads `Temperature`, writes `Cooler`/`Heater` via `PUT
+   /devices/:id/resources/:resource/auto` (`setActive` — the *first* real
+   caller of that endpoint, dormant since the Dual Devices Model shipped).
+   `Cooler = temperature > max`, `Heater = temperature < min`, written
+   every tick unconditionally (matches `/auto`'s own documented intent —
+   "the orchestrator keeps updating `valueAuto` in the background" — this
+   is genuinely that background computation, not something to debounce).
+   While `off`: does nothing further, **except once, exactly on the
+   on→off transition** (tracked in an in-memory `Map` in
+   `apps/orchestrator/src/processes/temperatureControl.ts` — resets on
+   restart, which is fine, nothing here needs to survive one), where it
+   forces both actuators off — confirmed live: pushed temperature above
+   `max` (`Cooler` turned on), flipped the process `OFF` (`Cooler` forced
+   back to `false`), flipped back `ON`.
+2. **Temperature Safety Monitor** (`permanent`, no actions) — independent
+   of process 1, deliberately configured with a **wider** min/max (`15/28`
+   vs. process 1's `18/25` — confirmed: independent values by design, a
+   permanent monitor may have wider critical margins than the controller it
+   watches, not a duplicate of the same numbers) — every tick: reads
+   `Temperature`/`Cooler`/`Heater` directly (the live EdgeX-reported values,
+   not the Dual Devices Model's computed "active" value — the point is
+   catching *actual* device-reported divergence), raises `critical` if
+   temperature is outside its own range **or** `Cooler`/`Heater` are both
+   `true` at once. That last check deliberately duplicates what the Model
+   State Validator already forbids on the write path (section 6) — this is
+   intentional defense-in-depth (a stuck relay or a bypass of the API
+   wouldn't go through the validator at all), not redundant dead code.
+   `critical` is raised for every id in `config.linkedProcessIds`
+   (`[1, 2]` for this pair — both itself and the process it watches, so
+   both rows highlight in the UI, not just the monitor's own) and clears
+   itself automatically the instant conditions normalize (confirmed by
+   design, not a latch requiring acknowledgment — a deliberate choice, not
+   an oversight).
+
+**UI** (`apps/ui/src/views/processes/ProcessesList.jsx`, nav "Orchestration
+› Processes"): group/type filters, a table row per process — name, group,
+status badge, right-aligned action buttons per `actions`, then the expand
+chevron last (everything interactive pressed to the row's right edge,
+chevron after actions, not before) — expanding a per-`kind` detail panel
+below the row: `TemperatureProcessPanel.jsx`, shared by both temperature-\*
+kinds since they look identical (`NumericStepper` — the same component Dev
+Simulator uses for `Temperature` — for `min`/`max` writing to the process's
+own config, not a device resource; current temperature in large type; big
+Cooler/Heater indicators, colored only while active). Live `status`/
+`critical` overlay via `useProcessLiveState`
+(`apps/ui/src/api/useLiveProcess.js`) — same one-shared-subscription,
+keyed-by-id pattern as `useDeviceLiveState` (section 9), reused rather than
+reinvented.
+
+A `critical` row (and its expanded panel row) gets `<CTableRow
+color="danger">` — **not** a `className="bg-danger-subtle"`, which was
+tried first and looked like nothing was happening at all (backend `critical`
+was confirmed correct via direct API calls the whole time - this was purely
+a rendering bug). CoreUI/Bootstrap tables resolve a row's background through
+a `--bs-table-bg` CSS custom property that its own striping/hover machinery
+also writes to at the `<td>` level; a plain `background-color` utility
+class on the `<tr>` gets masked by that instead of showing through.
+`CTableRow`'s own `color` prop (→ `table-danger`) is what actually sets
+that variable correctly - worth remembering for any future
+row-highlighting, not just this one. Action buttons also have a fixed
+width (`ACTION_BUTTON_STYLE`) and track *which* action is in flight
+(`busyAction`, not a shared boolean) - a button swapping its label for a
+`CSpinner` used to change that button's own width, which changed the
+Actions column's width for every row the moment any one row's button went
+busy, reading as the whole table jumping.
+
+**Not done / known limitations**:
+- No heartbeat — the general process concept describes one, but neither
+  seeded process needed it to be useful yet; still the same unimplemented
+  gap noted for devices in section 9.
+- `temperature-monitor`'s out-of-range check silently treats an unreadable
+  `Temperature` (`NaN`) as "not critical" rather than failing safe — a real
+  safety system should probably do the opposite; not fixed, called out
+  explicitly rather than left quiet.
+- `START`/`PAUSE`/`STOP` actions, and any process `kind` beyond the two
+  temperature-\* ones, don't exist — `RUNNERS`/`IMPLEMENTED_ACTIONS` are
+  small fixed maps, not a plugin system.
+- No automated tests — verified live (docker compose, both directions:
+  temperature swung out of range and back, process turned `OFF` mid-cooling
+  and back `ON`), same testing posture as the rest of this codebase.
+
+## 11. Running the stack
 
 ```
 cp .env.example .env      # adjust values

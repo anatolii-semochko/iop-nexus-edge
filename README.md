@@ -26,7 +26,7 @@ orchestrator, api, messaging-gateway, ui) together with the EdgeX Foundry
 core stack and its custom device-service (`apps/device-service`, CAN +
 Virtual Node Runtime).
 
-See `Makefile` for all available targets and `AGENTS.md` section 10 for
+See `Makefile` for all available targets and `AGENTS.md` section 11 for
 details.
 
 ## Repository layout

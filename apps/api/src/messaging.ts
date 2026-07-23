@@ -24,6 +24,17 @@ export interface DeviceEventEnvelope {
   source: string;
 }
 
+// First expansion of the bus beyond the "device" domain (AGENTS.md section
+// 10) - a process's on/off status or critical flag flipping.
+export interface ProcessEventEnvelope {
+  domain: "process";
+  entityId: number;
+  field: "status" | "critical";
+  value: unknown;
+  timestamp: string;
+  source: string;
+}
+
 const connection = amqp.connect([config.rabbitmq.url]);
 connection.on("connect", () => logger.info("connected to RabbitMQ"));
 connection.on("disconnect", (params) => logger.warn({ err: params.err }, "disconnected from RabbitMQ"));
@@ -33,17 +44,24 @@ const channelWrapper: ChannelWrapper = connection.createChannel({
 });
 
 /**
- * Publishes a device/resource state change onto `nexus.events`. Best-effort
- * by design: a publish failure (RabbitMQ briefly unreachable, etc.) must
- * never break the device write path this is called from
- * (dualDevicesModel.ts) - amqp-connection-manager already buffers/retries
- * under the hood, this just guards against it rejecting outright.
+ * Publishes onto `nexus.events`. Best-effort by design: a publish failure
+ * (RabbitMQ briefly unreachable, etc.) must never break the write path
+ * this is called from (dualDevicesModel.ts / processRegistry.ts) -
+ * amqp-connection-manager already buffers/retries under the hood, this
+ * just guards against it rejecting outright.
  */
-export async function publishDeviceEvent(envelope: DeviceEventEnvelope): Promise<void> {
-  const routingKey = `device.${envelope.entityId}.${envelope.resource}.updated`;
+async function publish(routingKey: string, envelope: unknown): Promise<void> {
   try {
     await channelWrapper.publish(EVENTS_EXCHANGE, routingKey, Buffer.from(JSON.stringify(envelope)));
   } catch (err) {
-    logger.warn({ err, routingKey }, "failed to publish device event to nexus.events");
+    logger.warn({ err, routingKey }, "failed to publish event to nexus.events");
   }
+}
+
+export function publishDeviceEvent(envelope: DeviceEventEnvelope): Promise<void> {
+  return publish(`device.${envelope.entityId}.${envelope.resource}.updated`, envelope);
+}
+
+export function publishProcessEvent(envelope: ProcessEventEnvelope): Promise<void> {
+  return publish(`process.${envelope.entityId}.${envelope.field}.changed`, envelope);
 }

@@ -60,4 +60,10 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ value }),
     }),
+  // Processes (AGENTS.md section 10 - orchestration).
+  listProcesses: () => request('/processes'),
+  setProcessConfig: (id, config) =>
+    request(`/processes/${id}/config`, { method: 'PATCH', body: JSON.stringify(config) }),
+  doProcessAction: (id, action) =>
+    request(`/processes/${id}/action`, { method: 'POST', body: JSON.stringify({ action }) }),
 }
