@@ -335,12 +335,24 @@ only), `GET /devices` (registry rows plus, for any with an
 `edgex_device_name`, that device's live `operatingState`/`adminState` from
 one core-metadata call), `GET /devices/:id` (registry row plus the live
 value of every resource in `capabilities.resources`, read from EdgeX
-core-command), and `PUT /devices/:id/resources/:resource` (proxies a write
-to EdgeX core-command; used today by the UI's dev simulator page to
-override a virtual device's sensor values). No Model State Validator sits in
-front of that write path yet (see section 6) - nothing stops a write that
-would violate a forbidden-state rule, because there are no such rules
-declared anywhere yet.
+core-command), and `PUT /devices/:id/resources/:resource` (Model State
+Validator, then proxies the write to EdgeX core-command; used today by the
+UI's dev simulator page to override a virtual device's sensor values).
+
+**Model State Validator** (`apps/api/src/validator.ts`) now sits in front of
+that write path. Rules are declared per device in
+`devices.capabilities.forbidden` (Postgres) - `{ when: { resource, equals },
+conflictsWith: { resource, equals } }` - and rejected writes get a `409`
+with a reason. The example device (section 6/7's smoke-test fixture) was
+extended with `Heater`/`Cooler` actuators and exactly the rule already used
+as an example above ("heating and cooling must never be active at once"),
+so the mechanism is real and tested, not just scaffolding. Two
+simplifications to know about: rules only compare resources on the *same*
+device (no cross-device rules - that needs the Redis-backed Dual Devices
+Model state, which doesn't exist yet), and the validator re-reads the
+*other* resource's current value straight from EdgeX core-command on every
+write rather than a cached state store (extra HTTP round-trips per write;
+fine at today's scale, revisit once Dual Devices Model persistence exists).
 
 `apps/ui` has a first "Devices" section: Nodes list, Devices list, a generic
 device detail (production-style, read-only), and a Dev Simulator page

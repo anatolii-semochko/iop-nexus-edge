@@ -2,7 +2,10 @@
 # types belong under devices/nodes/<node-type>/devices/<device-type>/ once
 # they exist (see AGENTS.md section 7); this profile exists purely to prove
 # the physical/virtual switch and the Virtual Node Runtime end-to-end before
-# any concrete device type is defined.
+# any concrete device type is defined. Heater/Cooler additionally exercise
+# the Devices API's Model State Validator (apps/api/src/validator.ts),
+# which forbids both being active at once - see migration
+# ...003_add-example-device-interlock.
 apiVersion: "v2"
 name: "NexusEdge-Example-Virtual"
 manufacturer: "NexusEdge"
@@ -26,5 +29,19 @@ deviceResources:
       valueType: "Float32"
       readWrite: "R"
       units: "C"
+  - name: "Heater"
+    isHidden: false
+    description: "Example actuator - must never be on at the same time as Cooler"
+    properties:
+      valueType: "Bool"
+      readWrite: "RW"
+      defaultValue: "false"
+  - name: "Cooler"
+    isHidden: false
+    description: "Example actuator - must never be on at the same time as Heater"
+    properties:
+      valueType: "Bool"
+      readWrite: "RW"
+      defaultValue: "false"
 
 deviceCommands: []

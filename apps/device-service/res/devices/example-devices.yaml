@@ -14,6 +14,8 @@ deviceList:
       virtual:
         "initial.Switch": false
         "initial.Temperature": 21.5
+        "initial.Heater": false
+        "initial.Cooler": false
     autoEvents:
       - interval: "10s"
         onChange: false
