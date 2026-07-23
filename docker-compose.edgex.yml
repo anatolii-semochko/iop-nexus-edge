@@ -200,6 +200,41 @@ services:
     networks:
       - nexus-edge-network
 
+  # Custom device-service (Go, EdgeX Device SDK) - not part of the official
+  # edgex-compose reference file above. Hosts both the CAN bus transport and
+  # the Virtual Node Runtime, switching per device (see AGENTS.md section 6).
+  # No official EdgeX device service exists for CAN, so this is our own code
+  # rather than a vendored image (see AGENTS.md section 5).
+  device-service:
+    container_name: nexus-edge-device-service
+    build:
+      context: .
+      dockerfile: apps/device-service/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      edgex-core-common-config-bootstrapper:
+        condition: service_started
+        required: true
+      edgex-core-keeper:
+        condition: service_started
+        required: true
+      edgex-core-metadata:
+        condition: service_started
+        required: true
+      edgex-core-data:
+        condition: service_started
+        required: true
+      edgex-core-command:
+        condition: service_started
+        required: true
+    environment:
+      EDGEX_SECURITY_SECRET_STORE: "false"
+      SERVICE_HOST: device-service
+    ports:
+      - "127.0.0.1:59999:59999"
+    networks:
+      - nexus-edge-network
+
 networks:
   nexus-edge-network: {}
 

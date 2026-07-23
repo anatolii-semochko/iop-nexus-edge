@@ -63,9 +63,14 @@ are separate repositories/projects built on top of this platform.
   devices (normalization, validation, unit conversion, capabilities).
 - `apps/ui` — local React web interface (CoreUI-based), must remain usable
   without any cloud dependency.
+- `apps/device-service` — Go, EdgeX Device SDK. The custom EdgeX
+  device-service from sections 5-6: hosts the CAN bus transport and the
+  Virtual Node Runtime side by side, switching per device. The only non-Node
+  service in the repo, and the only one with its own `go.mod`.
 
 Each app builds and runs only via its `Dockerfile`, orchestrated by
-`docker-compose.yml`.
+`docker-compose.yml` (`apps/device-service` via `docker-compose.edgex.yml`
+instead, since it is meaningless without the EdgeX stack it plugs into).
 
 ## 5. EdgeX Foundry integration
 
@@ -112,15 +117,38 @@ workflows) — separate from per-device control.
 **EdgeX has no native physical/virtual switching.** Every EdgeX device is
 bound to exactly one device-service; there is no built-in way to swap a
 device's backend at runtime. The switch is our own logic, implemented inside
-the custom **device-service** (Go, EdgeX Device SDK — the same one required
-for CAN, see section 5): per device, a config flag stored in the Postgres
-Device Registry (never hardcoded) selects whether that device's I/O goes to
-the real bus transport or to the **Virtual Node Runtime**. Because a custom
-device-service has to be written from scratch for CAN anyway, the Virtual
-Node Runtime lives in the same Go process rather than as a separate
-bridge/service (e.g. no EdgeX `device-rest` plus a separate simulator app) —
-one process, one language, less overhead on constrained hardware (Raspberry
-Pi).
+the custom **device-service** (`apps/device-service`, Go, EdgeX Device SDK —
+the same one required for CAN, see section 5): per device, a config flag
+stored in the Postgres Device Registry (never hardcoded) selects whether
+that device's I/O goes to a **PhysicalTransport** or to the **Virtual Node
+Runtime**. Because a custom device-service has to be written from scratch
+for CAN anyway, the Virtual Node Runtime lives in the same Go process rather
+than as a separate bridge/service (e.g. no EdgeX `device-rest` plus a
+separate simulator app) — one process, one language, less overhead on
+constrained hardware (Raspberry Pi).
+
+CAN is the first bus, not the only one planned (RS485, Modbus, MQTT are all
+named in `docs/PROJECT_MASTER-1.1.md`), so "physical" is not synonymous with
+"CAN": `internal/transport` defines a `PhysicalTransport` interface
+(`Name/Read/Write/Close`), and `internal/transport/can` is its first
+implementation. `internal/driver` holds a `map[string]PhysicalTransport`
+keyed by name and never talks to CAN directly - each future transport is a
+new package satisfying the same interface, plus one line registering it in
+`driver.Initialize`. A device's resource-to-wire addressing (CAN:
+arbitration ID + byte offset; Modbus: register address; MQTT: topic; ...) is
+fundamentally different per transport and is not unified beyond this
+Read/Write boundary - each transport package owns its own mapping.
+
+Postgres is the source of truth for both flags, but the device-service
+itself has no Postgres dependency: whatever provisions a device into EdgeX
+(Devices API, eventually) writes them onto the device's own EdgeX protocol
+properties at that time -
+`protocols.backend.mode: physical|virtual`, and, for physical devices,
+`protocols.transport.type` (e.g. `"can"`) naming which registered
+PhysicalTransport serves it, plus that transport's own properties in the
+same block (CAN: `bus`). The device-service only ever reads these back off
+the device it was just handed by the SDK — see
+`apps/device-service/internal/driver/backend.go`.
 
 This physical/virtual flag is **config-time only, not a live UI toggle**.
 Changing it means updating the device's Device Registry entry and restarting
@@ -145,6 +173,40 @@ alternate path around Device API/EdgeX rather than a backend swapped in below
 EdgeX. PROJECT_MASTER is a versioned vision document and is not rewritten in
 place for this kind of refinement — this file is the current source of truth
 as the design evolves.
+
+**Implementation status**: `apps/device-service` exists and works
+end-to-end (`make edgex-up` registers it and its example device with
+core-metadata; reads/writes round-trip through core-command). What's there
+today is deliberately generic, since no real device type exists yet under
+`devices/` (section 7):
+
+- The Virtual Node Runtime (`internal/virtual`) is a plain get/set state
+  store (`DeviceRuntime` interface, default `stateStore` implementation) —
+  it echoes back whatever was last written or seeded, with no simulated
+  dynamics. A concrete device type's own runtime (`devices/.../runtime/`)
+  is meant to `Register` a richer implementation once one exists.
+- The CAN transport (`internal/transport/can`, classic SocketCAN,
+  Linux-only) is a real, working raw-frame send/receive primitive, but the
+  mapping from a device resource to bytes on the bus (`mapping.go`) is
+  intentionally minimal: one resource per arbitration ID, fixed byte
+  offset/length, no bit-packed multi-signal frames (DBC-style). Revisit
+  once a real CAN device profile needs more than that.
+- The EdgeX SDK only calls `AddDevice` for a device new to metadata *this
+  run* - a device that already existed from a previous run is silently
+  reused without that callback firing again. Both backends must therefore
+  be able to lazily initialize themselves from protocol properties alone,
+  not rely on `AddDevice` having run: the CAN transport already does this
+  (`ensureBus` opens lazily inside `Read`/`Write`); the Virtual Node
+  Runtime's `EnsureDefault` is called the same way, from
+  `HandleReadCommands`/`HandleWriteCommands` directly, not only from
+  `AddDevice`. Found by actually restarting the service against an
+  already-provisioned device, not by inspection - worth remembering when
+  adding anything else that's set up "on add."
+- `res/profiles/NexusEdge-Example-Virtual.yaml` and
+  `res/devices/example-devices.yaml` are a smoke-test fixture, not a real
+  device type — remove them once real device types are provisioned the
+  intended way (via the Device Registry, not a static file baked into the
+  service).
 
 Devices API contains:
 - a command adapter translating high-level calls (e.g.

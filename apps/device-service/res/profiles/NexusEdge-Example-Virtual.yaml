@@ -1,0 +1,30 @@
+# Smoke-test / template profile only - not a real device type. Real device
+# types belong under devices/nodes/<node-type>/devices/<device-type>/ once
+# they exist (see AGENTS.md section 7); this profile exists purely to prove
+# the physical/virtual switch and the Virtual Node Runtime end-to-end before
+# any concrete device type is defined.
+apiVersion: "v2"
+name: "NexusEdge-Example-Virtual"
+manufacturer: "NexusEdge"
+model: "example-virtual-01"
+labels:
+  - "example"
+description: "Example virtual device exercising the Virtual Node Runtime"
+
+deviceResources:
+  - name: "Switch"
+    isHidden: false
+    description: "Example actuated boolean state"
+    properties:
+      valueType: "Bool"
+      readWrite: "RW"
+      defaultValue: "false"
+  - name: "Temperature"
+    isHidden: false
+    description: "Example simulated sensor reading"
+    properties:
+      valueType: "Float32"
+      readWrite: "R"
+      units: "C"
+
+deviceCommands: []
