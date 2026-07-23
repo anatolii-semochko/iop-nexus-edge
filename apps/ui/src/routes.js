@@ -25,6 +25,7 @@ const NodesList = React.lazy(() => import('./views/devices/NodesList'))
 const DevicesList = React.lazy(() => import('./views/devices/DevicesList'))
 const DeviceDetail = React.lazy(() => import('./views/devices/DeviceDetail'))
 const DevSimulator = React.lazy(() => import('./views/devices/DevSimulator'))
+const LiveEvents = React.lazy(() => import('./views/devices/LiveEvents'))
 
 // Base
 const Accordion = React.lazy(() => import('./views/base/accordion/Accordion'))
@@ -102,6 +103,7 @@ export const routes = [
   { path: '/devices', name: 'Devices', element: DevicesList, exact: true },
   { path: '/devices/:id', name: 'Device Detail', element: DeviceDetail },
   { path: '/dev-simulator', name: 'Dev Simulator', element: DevSimulator },
+  { path: '/live-events', name: 'Live Events', element: LiveEvents },
   { path: '/base', name: 'Base', element: Cards, exact: true },
   { path: '/base/accordion', name: 'Accordion', element: Accordion },
   { path: '/base/breadcrumbs', name: 'Breadcrumbs', element: Breadcrumbs },

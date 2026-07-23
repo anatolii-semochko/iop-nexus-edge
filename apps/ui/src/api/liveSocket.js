@@ -37,11 +37,13 @@ function connect() {
     }
     // Both message types carry the event(s) in the same envelope shape
     // (AGENTS.md section 9) - a fresh connection's "snapshot" plus every
-    // later "event" feed the same listeners.
+    // later "event" feed the same listeners, each as {routingKey, event}.
     if (payload.type === 'event') {
-      eventListeners.forEach((listener) => listener(payload.event))
+      eventListeners.forEach((listener) => listener({ routingKey: payload.routingKey, event: payload.event }))
     } else if (payload.type === 'snapshot') {
-      payload.events.forEach((entry) => eventListeners.forEach((listener) => listener(entry.event)))
+      payload.events.forEach((entry) =>
+        eventListeners.forEach((listener) => listener({ routingKey: entry.routingKey, event: entry.event })),
+      )
     }
   })
 
@@ -60,7 +62,10 @@ function ensureConnected() {
   if (!socket) connect()
 }
 
-/** Subscribes to every live device event. Returns an unsubscribe function. */
+/**
+ * Subscribes to every live event, as {routingKey, event}. Returns an
+ * unsubscribe function.
+ */
 export function subscribeToLiveEvents(listener) {
   ensureConnected()
   eventListeners.add(listener)

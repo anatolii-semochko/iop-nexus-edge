@@ -13,7 +13,7 @@ export function useDeviceLiveState(deviceId) {
 
   useEffect(() => {
     setLive({})
-    return subscribeToLiveEvents((event) => {
+    return subscribeToLiveEvents(({ event }) => {
       if (event.domain !== 'device' || String(event.entityId) !== String(deviceId)) return
       setLive((prev) => ({
         ...prev,

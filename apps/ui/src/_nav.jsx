@@ -111,6 +111,12 @@ const _nav = [
     icon: <CIcon icon={cilBug} customClassName="nav-icon" />,
   },
   {
+    component: CNavItem,
+    name: 'Live Events',
+    to: '/live-events',
+    icon: <CIcon icon={cilBell} customClassName="nav-icon" />,
+  },
+  {
     component: CNavTitle,
     name: 'Theme',
   },

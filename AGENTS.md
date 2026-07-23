@@ -497,16 +497,23 @@ Socket.IO (an unneeded protocol layer over plain WebSocket).
   shared, lazily-opened, auto-reconnecting connection to the relative `/ws`
   path (nginx reverse-proxies it to `messaging-gateway`, same reasoning as
   the existing `/api/*` proxy — see `nginx.conf.template` and
-  `vite.config.mjs` for the local-dev mirror); `src/api/useLiveDevice.js`
+  `vite.config.mjs` for the local-dev mirror). Its `subscribeToLiveEvents`
+  listener receives `{routingKey, event}` for every message (snapshot
+  entries and live pushes alike, same shape). `src/api/useLiveDevice.js`
   exposes `useDeviceLiveState(deviceId)` (per-resource `{value, mode,
   valueAuto, valueManual, timestamp}` overlay) and
   `useLiveConnectionStatus()` (for the small `LiveBadge` shown on the Device
-  Detail and Dev Simulator pages). Both pages patch live value/mode over
-  whatever the initial REST `GET /devices/:id` returned, without touching
-  the Dev Simulator's in-progress draft inputs. Verified end-to-end through
-  the exact browser path (`ws://localhost:8080/ws` via the UI's nginx, not
-  hitting `messaging-gateway` directly) and the production UI bundle builds
-  cleanly with this code — **not** verified in an actual browser window (no
+  Detail, Dev Simulator, and Live Events pages). Device Detail/Dev Simulator
+  patch live value/mode over whatever the initial REST `GET /devices/:id`
+  returned, without touching the Dev Simulator's in-progress draft inputs.
+  `views/devices/LiveEvents.jsx` (`/live-events`) is a raw, unfiltered feed
+  of every message the socket receives, newest first, capped at a **fixed
+  constant** (`MAX_EVENTS = 200` in that file) — a placeholder until a real
+  filter/limit control is built; don't read that number as a considered
+  design choice. Verified end-to-end through the exact browser path
+  (`ws://localhost:8080/ws` via the UI's nginx, not hitting
+  `messaging-gateway` directly) and the production UI bundle builds cleanly
+  with this code — **not** verified in an actual browser window (no
   browser tool available in this environment); the user should confirm the
   Live badge and value updates render correctly on first real use.
 - Every service shares one RabbitMQ user (see Access model above) — fine at
