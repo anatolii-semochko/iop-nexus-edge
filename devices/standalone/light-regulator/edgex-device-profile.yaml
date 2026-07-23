@@ -1,0 +1,35 @@
+# Source of truth for this device type's EdgeX-facing shape. The copy
+# actually loaded by apps/device-service lives at
+# apps/device-service/res/profiles/NexusEdge-LightRegulator.yaml - there is
+# no provisioning flow yet that reads this file directly (AGENTS.md section
+# 7), so the two must be kept in sync by hand. Identical content.
+apiVersion: "v2"
+name: "NexusEdge-LightRegulator"
+manufacturer: "NexusEdge"
+model: "light-regulator-01"
+labels:
+  - "sensor"
+  - "standalone"
+description: "Universal 0-100 linear regulator (virtual light dimmer dial)"
+
+deviceResources:
+  - name: "Level"
+    isHidden: false
+    description: "Current position of the physical linear regulator (0-100)"
+    properties:
+      valueType: "Int32"
+      # RW at the EdgeX/core-command level even though this is a read-only
+      # sensor from the platform's perspective - Devices API is what
+      # actually enforces "no ordinary command surface for this resource"
+      # (capabilities.resources readOnly: true, apps/api/src/routes/
+      # devices.ts). An EdgeX-level "R" would make it impossible for the
+      # Dev Simulator's .../simulate endpoint to ever push a new reading
+      # through core-command at all (EdgeX itself rejects writes to "R"
+      # resources with a 405 - see the note on NexusEdge-Example-Virtual's
+      # Temperature resource, which hit exactly this).
+      readWrite: "RW"
+      minimum: 0
+      maximum: 100
+      defaultValue: "50"
+
+deviceCommands: []

@@ -23,6 +23,27 @@ export default defineConfig(() => {
           find: 'src/',
           replacement: `${path.resolve(__dirname, 'src')}/`,
         },
+        // Lets apps/ui import a device type's ui/control and ui/simulator
+        // components straight from devices/ (AGENTS.md section 7) via
+        // 'devices/...' instead of a long chain of '../../../'.
+        {
+          find: 'devices/',
+          replacement: `${path.resolve(__dirname, '../../devices')}/`,
+        },
+        // devices/ lives outside apps/ui's own package, so plain Node
+        // resolution (walking up node_modules from the importing file)
+        // would never find react there - pin it to apps/ui's own copy so
+        // device-type components (which only ever get imported by apps/ui)
+        // share the exact same React instance rather than resolution
+        // failing outright.
+        {
+          find: /^react$/,
+          replacement: path.resolve(__dirname, 'node_modules/react'),
+        },
+        {
+          find: /^react\//,
+          replacement: `${path.resolve(__dirname, 'node_modules/react')}/`,
+        },
       ],
       extensions: ['.mjs', '.js', '.ts', '.jsx', '.tsx', '.json', '.scss'],
     },

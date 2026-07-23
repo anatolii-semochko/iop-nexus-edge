@@ -9,6 +9,10 @@ RUN pnpm install --frozen-lockfile --filter @nexus-edge/ui...
 
 FROM deps AS build
 COPY apps/ui apps/ui
+# devices/ holds device-type UI components (ui/control, ui/simulator - see
+# AGENTS.md section 7) that apps/ui imports directly via the 'devices/'
+# alias in vite.config.mjs - needs to be present in the build context too.
+COPY devices devices
 RUN pnpm --filter @nexus-edge/ui build
 
 FROM nginx:1.27-alpine AS runtime

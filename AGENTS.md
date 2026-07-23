@@ -297,6 +297,27 @@ valueManual}`.
   error is raised" part above), and cross-device rules still aren't
   possible (a rule only ever compares resources on the same device).
 
+**Read-only resources have no Dual Devices Model state at all** - not a
+third mode, an *absent* one. A pure sensor (e.g. `Temperature` on the
+smoke-test device, `Level` on the Light Regulator - section 7) is declared
+`readOnly: true` in `devices.capabilities.resources` (Postgres); `GET
+/devices/:id` then omits its `dualState` entry entirely rather than
+defaulting to `AUTO` (a resource nothing ever commands isn't meaningfully
+"automatic"), and `PUT /devices/:id/resources/:resource` /
+`.../resources/:resource/auto` / `.../resources/:resource/release` all
+reject it with 400 - there is no `MANUAL` to enter or `AUTO` to return to.
+The EdgeX device profile for such a resource still declares it `RW`, not
+`R` - EdgeX itself refuses writes to an `R` resource outright (405), which
+would make it impossible to ever push a new reading through core-command at
+all. Devices API is what actually enforces "no ordinary command surface for
+this resource", via a separate dev-only path: `PUT
+/devices/:id/resources/:resource/simulate` writes straight to EdgeX
+core-command, bypassing the Dual Devices Model entirely (mirrors a physical
+sensor producing a new value on its own), and publishes it exactly like a
+controllable resource's write does (`dualDevicesModel.publishReading` -
+`state:*` cache + `nexus.events`, see section 9), just without a
+mode/valueAuto/valueManual - a plain `{value, timestamp, source}`.
+
 ## 7. Node & Device entities, `devices/` layout
 
 **Entities**: `Node` and `Device` are both first-class, persisted in the
@@ -360,31 +381,58 @@ devices/
 ```
 
 A device type without a node (`standalone/`) still needs a `firmware/` of its
-own (it has no node-level project to be included into). Empty for now — this
-is the convention to follow once the first real device type is built; no
-folders under `devices/` exist yet.
+own (it has no node-level project to be included into). `devices/standalone/
+light-regulator/` is the first real device type built to this layout (see
+its Implementation status note below) - `runtime/` and `firmware/` are
+deliberately absent there (nothing for either to add over the generic
+Virtual Node Runtime yet, no hardware to target), everything else
+(`contract.schema.ts`, `edgex-device-profile.yaml`, `safety.yaml`,
+`config/default-state.yaml`, `docs/`, `tests/`, `ui/control`,
+`ui/simulator`, `CHANGELOG.md`) is present and real.
 
 **Implementation status**: the Postgres side of the Device Registry exists
 now (`apps/api/migrations`, `node-pg-migrate`) - `nodes` and `devices`
 tables, run automatically on every `apps/api` container start (idempotent;
-node-pg-migrate tracks what's applied). This is a first, minimal schema, not
-the final shape: `devices.capabilities` is a bare `{"resources": [...]}`
-list of EdgeX resource names, not the richer contract described above, and
-`devices.edgex_device_name` is how a registry row optionally links to an
-already-provisioned EdgeX device - there is no write-side provisioning flow
-yet (registering a Postgres row does not create the EdgeX device, or vice
-versa). A migration seeds the existing example virtual device (see
-`apps/device-service` section 6) as a standalone row so the API/UI have
-something real to show.
+node-pg-migrate tracks what's applied). `devices.capabilities.resources` is
+an array of `{name, readOnly?, min?, max?, step?}` descriptors (not the
+richer `contract.schema.ts` contract described above - that file exists per
+device type today but nothing reads it across a process boundary yet, kept
+in sync by hand), and `devices.edgex_device_name` is how a registry row
+optionally links to an already-provisioned EdgeX device - there is still no
+write-side provisioning flow (registering a Postgres row does not create
+the EdgeX device, or vice versa; both the smoke-test example device and the
+Light Regulator were wired up the same manual way - a static
+`apps/device-service/res/devices/*.yaml` entry plus a Postgres seed
+migration).
 
 `apps/api` exposes this over HTTP: `GET /nodes`, `GET /nodes/:id` (registry
 only), `GET /devices` (registry rows plus, for any with an
 `edgex_device_name`, that device's live `operatingState`/`adminState` from
 one core-metadata call), `GET /devices/:id` (registry row plus the live
 value of every resource in `capabilities.resources`, read from EdgeX
-core-command), and `PUT /devices/:id/resources/:resource` (Model State
-Validator, then proxies the write to EdgeX core-command; used today by the
-UI's dev simulator page to override a virtual device's sensor values).
+core-command, and each *controllable* resource's Dual Devices Model state -
+see the read-only-resources note in section 6), `PUT
+/devices/:id/resources/:resource` (Model State Validator, then proxies the
+write to EdgeX core-command; used by the UI's dev simulator page for
+controllable/actuator resources), and `PUT
+/devices/:id/resources/:resource/simulate` (the equivalent for `readOnly`
+sensor resources - section 6).
+
+EdgeX numeric readings need normalizing before they're usable: `apps/api/
+src/edgex.ts` parses every Int*/Uint*/Float* reading's `value` (EdgeX always
+sends these as strings, and Float32/64 always in scientific notation post-v2
+- e.g. `"2.15e+01"` - there is no server-side config to change this anymore)
+into a real JS number once, at the boundary, rather than leaking EdgeX's
+wire format to every consumer (UI tables, the live WebSocket overlay, the
+Light Regulator's slider). Found and fixed alongside a matching Go-side gap
+in `apps/device-service`: `internal/driver/codec.go`'s `toInt64` only
+accepted the native Go types a fresh YAML-seeded value arrives as (`int`,
+`int64`, `float64`) - a resource written once and then read again arrives as
+whatever type the Virtual Node Runtime's state store had already coerced it
+to (`int32`/`uint32`/`uint64` for `Int32`/`Uint32` resources), which
+`toInt64` rejected outright. Never surfaced before because no `Int32`/
+`Uint32` resource existed to round-trip through it until the Light
+Regulator's `Level` resource did.
 
 **Model State Validator** (`apps/api/src/validator.ts`) now sits in front of
 that write path. Rules are declared per device in
@@ -403,11 +451,43 @@ fine at today's scale, revisit once Dual Devices Model persistence exists).
 
 `apps/ui` has a first "Devices" section: Nodes list, Devices list, a generic
 device detail (production-style, read-only), and a Dev Simulator page
-(virtual devices only, shows and lets you override every resource). The UI
-calls the API via a relative `/api/*` path; nginx (the UI's runtime image)
-reverse-proxies that to the `api` service, with the target port templated
-from `API_PORT` at container start (`apps/ui/nginx.conf.template`) rather
-than hardcoded, so it always matches whatever `.env` actually says.
+(virtual devices only, shows and lets you override every resource). Both
+detail views sort resources by name (a device's resource order was
+otherwise whatever object-key order the API happened to return, which
+visibly reshuffled on every live update) and dispatch to a device type's own
+`ui/control`/`ui/simulator` component when one exists (`DEVICE_TYPE_CONTROLS`
+/ `DEVICE_TYPE_SIMULATORS` maps, keyed by `device.type` then resource name -
+today just the Light Regulator's `Level`), falling back to the generic
+table row otherwise. The Dev Simulator's generic override column is instant
+- no "Set" button - for `Bool` (checkbox) and any device-type-specific
+control (e.g. the Light Regulator's slider, debounced 150ms so dragging
+doesn't flood the API); a `NumericStepper` component (±1 buttons plus a
+signed two-decimal-place text input, `apps/ui/src/views/devices/
+NumericStepper.jsx`) is the one control that still has an explicit commit
+step (Enter or "Set") for anything else (e.g. `Temperature`) - free-typing a
+number a character at a time must not fire a write per keystroke. It also
+shows a device-wide "Auto value" column next to "Current value" (both
+turn red on mismatch) for controllable resources, and renames "Release to
+Auto" to "Auto", shown only while a resource is actually `MANUAL`.
+
+`devices/` device-type components are imported straight into `apps/ui` from
+outside its own package (`import ... from 'devices/standalone/light-
+regulator/ui/simulator/LightRegulatorSimulator.jsx'`) via a `'devices/'`
+Vite resolve alias (`apps/ui/vite.config.mjs`) pointing at the repo-root
+`devices/` folder, which also needs `COPY devices devices` added to `apps/
+ui/Dockerfile`'s build stage to be present in the build context at all.
+Because `devices/` sits outside `apps/ui`'s own `node_modules` chain (pnpm's
+strict, non-hoisted layout), plain Node resolution would never find `react`
+from a file there - two more aliases pin bare `react`/`react/*` imports to
+`apps/ui`'s own copy specifically so a device-type component shares the
+same React instance as the app importing it, rather than failing to resolve
+at all. These device-type components are intentionally "dumb": plain
+controlled components (`value`/`min`/`max`/`onChange` props, Bootstrap
+utility classes for styling since CoreUI's global CSS is already loaded
+app-wide - no `@coreui/react` import, which would hit the same
+cross-package resolution problem `react` does) with zero knowledge of HTTP -
+`apps/ui` owns fetching and writing, they only render and report
+interaction.
 
 ## 9. Messaging Service (Event Bus + realtime UI push)
 

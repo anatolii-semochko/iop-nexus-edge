@@ -95,6 +95,24 @@ async function publishState(deviceId: number, resource: string, state: ResourceS
   });
 }
 
+/**
+ * Same as publishState above (cache refresh + nexus.events publish), for a
+ * readOnly (sensor) resource that has no Dual Devices Model state at all -
+ * no `dvm:*` keys, no mode/valueAuto/valueManual, just the value itself.
+ * Called from the .../simulate write path (routes/devices.ts), which is
+ * the only way such a resource's value ever changes.
+ */
+export async function publishReading(deviceId: number, resource: string, value: unknown, source: string): Promise<void> {
+  const timestamp = new Date().toISOString();
+  try {
+    await redis.set(`state:${deviceId}:${resource}`, encode({ value, updatedAt: timestamp, source }));
+  } catch (err) {
+    logger.warn({ err, deviceId, resource }, "failed to refresh state cache");
+  }
+
+  await publishDeviceEvent({ domain: "device", entityId: deviceId, resource, value, timestamp, source });
+}
+
 export async function getState(deviceId: number, resource: string): Promise<ResourceState> {
   const k = keysFor(deviceId, resource);
   const [mode, rawAuto, rawManual] = await Promise.all([

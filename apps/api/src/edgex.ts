@@ -47,7 +47,7 @@ export async function listEdgeXDevices(): Promise<EdgeXDeviceStatus[]> {
 
 export interface EdgeXReading {
   resourceName: string;
-  value: string;
+  value: string | number;
   valueType: string;
   units?: string;
   origin: number;
@@ -55,6 +55,34 @@ export interface EdgeXReading {
 
 interface CoreCommandReadResponse {
   event: { readings: EdgeXReading[] };
+}
+
+// EdgeX v2+ always encodes Float32/Float64 readings as scientific-notation
+// strings ("2.15e+01") - there is no config knob to change this server-side
+// (the old Writable.Reading.FloatEncoding option was removed after v1).
+// Every integer/float valueType also comes back as a JSON string, not a
+// number. Parsing these into real JS numbers here, once, means every
+// consumer (UI tables, the live WebSocket overlay, a future slider control)
+// gets an actual number instead of having to re-parse an EdgeX-specific
+// string format itself.
+const NUMERIC_VALUE_TYPES = new Set([
+  "Int8",
+  "Int16",
+  "Int32",
+  "Int64",
+  "Uint8",
+  "Uint16",
+  "Uint32",
+  "Uint64",
+  "Float32",
+  "Float64",
+]);
+
+function normalizeReading(reading: EdgeXReading): EdgeXReading {
+  if (!NUMERIC_VALUE_TYPES.has(reading.valueType) || typeof reading.value !== "string") {
+    return reading;
+  }
+  return { ...reading, value: Number(reading.value) };
 }
 
 /** Live value of one resource - used for the device detail view. */
@@ -69,7 +97,7 @@ export async function readResource(deviceName: string, resource: string): Promis
   if (!reading) {
     throw new Error(`core-command GET ${deviceName}/${resource} returned no reading`);
   }
-  return reading;
+  return normalizeReading(reading);
 }
 
 /** Writes one resource - used by the dev simulator page to override a

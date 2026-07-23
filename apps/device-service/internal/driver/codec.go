@@ -66,6 +66,18 @@ func toInt64(value any) (int64, error) {
 		return v, nil
 	case int:
 		return int64(v), nil
+	case int32:
+		// A resource previously written as Int32/Uint32 round-trips back
+		// through here on the next read already carrying its coerced
+		// native Go type (see writeVirtual, which stores
+		// params[i].Value as-is) - not the generic int/float64 a fresh
+		// YAML-seeded value would arrive as. Both shapes must be
+		// accepted, not just the seed-time one.
+		return int64(v), nil
+	case uint32:
+		return int64(v), nil
+	case uint64:
+		return int64(v), nil
 	case float64:
 		return int64(v), nil
 	default:

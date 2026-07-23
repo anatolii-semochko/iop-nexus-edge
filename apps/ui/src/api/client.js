@@ -52,4 +52,12 @@ export const api = {
   releaseResource: (id, resource) =>
     request(`/devices/${id}/resources/${resource}/release`, { method: 'POST' }),
   getSystemMode: () => request('/system/mode'),
+  // Dev-only: pushes a new reading for a read-only (sensor) resource,
+  // bypassing the Dual Devices Model entirely - simulates the physical
+  // device producing a new value on its own (AGENTS.md section 7/9).
+  simulateResource: (id, resource, value) =>
+    request(`/devices/${id}/resources/${resource}/simulate`, {
+      method: 'PUT',
+      body: JSON.stringify({ value }),
+    }),
 }

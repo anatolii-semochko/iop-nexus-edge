@@ -17,6 +17,15 @@ import {
 import { api } from '../../api/client'
 import { useDeviceLiveState } from '../../api/useLiveDevice'
 import LiveBadge from './LiveBadge'
+import LightRegulatorControl from 'devices/standalone/light-regulator/ui/control/LightRegulatorControl.jsx'
+
+// device.type -> {resourceName: ControlComponent} - a device type's own
+// ui/control component (AGENTS.md section 7), for the one resource it
+// applies to. Same pattern as DEVICE_TYPE_SIMULATORS in DevSimulator.jsx;
+// only one real device type exists today, so a plain map is enough.
+const DEVICE_TYPE_CONTROLS = {
+  'light-regulator': { Level: LightRegulatorControl },
+}
 
 const formatValue = (reading) => {
   if (!reading) return '-'
@@ -27,9 +36,9 @@ const modeColor = (mode) => (mode === 'MANUAL' ? 'warning' : 'success')
 
 /**
  * Production-style device view: read-only current state. Generic (not
- * device-specific) since no real device type exists yet under devices/ -
- * see AGENTS.md section 7 for the eventual per-device-type ui/control
- * component this is a stand-in for.
+ * device-specific) for most resources - see AGENTS.md section 7 for the
+ * per-device-type ui/control component this is a stand-in for, used
+ * instead wherever a device type has one (see DEVICE_TYPE_CONTROLS).
  */
 const DeviceDetail = () => {
   const { id } = useParams()
@@ -47,7 +56,7 @@ const DeviceDetail = () => {
   if (error) return <CAlert color="danger">{error}</CAlert>
   if (!device) return <CSpinner color="primary" />
 
-  const resourceNames = Object.keys(device.resources ?? {})
+  const resourceNames = Object.keys(device.resources ?? {}).sort()
 
   return (
     <CCard className="mb-4">
@@ -76,14 +85,34 @@ const DeviceDetail = () => {
                 const reading = device.resources[name]
                 const liveEntry = live[name]
                 const displayReading = liveEntry ? { ...reading, value: liveEntry.value } : reading
-                const mode = liveEntry?.mode ?? device.dualState?.[name]?.mode ?? 'AUTO'
+                // No fallback to "AUTO" - a readOnly (sensor) resource has
+                // no Dual Devices Model mode at all (AGENTS.md section 6/7).
+                const mode = liveEntry?.mode ?? device.dualState?.[name]?.mode
+                const resourceCap = device.capabilities?.resources?.find(
+                  (r) => r.name === name,
+                ) ?? { name }
+                const CustomControl = DEVICE_TYPE_CONTROLS[device.type]?.[name]
                 return (
                   <CTableRow key={name}>
                     <CTableDataCell>{name}</CTableDataCell>
-                    <CTableDataCell>{formatValue(displayReading)}</CTableDataCell>
+                    <CTableDataCell>
+                      {CustomControl ? (
+                        <CustomControl
+                          value={displayReading?.value}
+                          min={resourceCap.min}
+                          max={resourceCap.max}
+                        />
+                      ) : (
+                        formatValue(displayReading)
+                      )}
+                    </CTableDataCell>
                     <CTableDataCell>{reading?.valueType ?? '-'}</CTableDataCell>
                     <CTableDataCell>
-                      <CBadge color={modeColor(mode)}>{mode}</CBadge>
+                      {mode ? (
+                        <CBadge color={modeColor(mode)}>{mode}</CBadge>
+                      ) : (
+                        <span className="text-body-secondary">&mdash;</span>
+                      )}
                     </CTableDataCell>
                   </CTableRow>
                 )

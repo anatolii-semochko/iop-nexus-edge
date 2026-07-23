@@ -39,10 +39,14 @@ function connect() {
     // (AGENTS.md section 9) - a fresh connection's "snapshot" plus every
     // later "event" feed the same listeners, each as {routingKey, event}.
     if (payload.type === 'event') {
-      eventListeners.forEach((listener) => listener({ routingKey: payload.routingKey, event: payload.event }))
+      eventListeners.forEach((listener) =>
+        listener({ routingKey: payload.routingKey, event: payload.event }),
+      )
     } else if (payload.type === 'snapshot') {
       payload.events.forEach((entry) =>
-        eventListeners.forEach((listener) => listener({ routingKey: entry.routingKey, event: entry.event })),
+        eventListeners.forEach((listener) =>
+          listener({ routingKey: entry.routingKey, event: entry.event }),
+        ),
       )
     }
   })

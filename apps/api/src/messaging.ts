@@ -14,9 +14,12 @@ export interface DeviceEventEnvelope {
   entityId: number;
   resource: string;
   value: unknown;
-  mode: string;
-  valueAuto: unknown;
-  valueManual: unknown;
+  // Absent for a readOnly (sensor) resource - it has no Dual Devices Model
+  // concept at all (AGENTS.md section 6/7), unlike a controllable resource,
+  // which always has all three.
+  mode?: string;
+  valueAuto?: unknown;
+  valueManual?: unknown;
   timestamp: string;
   source: string;
 }

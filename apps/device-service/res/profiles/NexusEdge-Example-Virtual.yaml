@@ -27,7 +27,14 @@ deviceResources:
     description: "Example simulated sensor reading"
     properties:
       valueType: "Float32"
-      readWrite: "R"
+      # RW at the EdgeX/core-command level even though this is conceptually
+      # a read-only sensor - Devices API is what actually enforces "no
+      # ordinary command surface for this resource" (capabilities.resources
+      # readOnly: true, apps/api/src/routes/devices.ts). Marking it "R" here
+      # would make it impossible for the Dev Simulator's .../simulate
+      # endpoint to ever push a new reading through core-command at all -
+      # EdgeX itself rejects writes to "R" resources outright (405).
+      readWrite: "RW"
       units: "C"
   - name: "Heater"
     isHidden: false

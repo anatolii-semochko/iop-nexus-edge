@@ -79,9 +79,15 @@ const LiveEvents = () => {
                     {row.event.domain}.{row.event.entityId}
                   </CTableDataCell>
                   <CTableDataCell>{row.event.resource ?? '-'}</CTableDataCell>
-                  <CTableDataCell>{row.event.value !== undefined ? String(row.event.value) : '-'}</CTableDataCell>
                   <CTableDataCell>
-                    {row.event.mode ? <CBadge color={modeColor(row.event.mode)}>{row.event.mode}</CBadge> : '-'}
+                    {row.event.value !== undefined ? String(row.event.value) : '-'}
+                  </CTableDataCell>
+                  <CTableDataCell>
+                    {row.event.mode ? (
+                      <CBadge color={modeColor(row.event.mode)}>{row.event.mode}</CBadge>
+                    ) : (
+                      '-'
+                    )}
                   </CTableDataCell>
                   <CTableDataCell>{row.event.source ?? '-'}</CTableDataCell>
                 </CTableRow>
