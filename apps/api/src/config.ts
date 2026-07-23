@@ -21,6 +21,10 @@ export const config = {
     user: required("POSTGRES_USER"),
     password: required("POSTGRES_PASSWORD"),
   },
+  redis: {
+    host: required("REDIS_HOST"),
+    port: Number(process.env.REDIS_PORT ?? 6379),
+  },
   edgex: {
     coreMetadataUrl: `http://${required("EDGEX_CORE_METADATA_HOST")}:${process.env.EDGEX_CORE_METADATA_PORT ?? 59881}`,
     coreDataUrl: `http://${required("EDGEX_CORE_DATA_HOST")}:${process.env.EDGEX_CORE_DATA_PORT ?? 59880}`,

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import {
   CAlert,
+  CBadge,
   CButton,
   CCard,
   CCardBody,
@@ -17,6 +18,17 @@ import {
 } from '@coreui/react'
 import { api } from '../../api/client'
 
+const modeColor = (mode) => {
+  switch (mode) {
+    case 'MANUAL':
+      return 'warning'
+    case 'SERVICE':
+      return 'info'
+    default:
+      return 'success'
+  }
+}
+
 /**
  * One virtual device: all its resources, current values, and inputs to
  * override them (writes through Devices API -> EdgeX core-command, handled
@@ -28,7 +40,7 @@ const DeviceSimulatorCard = ({ device }) => {
   const [detail, setDetail] = useState(null)
   const [drafts, setDrafts] = useState({})
   const [error, setError] = useState(null)
-  const [savingResource, setSavingResource] = useState(null)
+  const [busyResource, setBusyResource] = useState(null)
 
   const load = () => {
     api
@@ -43,14 +55,28 @@ const DeviceSimulatorCard = ({ device }) => {
   useEffect(load, [device.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSave = async (resource) => {
-    setSavingResource(resource)
+    setBusyResource(resource)
+    setError(null)
     try {
       await api.writeResource(device.id, resource, drafts[resource])
       load()
     } catch (err) {
       setError(err.message)
     } finally {
-      setSavingResource(null)
+      setBusyResource(null)
+    }
+  }
+
+  const handleRelease = async (resource) => {
+    setBusyResource(resource)
+    setError(null)
+    try {
+      await api.releaseResource(device.id, resource)
+      load()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusyResource(null)
     }
   }
 
@@ -72,6 +98,7 @@ const DeviceSimulatorCard = ({ device }) => {
               <CTableRow>
                 <CTableHeaderCell scope="col">Resource</CTableHeaderCell>
                 <CTableHeaderCell scope="col">Current value</CTableHeaderCell>
+                <CTableHeaderCell scope="col">Mode</CTableHeaderCell>
                 <CTableHeaderCell scope="col">Override</CTableHeaderCell>
                 <CTableHeaderCell scope="col" />
               </CTableRow>
@@ -81,11 +108,16 @@ const DeviceSimulatorCard = ({ device }) => {
                 const reading = detail.resources[name]
                 const valueType = reading?.valueType
                 const draft = drafts[name] ?? reading?.value ?? ''
+                const mode = detail.dualState?.[name]?.mode ?? 'AUTO'
+                const busy = busyResource === name
 
                 return (
                   <CTableRow key={name}>
                     <CTableDataCell>{name}</CTableDataCell>
                     <CTableDataCell>{reading ? String(reading.value) : '-'}</CTableDataCell>
+                    <CTableDataCell>
+                      <CBadge color={modeColor(mode)}>{mode}</CBadge>
+                    </CTableDataCell>
                     <CTableDataCell>
                       {valueType === 'Bool' ? (
                         <CFormCheck
@@ -106,13 +138,17 @@ const DeviceSimulatorCard = ({ device }) => {
                       )}
                     </CTableDataCell>
                     <CTableDataCell>
+                      <CButton size="sm" color="primary" disabled={busy} onClick={() => handleSave(name)}>
+                        {busy ? <CSpinner size="sm" /> : 'Set'}
+                      </CButton>{' '}
                       <CButton
                         size="sm"
-                        color="primary"
-                        disabled={savingResource === name}
-                        onClick={() => handleSave(name)}
+                        color="secondary"
+                        variant="outline"
+                        disabled={busy || mode !== 'MANUAL'}
+                        onClick={() => handleRelease(name)}
                       >
-                        {savingResource === name ? <CSpinner size="sm" /> : 'Set'}
+                        Release to Auto
                       </CButton>
                     </CTableDataCell>
                   </CTableRow>
@@ -128,6 +164,7 @@ const DeviceSimulatorCard = ({ device }) => {
 
 const DevSimulator = () => {
   const [devices, setDevices] = useState(null)
+  const [systemMode, setSystemMode] = useState(null)
   const [error, setError] = useState(null)
 
   useEffect(() => {
@@ -135,16 +172,23 @@ const DevSimulator = () => {
       .listDevices()
       .then((all) => setDevices(all.filter((d) => d.backend === 'virtual')))
       .catch((err) => setError(err.message))
+    api
+      .getSystemMode()
+      .then((res) => setSystemMode(res.mode))
+      .catch(() => setSystemMode(null))
   }, [])
 
   if (error) return <CAlert color="danger">{error}</CAlert>
   if (!devices) return <CSpinner color="primary" />
-  if (devices.length === 0) {
-    return <CAlert color="info">No virtual devices registered yet.</CAlert>
-  }
 
   return (
     <>
+      {systemMode && (
+        <CAlert color="secondary">
+          System mode: <CBadge color={modeColor(systemMode)}>{systemMode}</CBadge>
+        </CAlert>
+      )}
+      {devices.length === 0 && <CAlert color="info">No virtual devices registered yet.</CAlert>}
       {devices.map((device) => (
         <DeviceSimulatorCard key={device.id} device={device} />
       ))}

@@ -21,6 +21,8 @@ const formatValue = (reading) => {
   return reading.units ? `${reading.value} ${reading.units}` : reading.value
 }
 
+const modeColor = (mode) => (mode === 'MANUAL' ? 'warning' : 'success')
+
 /**
  * Production-style device view: read-only current state. Generic (not
  * device-specific) since no real device type exists yet under devices/ -
@@ -59,16 +61,23 @@ const DeviceDetail = () => {
                 <CTableHeaderCell scope="col">Resource</CTableHeaderCell>
                 <CTableHeaderCell scope="col">Value</CTableHeaderCell>
                 <CTableHeaderCell scope="col">Type</CTableHeaderCell>
+                <CTableHeaderCell scope="col">Mode</CTableHeaderCell>
               </CTableRow>
             </CTableHead>
             <CTableBody>
-              {resourceNames.map((name) => (
-                <CTableRow key={name}>
-                  <CTableDataCell>{name}</CTableDataCell>
-                  <CTableDataCell>{formatValue(device.resources[name])}</CTableDataCell>
-                  <CTableDataCell>{device.resources[name]?.valueType ?? '-'}</CTableDataCell>
-                </CTableRow>
-              ))}
+              {resourceNames.map((name) => {
+                const mode = device.dualState?.[name]?.mode ?? 'AUTO'
+                return (
+                  <CTableRow key={name}>
+                    <CTableDataCell>{name}</CTableDataCell>
+                    <CTableDataCell>{formatValue(device.resources[name])}</CTableDataCell>
+                    <CTableDataCell>{device.resources[name]?.valueType ?? '-'}</CTableDataCell>
+                    <CTableDataCell>
+                      <CBadge color={modeColor(mode)}>{mode}</CBadge>
+                    </CTableDataCell>
+                  </CTableRow>
+                )
+              })}
             </CTableBody>
           </CTable>
         )}

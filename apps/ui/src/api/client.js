@@ -16,7 +16,14 @@ async function request(path, options = {}) {
   })
   if (!res.ok) {
     const text = await res.text()
-    throw new Error(`API ${options.method ?? 'GET'} ${path} failed: ${res.status} ${text}`)
+    let message = `API ${options.method ?? 'GET'} ${path} failed: ${res.status} ${text}`
+    try {
+      const body = JSON.parse(text)
+      message = body.reason ?? body.error ?? message
+    } catch {
+      // response wasn't JSON - keep the raw-text message above
+    }
+    throw new Error(message)
   }
   if (res.status === 204) {
     return null
@@ -29,9 +36,16 @@ export const api = {
   getNode: (id) => request(`/nodes/${id}`),
   listDevices: () => request('/devices'),
   getDevice: (id) => request(`/devices/${id}`),
+  // A UI write is always a manual override (Dual Devices Model MANUAL mode
+  // - see AGENTS.md section 6).
   writeResource: (id, resource, value) =>
     request(`/devices/${id}/resources/${resource}`, {
       method: 'PUT',
       body: JSON.stringify({ value }),
     }),
+  // Releases a resource from MANUAL back to AUTO - the orchestrator's last
+  // computed value takes over immediately.
+  releaseResource: (id, resource) =>
+    request(`/devices/${id}/resources/${resource}/release`, { method: 'POST' }),
+  getSystemMode: () => request('/system/mode'),
 }

@@ -250,6 +250,45 @@ Virtual Node Runtime.
 - This model is implemented first and used as the reference for the STM32
   node firmware that will follow.
 
+**Implementation status**: the Redis-backed state described above exists
+now (`apps/api/src/dualDevicesModel.ts`), generalized to per
+**(device, resource)** rather than strictly per-device — the rest of this
+API already operates at resource granularity (`PUT
+/devices/:id/resources/:resource`, the Model State Validator), and a
+single-purpose device is just the case where it happens to have one
+resource. Redis keys: `dvm:{deviceId}:{resource}:{mode,valueAuto,
+valueManual}`.
+
+- `PUT /devices/:id/resources/:resource` (the existing UI write path) is now
+  `setManualActive`: any direct UI write both sets `valueManual` and
+  switches that resource to `MANUAL` — a UI write *is* what "MANUAL" means.
+- `PUT /devices/:id/resources/:resource/auto` is `setActive` — records
+  `valueAuto`, but only reaches EdgeX while the resource is still `AUTO`.
+  Nothing calls this yet (`apps/orchestrator` has no automation logic yet),
+  but it is real, tested Devices API surface, not speculative scaffolding.
+- `POST /devices/:id/resources/:resource/release` returns a resource from
+  `MANUAL` to `AUTO`, immediately pushing whatever `valueAuto` the
+  orchestrator kept computing in the background — verified live: set
+  `Cooler` active via `/auto`, override it `MANUAL` via the plain `PUT`, call
+  `/auto` again (confirmed it does *not* reach EdgeX while `MANUAL`), then
+  `release` (confirmed the backgrounded `valueAuto` takes over immediately).
+- `GET /system/mode` derives the aggregate `AUTO`/`SERVICE`/`MANUAL` from
+  the *full* resource list in Postgres (not just whatever happens to have a
+  Redis key) — a resource untouched in Redis is implicitly `AUTO`, and
+  omitting it from the count would wrongly report `MANUAL` after a single
+  override among many resources (a real bug caught during testing, not
+  hypothetical).
+- The Model State Validator (section above) now reads the *other* resource
+  values it needs from this Redis state (via `resolveActiveValue`, falling
+  back to a live EdgeX read only the first time a resource is ever touched,
+  then caching it as the initial `valueAuto`) instead of live EdgeX reads on
+  every write — resolves the simplification noted when the validator first
+  shipped.
+- Not yet done: no consistency-check job reconciling Redis against EdgeX's
+  actual state (the "if a scheduled consistency check finds a mismatch, an
+  error is raised" part above), and cross-device rules still aren't
+  possible (a rule only ever compares resources on the same device).
+
 ## 7. Node & Device entities, `devices/` layout
 
 **Entities**: `Node` and `Device` are both first-class, persisted in the
