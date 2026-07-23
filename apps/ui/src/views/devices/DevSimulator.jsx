@@ -58,7 +58,13 @@ const DeviceSimulatorCard = ({ device }) => {
     setBusyResource(resource)
     setError(null)
     try {
-      await api.writeResource(device.id, resource, drafts[resource])
+      // Fall back to the currently displayed value (same logic the table
+      // renders with) rather than the raw draft, which is still undefined
+      // if the user never touched this resource's input - sending
+      // `undefined` would drop `value` from the request body entirely.
+      const reading = detail.resources[resource]
+      const value = drafts[resource] ?? reading?.value ?? ''
+      await api.writeResource(device.id, resource, value)
       load()
     } catch (err) {
       setError(err.message)

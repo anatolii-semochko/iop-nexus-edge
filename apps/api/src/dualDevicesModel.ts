@@ -33,7 +33,22 @@ function keysFor(deviceId: number, resource: string) {
 }
 
 function decode(raw: string | null): unknown {
-  return raw === null ? undefined : JSON.parse(raw);
+  if (raw === null || raw === "") {
+    return undefined;
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    // Defensive: a value should never get here except through encode()
+    // below, but a read must never 500 over data that turns out to be
+    // malformed (e.g. a past bug persisted `undefined` as an empty
+    // string - see the write-side guard in routes/devices.ts).
+    return undefined;
+  }
+}
+
+function encode(value: unknown): string {
+  return JSON.stringify(value) ?? "null";
 }
 
 export async function getState(deviceId: number, resource: string): Promise<ResourceState> {
@@ -62,14 +77,14 @@ export async function getState(deviceId: number, resource: string): Promise<Reso
  * computing what it would set automatically, so that value can take over
  * immediately once the resource is released back to AUTO. */
 export async function setActive(deviceId: number, resource: string, value: unknown): Promise<ResourceState> {
-  await redis.set(keysFor(deviceId, resource).valueAuto, JSON.stringify(value));
+  await redis.set(keysFor(deviceId, resource).valueAuto, encode(value));
   return getState(deviceId, resource);
 }
 
 /** UI-driven manual override. Always becomes the resource's active value. */
 export async function setManualActive(deviceId: number, resource: string, value: unknown): Promise<ResourceState> {
   const k = keysFor(deviceId, resource);
-  await Promise.all([redis.set(k.valueManual, JSON.stringify(value)), redis.set(k.mode, "MANUAL")]);
+  await Promise.all([redis.set(k.valueManual, encode(value)), redis.set(k.mode, "MANUAL")]);
   return getState(deviceId, resource);
 }
 

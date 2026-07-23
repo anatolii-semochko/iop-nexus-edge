@@ -58,7 +58,11 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
             app.log.warn({ err, resource }, "failed to read resource");
             resources[resource] = null;
           }
-          dualState[resource] = await dualDevicesModel.getState(device.id, resource);
+          try {
+            dualState[resource] = await dualDevicesModel.getState(device.id, resource);
+          } catch (err) {
+            app.log.warn({ err, resource }, "failed to read Dual Devices Model state");
+          }
         }),
       );
     }
@@ -76,6 +80,9 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { resource } = request.params;
       const { value } = request.body;
+      if (value === undefined) {
+        return reply.code(400).send({ error: "request body must include a 'value'" });
+      }
 
       const device = await requireEdgeXDevice(request.params.id, reply);
       if (!device) return;
@@ -101,6 +108,9 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { resource } = request.params;
       const { value } = request.body;
+      if (value === undefined) {
+        return reply.code(400).send({ error: "request body must include a 'value'" });
+      }
 
       const device = await requireEdgeXDevice(request.params.id, reply);
       if (!device) return;
