@@ -15,6 +15,8 @@ import {
   CTableRow,
 } from '@coreui/react'
 import { api } from '../../api/client'
+import { useDeviceLiveState } from '../../api/useLiveDevice'
+import LiveBadge from './LiveBadge'
 
 const formatValue = (reading) => {
   if (!reading) return '-'
@@ -33,6 +35,7 @@ const DeviceDetail = () => {
   const { id } = useParams()
   const [device, setDevice] = useState(null)
   const [error, setError] = useState(null)
+  const live = useDeviceLiveState(id)
 
   useEffect(() => {
     api
@@ -50,7 +53,8 @@ const DeviceDetail = () => {
     <CCard className="mb-4">
       <CCardHeader>
         <strong>{device.name}</strong> <small>{device.type}</small>{' '}
-        <CBadge color={device.backend === 'physical' ? 'primary' : 'info'}>{device.backend}</CBadge>
+        <CBadge color={device.backend === 'physical' ? 'primary' : 'info'}>{device.backend}</CBadge>{' '}
+        <LiveBadge />
       </CCardHeader>
       <CCardBody>
         {resourceNames.length === 0 && <CAlert color="info">No resources reported.</CAlert>}
@@ -66,12 +70,18 @@ const DeviceDetail = () => {
             </CTableHead>
             <CTableBody>
               {resourceNames.map((name) => {
-                const mode = device.dualState?.[name]?.mode ?? 'AUTO'
+                // Live overlay (WebSocket) wins over the values from the
+                // initial REST load, but keeps that load's units/valueType -
+                // the live envelope doesn't carry those (AGENTS.md section 9).
+                const reading = device.resources[name]
+                const liveEntry = live[name]
+                const displayReading = liveEntry ? { ...reading, value: liveEntry.value } : reading
+                const mode = liveEntry?.mode ?? device.dualState?.[name]?.mode ?? 'AUTO'
                 return (
                   <CTableRow key={name}>
                     <CTableDataCell>{name}</CTableDataCell>
-                    <CTableDataCell>{formatValue(device.resources[name])}</CTableDataCell>
-                    <CTableDataCell>{device.resources[name]?.valueType ?? '-'}</CTableDataCell>
+                    <CTableDataCell>{formatValue(displayReading)}</CTableDataCell>
+                    <CTableDataCell>{reading?.valueType ?? '-'}</CTableDataCell>
                     <CTableDataCell>
                       <CBadge color={modeColor(mode)}>{mode}</CBadge>
                     </CTableDataCell>

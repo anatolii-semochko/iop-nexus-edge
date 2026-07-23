@@ -47,8 +47,11 @@ are separate repositories/projects built on top of this platform.
 - pnpm workspaces + Turborepo (monorepo)
 - Fastify (backend HTTP), Pino (logging)
 - PostgreSQL 16 (Device Registry persistence)
-- Redis 7 (Dual Devices Model state store)
-- RabbitMQ 4 (Event Bus)
+- Redis 7 (Dual Devices Model state store, plus the `state:*` last-known-value
+  cache from section 9)
+- RabbitMQ 4 (Event Bus — `nexus.events` topic exchange, see section 9),
+  `amqp-connection-manager`/`amqplib` as the client
+- `@fastify/websocket` (UI-facing realtime push, `apps/messaging-gateway`)
 - React + Vite, based on CoreUI Free React Admin Template (`apps/ui`)
 - EdgeX Foundry **Palau (4.0.2)**, no-security profile (see section 5)
 - License: Apache-2.0. `apps/ui` includes third-party CoreUI template code
@@ -67,6 +70,11 @@ are separate repositories/projects built on top of this platform.
   device-service from sections 5-6: hosts the CAN bus transport and the
   Virtual Node Runtime side by side, switching per device. The only non-Node
   service in the repo, and the only one with its own `go.mod`.
+- `apps/messaging-gateway` — Node.js. The realtime messaging service from
+  section 9: consumes the shared RabbitMQ event bus and fans events out to
+  the UI over WebSocket. No database, no EdgeX client — deliberately the
+  lightest process in the stack, isolated from Devices API's request/response
+  load.
 
 Each app builds and runs only via its `Dockerfile`, orchestrated by
 `docker-compose.yml` (`apps/device-service` via `docker-compose.edgex.yml`
@@ -401,7 +409,110 @@ reverse-proxies that to the `api` service, with the target port templated
 from `API_PORT` at container start (`apps/ui/nginx.conf.template`) rather
 than hardcoded, so it always matches whatever `.env` actually says.
 
-## 8. Running the stack
+## 9. Messaging Service (Event Bus + realtime UI push)
+
+The "message service between physical devices, the orchestrator and the UI"
+named in the original project brief. Reuses **RabbitMQ** (already deployed,
+already named "Event Bus" in section 3) rather than adding a second broker -
+`apps/api` publishes, `apps/messaging-gateway` is today's only consumer,
+fanning events out to UI WebSocket clients.
+
+**Exchange and routing keys**: one topic exchange, `nexus.events`, durable.
+Routing key shape: `<domain>.<entityId>.<resource>.<eventType>` — today only
+`device.<deviceId>.<resource>.updated` exists (published by
+`dualDevicesModel.ts` — see below). `node.<id>.heartbeat` and
+`system.mode.changed` are reserved shapes for later, not implemented yet.
+
+**Envelope** (JSON body of every message): `{ domain, entityId, resource,
+value, mode, valueAuto, valueManual, timestamp, source }` — one flat shape
+for every event type, deliberately not modeled per-event-type since nothing
+so far needs it.
+
+**Publish side** (`apps/api/src/messaging.ts` + `dualDevicesModel.ts`):
+every `setActive`/`setManualActive`/`release` call ends by publishing the
+resource's new effective state and refreshing a Redis cache key,
+`state:{deviceId}:{resource}` → `{ value, mode, valueAuto, valueManual,
+updatedAt, source }`. This is a **separate key from `dvm:*`** (section 6) —
+`state:*` has **no TTL**: it is last-known-value state, valid until the next
+write, not a liveness/heartbeat signal. There is no heartbeat producer
+anywhere yet (`apps/device-service` doesn't emit one), so a TTL-based
+"device went silent" signal is future work, not implemented — do not assume
+`state:*` expiring means anything yet. Publishing is best-effort: a
+RabbitMQ/Redis hiccup on this path is logged and swallowed, never allowed to
+fail the device write it rides along with.
+
+**Consume + fan-out side** (`apps/messaging-gateway`): a deliberately thin
+service — no Postgres, no EdgeX client, only `ioredis` (read-only, for the
+snapshot) and the RabbitMQ client. Binds **one** exclusive, auto-delete
+queue to `nexus.events` with `#` (everything) — per-client filtering by
+routing-key pattern happens in-process (`topicMatch.ts`, reimplementing
+RabbitMQ's own `*`/`#` wildcard semantics) rather than one RabbitMQ binding
+per WebSocket client, so the exchange/queue topology never changes as UI
+clients connect and disconnect. `GET /ws?topics=<comma-separated patterns>`
+(default `#` if omitted): on connect, immediately sends `{type: "snapshot",
+events: [{routingKey, event}, ...]}` from the `state:*` cache filtered to
+the requested patterns, then streams `{type: "event", routingKey, event}`
+for every subsequent bus message that matches — each `event` is always the
+same envelope shape (section above) whether it came from the snapshot or
+the live stream, so a client only needs one code path to handle both. Both
+`apps/api` and `apps/messaging-gateway` use
+`amqp-connection-manager` (not bare `amqplib`) specifically for its
+auto-reconnect — verified live by restarting the `rabbitmq` container under
+a connected gateway and API: both logged "disconnected" then "connected"
+within seconds, no restart of either Node process needed, and a write made
+right after reconnection still published and arrived over the socket
+correctly.
+
+**Access model**: deliberately not built yet. Every service authenticates to
+RabbitMQ as the single existing user (`RABBITMQ_DEFAULT_USER`/`_PASS`) — no
+per-role RabbitMQ permissions, no per-user topic ACL. This is fine while the
+platform has no multi-user auth at all (JWT/Casbin is still an unstarted,
+separate item from `docs/PROJECT_MASTER-1.1.md` section 16); revisit
+RabbitMQ vhost permissions and gateway-side topic ACLs once that layer
+exists, rather than building access control here first.
+
+**Considered and deliberately not chosen**: an MQTT retained-message
+approach (redundant with the `state:*` cache above), NATS (RabbitMQ is
+already deployed — switching now is pure churn), Centrifugo (a real
+"batteries-included" realtime gateway with channels/presence/JWT built in,
+but it solves a multi-user auth problem the platform doesn't have yet — the
+thin custom gateway above is far cheaper for what's actually needed today;
+Centrifugo remains a candidate if/when real multi-user auth lands), and
+Socket.IO (an unneeded protocol layer over plain WebSocket).
+
+**Implementation status / known simplifications**:
+- No heartbeat producer exists anywhere — `node.*.heartbeat` is a reserved
+  routing-key shape, not a real event yet.
+- `apps/api` is the only publisher. Nothing bridges EdgeX's own southbound
+  device events into `nexus.events` yet, so a device's state only reaches
+  the bus when something calls the Devices API's write path — a physical
+  device changing state on its own (e.g. a sensor reading drifting, not
+  commanded) does not yet produce a live event. EdgeX core-data can publish
+  new readings to a configurable message bus (Redis pub/sub, MQTT, or NATS)
+  as a northbound feature — bridging that into `nexus.events` via
+  `apps/api` is the natural next step, but needs live verification against
+  the actual Palau no-secty configuration before relying on it; not done,
+  not assumed to work.
+- `apps/ui` now consumes this WebSocket: `src/api/liveSocket.js` is one
+  shared, lazily-opened, auto-reconnecting connection to the relative `/ws`
+  path (nginx reverse-proxies it to `messaging-gateway`, same reasoning as
+  the existing `/api/*` proxy — see `nginx.conf.template` and
+  `vite.config.mjs` for the local-dev mirror); `src/api/useLiveDevice.js`
+  exposes `useDeviceLiveState(deviceId)` (per-resource `{value, mode,
+  valueAuto, valueManual, timestamp}` overlay) and
+  `useLiveConnectionStatus()` (for the small `LiveBadge` shown on the Device
+  Detail and Dev Simulator pages). Both pages patch live value/mode over
+  whatever the initial REST `GET /devices/:id` returned, without touching
+  the Dev Simulator's in-progress draft inputs. Verified end-to-end through
+  the exact browser path (`ws://localhost:8080/ws` via the UI's nginx, not
+  hitting `messaging-gateway` directly) and the production UI bundle builds
+  cleanly with this code — **not** verified in an actual browser window (no
+  browser tool available in this environment); the user should confirm the
+  Live badge and value updates render correctly on first real use.
+- Every service shares one RabbitMQ user (see Access model above) — fine at
+  today's single-tenant, no-auth stage.
+
+## 10. Running the stack
 
 ```
 cp .env.example .env      # adjust values

@@ -25,6 +25,12 @@ export const config = {
     host: required("REDIS_HOST"),
     port: Number(process.env.REDIS_PORT ?? 6379),
   },
+  rabbitmq: {
+    // Reuses the single RabbitMQ user already provisioned for the whole
+    // platform (RABBITMQ_DEFAULT_USER/PASS) - see the same note in
+    // apps/messaging-gateway/src/config.ts.
+    url: `amqp://${required("RABBITMQ_DEFAULT_USER")}:${required("RABBITMQ_DEFAULT_PASS")}@${required("RABBITMQ_HOST")}:${process.env.RABBITMQ_PORT ?? 5672}`,
+  },
   edgex: {
     coreMetadataUrl: `http://${required("EDGEX_CORE_METADATA_HOST")}:${process.env.EDGEX_CORE_METADATA_PORT ?? 59881}`,
     coreDataUrl: `http://${required("EDGEX_CORE_DATA_HOST")}:${process.env.EDGEX_CORE_DATA_PORT ?? 59880}`,

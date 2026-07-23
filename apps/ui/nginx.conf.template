@@ -1,6 +1,7 @@
 # Templated by the official nginx image entrypoint (envsubst on
-# /etc/nginx/templates/*.template -> /etc/nginx/conf.d/*) so API_PORT comes
-# from the environment (.env), never hardcoded here.
+# /etc/nginx/templates/*.template -> /etc/nginx/conf.d/*) so API_PORT and
+# MESSAGING_GATEWAY_PORT come from the environment (.env), never hardcoded
+# here.
 server {
     listen 80;
     server_name _;
@@ -11,6 +12,19 @@ server {
     # CORS) and independent of whatever host/port the api container maps to.
     location /api/ {
         proxy_pass http://api:${API_PORT}/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    # Reverse-proxy to the Messaging Gateway's WebSocket endpoint (AGENTS.md
+    # section 9) - same same-origin reasoning as /api/ above, plus the
+    # Upgrade/Connection headers nginx needs to pass a WebSocket handshake
+    # through instead of treating it as a plain HTTP request.
+    location /ws {
+        proxy_pass http://messaging-gateway:${MESSAGING_GATEWAY_PORT}/ws;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
     }

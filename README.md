@@ -22,16 +22,17 @@ make up-all
 ```
 
 This starts the platform services (PostgreSQL, Redis, RabbitMQ,
-orchestrator, api, ui) together with the EdgeX Foundry core stack and its
-custom device-service (`apps/device-service`, CAN + Virtual Node Runtime).
+orchestrator, api, messaging-gateway, ui) together with the EdgeX Foundry
+core stack and its custom device-service (`apps/device-service`, CAN +
+Virtual Node Runtime).
 
-See `Makefile` for all available targets and `AGENTS.md` section 8 for
+See `Makefile` for all available targets and `AGENTS.md` section 10 for
 details.
 
 ## Repository layout
 
 ```
-apps/           orchestrator, api, ui, device-service — the deployable platform services
+apps/           orchestrator, api, messaging-gateway, ui, device-service — the deployable platform services
 packages/       shared libraries (empty for now)
 plugins/        protocol/device-driver/UI/storage/AI plugins (empty for now)
 devices/        device/node type definitions for physical & virtual devices,

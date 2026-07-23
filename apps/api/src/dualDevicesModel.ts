@@ -10,6 +10,8 @@
 // (e.g. a valve) is just the case where a device happens to have one
 // resource.
 
+import { logger } from "./logger.js";
+import { publishDeviceEvent } from "./messaging.js";
 import { redis } from "./redis.js";
 
 export type Mode = "AUTO" | "MANUAL";
@@ -51,6 +53,48 @@ function encode(value: unknown): string {
   return JSON.stringify(value) ?? "null";
 }
 
+/**
+ * Publishes the resource's current effective state onto the shared
+ * `nexus.events` bus (see apps/messaging-gateway) and refreshes the
+ * `state:{deviceId}:{resource}` Redis cache the gateway serves as an
+ * initial snapshot to new WebSocket clients. Deliberately a separate key
+ * from `dvm:*` above rather than derived from it on read: `state:*` has no
+ * TTL (it is last-known-value state, valid until the next write - not a
+ * heartbeat/liveness signal; there is no heartbeat producer yet at all).
+ * Best-effort - a cache/bus hiccup must never fail the device write path
+ * this is called from.
+ */
+async function publishState(deviceId: number, resource: string, state: ResourceState, source: string): Promise<void> {
+  const timestamp = new Date().toISOString();
+  try {
+    await redis.set(
+      `state:${deviceId}:${resource}`,
+      encode({
+        value: state.active,
+        mode: state.mode,
+        valueAuto: state.valueAuto,
+        valueManual: state.valueManual,
+        updatedAt: timestamp,
+        source,
+      }),
+    );
+  } catch (err) {
+    logger.warn({ err, deviceId, resource }, "failed to refresh state cache");
+  }
+
+  await publishDeviceEvent({
+    domain: "device",
+    entityId: deviceId,
+    resource,
+    value: state.active,
+    mode: state.mode,
+    valueAuto: state.valueAuto,
+    valueManual: state.valueManual,
+    timestamp,
+    source,
+  });
+}
+
 export async function getState(deviceId: number, resource: string): Promise<ResourceState> {
   const k = keysFor(deviceId, resource);
   const [mode, rawAuto, rawManual] = await Promise.all([
@@ -78,21 +122,27 @@ export async function getState(deviceId: number, resource: string): Promise<Reso
  * immediately once the resource is released back to AUTO. */
 export async function setActive(deviceId: number, resource: string, value: unknown): Promise<ResourceState> {
   await redis.set(keysFor(deviceId, resource).valueAuto, encode(value));
-  return getState(deviceId, resource);
+  const state = await getState(deviceId, resource);
+  await publishState(deviceId, resource, state, "api");
+  return state;
 }
 
 /** UI-driven manual override. Always becomes the resource's active value. */
 export async function setManualActive(deviceId: number, resource: string, value: unknown): Promise<ResourceState> {
   const k = keysFor(deviceId, resource);
   await Promise.all([redis.set(k.valueManual, encode(value)), redis.set(k.mode, "MANUAL")]);
-  return getState(deviceId, resource);
+  const state = await getState(deviceId, resource);
+  await publishState(deviceId, resource, state, "api");
+  return state;
 }
 
 /** Releases a resource back to automatic control - the orchestrator's last
  * computed valueAuto becomes the active value again. */
 export async function release(deviceId: number, resource: string): Promise<ResourceState> {
   await redis.set(keysFor(deviceId, resource).mode, "AUTO");
-  return getState(deviceId, resource);
+  const state = await getState(deviceId, resource);
+  await publishState(deviceId, resource, state, "api");
+  return state;
 }
 
 /**

@@ -17,6 +17,8 @@ import {
   CTableRow,
 } from '@coreui/react'
 import { api } from '../../api/client'
+import { useDeviceLiveState } from '../../api/useLiveDevice'
+import LiveBadge from './LiveBadge'
 
 const modeColor = (mode) => {
   switch (mode) {
@@ -41,6 +43,7 @@ const DeviceSimulatorCard = ({ device }) => {
   const [drafts, setDrafts] = useState({})
   const [error, setError] = useState(null)
   const [busyResource, setBusyResource] = useState(null)
+  const live = useDeviceLiveState(device.id)
 
   const load = () => {
     api
@@ -112,15 +115,20 @@ const DeviceSimulatorCard = ({ device }) => {
             <CTableBody>
               {resourceNames.map((name) => {
                 const reading = detail.resources[name]
+                const liveEntry = live[name]
+                // Live overlay only feeds the read-only "Current value"/
+                // "Mode" columns below - the draft input is untouched, so
+                // a live update never clobbers an edit in progress.
+                const currentValue = liveEntry ? liveEntry.value : reading?.value
                 const valueType = reading?.valueType
                 const draft = drafts[name] ?? reading?.value ?? ''
-                const mode = detail.dualState?.[name]?.mode ?? 'AUTO'
+                const mode = liveEntry?.mode ?? detail.dualState?.[name]?.mode ?? 'AUTO'
                 const busy = busyResource === name
 
                 return (
                   <CTableRow key={name}>
                     <CTableDataCell>{name}</CTableDataCell>
-                    <CTableDataCell>{reading ? String(reading.value) : '-'}</CTableDataCell>
+                    <CTableDataCell>{currentValue !== undefined ? String(currentValue) : '-'}</CTableDataCell>
                     <CTableDataCell>
                       <CBadge color={modeColor(mode)}>{mode}</CBadge>
                     </CTableDataCell>
@@ -189,11 +197,14 @@ const DevSimulator = () => {
 
   return (
     <>
-      {systemMode && (
-        <CAlert color="secondary">
-          System mode: <CBadge color={modeColor(systemMode)}>{systemMode}</CBadge>
-        </CAlert>
-      )}
+      <CAlert color="secondary">
+        {systemMode && (
+          <>
+            System mode: <CBadge color={modeColor(systemMode)}>{systemMode}</CBadge>{' '}
+          </>
+        )}
+        <LiveBadge />
+      </CAlert>
       {devices.length === 0 && <CAlert color="info">No virtual devices registered yet.</CAlert>}
       {devices.map((device) => (
         <DeviceSimulatorCard key={device.id} device={device} />

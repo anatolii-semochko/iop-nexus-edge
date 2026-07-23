@@ -37,6 +37,12 @@ export default defineConfig(() => {
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/api/, ''),
         },
+        // Mirrors nginx.conf.template's /ws reverse proxy, for local
+        // `pnpm dev` - see apps/ui/src/api/liveSocket.js.
+        '/ws': {
+          target: `http://localhost:${process.env.MESSAGING_GATEWAY_PORT ?? 3030}`,
+          ws: true,
+        },
       },
     },
   }

@@ -1,5 +1,5 @@
 {
-  "name": "@nexus-edge/api",
+  "name": "@nexus-edge/messaging-gateway",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -8,25 +8,22 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
-    "migrate": "DATABASE_URL=postgres://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB node-pg-migrate up",
-    "migrate:create": "node-pg-migrate create -j ts",
     "lint": "eslint src",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@fastify/websocket": "^11.0.0",
     "amqp-connection-manager": "^4.1.15",
     "amqplib": "^0.10.9",
     "fastify": "^5.2.0",
     "ioredis": "^5.11.1",
-    "node-pg-migrate": "^9.0.0",
-    "pg": "^8.22.0",
     "pino": "^9.6.0"
   },
   "devDependencies": {
     "@types/amqplib": "^0.10.5",
     "@types/node": "^22.10.0",
-    "@types/pg": "^8.20.0",
+    "@types/ws": "^8.5.13",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^2.1.0"
