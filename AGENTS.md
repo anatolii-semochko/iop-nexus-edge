@@ -925,7 +925,65 @@ link that would fail. `UsersList.jsx`/`UserForm.jsx` reuse the pagination/
 search toolkit from section 11 (proof it's actually "minimal glue" per-page,
 not just descriptive).
 
-## 14. Running the stack
+## 15. CoreUI demo scaffolding removed
+
+The CoreUI Free React Admin Template `apps/ui` was bootstrapped from ships
+with a full showcase of every component it offers (Base, Buttons, Forms,
+Charts, Icons, Notifications, Widgets, Theme/Colors+Typography) plus an
+"Extras" nav section (Login/404/500 shortcut links, an external link to
+CoreUI's own docs site). None of it was ever real - it existed to demo the
+template, not this platform - and none of it was reachable from anywhere a
+real user would go. All of it is now deleted:
+
+- `views/{base,buttons,forms,charts,icons,notifications,theme,widgets}/`
+  (every file), `views/dashboard/MainChart.jsx`, and the `Docs*` support
+  components (`components/DocsComponents.jsx`/`DocsExample.jsx`/
+  `DocsIcons.jsx`/`DocsLink.jsx`) — confirmed via full-repo grep that nothing
+  under `devices/`, `processes/`, `users/`, or `layout/` referenced any of
+  it before deleting.
+- Every corresponding `routes.js`/`_nav.jsx` entry, and the dead
+  `AppHeader.jsx` cruft that came with them: a top-nav "Users"/"Settings"
+  pair of `href="#"` links (never wired to the real `/users` route or
+  anything else) and three icon-only `href="#"` nav items (bell/list/
+  envelope) that looked like notification shortcuts but went nowhere -
+  confirmed via the same grep pass, not assumed.
+- Now-unused npm dependencies: `chart.js`, `@coreui/chartjs`,
+  `@coreui/react-chartjs` (only the deleted chart/widget/dashboard demo
+  files used them), `classnames` (only `Colors.jsx` and the old
+  `Dashboard.jsx` used it). `prop-types` and `simplebar-react` stay -
+  `AppSidebarNav.jsx` (real layout code) uses both. `src/scss/examples.scss`
+  (CoreUI's own "remove in your application" comment) and its `App.jsx`
+  import, the `@coreui/chartjs` `@use` line in `style.scss`, and the 9
+  now-orphaned `assets/images/avatars/*.jpg` files are gone too.
+- Dropping the Icons/Flags/Brands/chart.js demo chunks took the production
+  build from several multi-megabyte chunks (`Flags` alone was ~3.1 MB
+  minified) down to well under 1 MB total - a direct, measured win for the
+  Raspberry Pi target (section 1), not just tidiness.
+
+**What stayed, deliberately, as real (not demo) pages**:
+- `views/dashboard/Dashboard.jsx` — emptied to a single placeholder card
+  ("Nothing here yet"), not deleted: there's no cross-cutting "system
+  overview" concept designed yet (see Devices/Orchestration for what
+  actually exists), and inventing one just to fill this page would be
+  scope no one asked for.
+- A new `views/docs/Docs.jsx` — same empty-placeholder pattern, replacing
+  the sidebar's external link to CoreUI's own doc site. This platform's
+  actual documentation lives in the repo (`README.md`, this file,
+  `docs/PROJECT_MASTER-1.1.md`), not behind a UI page - stays empty until
+  there's a real reason to render docs in-app.
+- `views/pages/login/`, `page404/`, `page500/` — real functional pages
+  (section 13), wired directly in `App.jsx` outside `routes.js`/`_nav.jsx`.
+  The sidebar shortcut *links* to `/login`/`/404`/`/500` (the old "Extras >
+  Pages" group) were removed as demo-only navigation - none of these are
+  pages a user manually navigates to from a menu in the finished product -
+  but the pages/routes themselves are untouched and still reachable exactly
+  as before (redirect-on-logout for `/login`, direct URL for the error
+  pages).
+
+Final sidebar: Dashboard, Devices (Nodes/Devices/Dev Simulator/Live
+Events), Orchestration (Processes), Settings (Users, admin-only), Docs.
+
+## 16. Running the stack
 
 ```
 cp .env.example .env      # adjust values

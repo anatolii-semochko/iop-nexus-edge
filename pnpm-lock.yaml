@@ -140,9 +140,6 @@ importers:
 
   apps/ui:
     dependencies:
-      '@coreui/chartjs':
-        specifier: ^4.2.0
-        version: 4.2.0(@popperjs/core@2.11.8)
       '@coreui/coreui':
         specifier: ^5.6.1
         version: 5.9.0(@popperjs/core@2.11.8)
@@ -155,21 +152,12 @@ importers:
       '@coreui/react':
         specifier: ^5.10.0
         version: 5.13.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
-      '@coreui/react-chartjs':
-        specifier: ^3.0.0
-        version: 3.0.0(@popperjs/core@2.11.8)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@coreui/utils':
         specifier: ^2.0.2
         version: 2.0.2
       '@popperjs/core':
         specifier: ^2.11.8
         version: 2.11.8
-      chart.js:
-        specifier: ^4.5.1
-        version: 4.5.1
-      classnames:
-        specifier: ^2.5.1
-        version: 2.5.1
       core-js:
         specifier: ^3.49.0
         version: 3.49.0
@@ -301,9 +289,6 @@ packages:
     resolution: {integrity: sha512-4zBIxpPzowiZpusoFkyGVwakdRJUyuH5PxQ/PrqghfdFWWasvnCdPfQXHrenDai+gyLARulZjZowCOj6fjT4pA==}
     engines: {node: '>=6.9.0'}
 
-  '@coreui/chartjs@4.2.0':
-    resolution: {integrity: sha512-lgAbknvYAnCcZdG5Sv/ZmHF9N9yytAmL1hroBCTd1+1fJNYvDcOmYyj8HNe8nvS9X/yo5bEQ/kx+HenP2gAXFA==}
-
   '@coreui/coreui@5.9.0':
     resolution: {integrity: sha512-rJ3vb7KDByRJGE0kJVzGZ/gInssHTWyBN1br+aSpxSxLmF1yYbiaC+7xFPhOU3JpQ1Tf8gVH+0UZCAesiFJvAg==}
     peerDependencies:
@@ -317,12 +302,6 @@ packages:
 
   '@coreui/icons@3.1.0':
     resolution: {integrity: sha512-250Wt7oDd9lHjC1YSJz/Eobx3joXHVVae+kXVnsDBfTtKXRnUghHWQWr6FFNcUXnPTpZ+6vWt48eDUKLCuS6qA==}
-
-  '@coreui/react-chartjs@3.0.0':
-    resolution: {integrity: sha512-65FAxHHwfMp3HY2yej7a0sLgkQJ49v9oPisuwvShrHOo0cuFVaUGKSa1V+M13W/oKsS6AWEFUooAZdsz/WZrAg==}
-    peerDependencies:
-      react: '>=17'
-      react-dom: '>=17'
 
   '@coreui/react@5.13.0':
     resolution: {integrity: sha512-6xc/d5KdRIR8pf/afalVzJLPAgE+dz+73xzooCRMGZOkvnsgSwmGf/gtp784dPI4aJDF8xDFqWmgSybU9WG/HQ==}
@@ -761,9 +740,6 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
-
-  '@kurkle/color@0.3.4':
-    resolution: {integrity: sha512-M5UknZPHRu3DEDWoipU6sE8PdkZ6Z/S+v4dD+Ke8IaNlpdSQah50lz1KtcFBa2vsdOnwbbnxJwVM4wty6udA5w==}
 
   '@lukeed/ms@2.0.2':
     resolution: {integrity: sha512-9I2Zn6+NJLfaGoz9jN3lpwDgAYvfGeNYdbAIjJOqzs4Tpc+VU3Jqq4IofSUBKajiDS8k9fZIg18/z13mpk1bsA==}
@@ -1353,10 +1329,6 @@ packages:
     resolution: {integrity: sha512-oKnbhFyRIXpUuez8iBMmyEa4nbj4IOQyuhc/wy9kY7/WVPcwIO9VA668Pu8RkO7+0G76SLROeyw9CpQ061i4mA==}
     engines: {node: '>=10'}
 
-  chart.js@4.5.1:
-    resolution: {integrity: sha512-GIjfiT9dbmHRiYi6Nl2yFCq7kkwdkp1W/lp2J99rX0yo9tgJGn3lKQATztIjb5tVtevcBtIdICNWqlq5+E8/Pw==}
-    engines: {pnpm: '>=8'}
-
   check-error@2.1.3:
     resolution: {integrity: sha512-PAJdDJusoxnwm1VwW07VWwUN1sl7smmC3OKggvndJFadxxDRyFJBX/ggnu/KE4kQAB7a3Dp8f/YXC1FlUprWmA==}
     engines: {node: '>= 16'}
@@ -1364,9 +1336,6 @@ packages:
   chokidar@5.0.0:
     resolution: {integrity: sha512-TQMmc3w+5AxjpL8iIiwebF73dRDF4fBIieAqGn9RGCWaEVwQ6Fb2cGe31Yns0RRIzii5goJ1Y7xbMwo1TxMplw==}
     engines: {node: '>= 20.19.0'}
-
-  classnames@2.5.1:
-    resolution: {integrity: sha512-saHYOzhIQs6wy2sVxTM6bUDsQO4F50V9RQ22qBpEdCW+I+/Wmke2HOl6lS6dTpdxVhb88/I6+Hs+438c3lfUow==}
 
   cliui@9.0.1:
     resolution: {integrity: sha512-k7ndgKhwoQveBL+/1tqGJYNz097I7WOvwbmmU2AR5+magtbjPWQTS1C5vzGkBC8Ym8UWRzfKUzUUqFLypY4Q+w==}
@@ -3051,13 +3020,6 @@ snapshots:
       '@babel/helper-string-parser': 7.29.7
       '@babel/helper-validator-identifier': 7.29.7
 
-  '@coreui/chartjs@4.2.0(@popperjs/core@2.11.8)':
-    dependencies:
-      '@coreui/coreui': 5.9.0(@popperjs/core@2.11.8)
-      chart.js: 4.5.1
-    transitivePeerDependencies:
-      - '@popperjs/core'
-
   '@coreui/coreui@5.9.0(@popperjs/core@2.11.8)':
     dependencies:
       '@popperjs/core': 2.11.8
@@ -3068,15 +3030,6 @@ snapshots:
       react-dom: 19.2.8(react@19.2.8)
 
   '@coreui/icons@3.1.0': {}
-
-  '@coreui/react-chartjs@3.0.0(@popperjs/core@2.11.8)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
-    dependencies:
-      '@coreui/chartjs': 4.2.0(@popperjs/core@2.11.8)
-      chart.js: 4.5.1
-      react: 19.2.8
-      react-dom: 19.2.8(react@19.2.8)
-    transitivePeerDependencies:
-      - '@popperjs/core'
 
   '@coreui/react@5.13.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
@@ -3411,8 +3364,6 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
-
-  '@kurkle/color@0.3.4': {}
 
   '@lukeed/ms@2.0.2': {}
 
@@ -3907,17 +3858,11 @@ snapshots:
       ansi-styles: 4.3.0
       supports-color: 7.2.0
 
-  chart.js@4.5.1:
-    dependencies:
-      '@kurkle/color': 0.3.4
-
   check-error@2.1.3: {}
 
   chokidar@5.0.0:
     dependencies:
       readdirp: 5.0.0
-
-  classnames@2.5.1: {}
 
   cliui@9.0.1:
     dependencies:
