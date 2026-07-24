@@ -983,7 +983,57 @@ real user would go. All of it is now deleted:
 Final sidebar: Dashboard, Devices (Nodes/Devices/Dev Simulator/Live
 Events), Orchestration (Processes), Settings (Users, admin-only), Docs.
 
-## 16. Running the stack
+## 17. Shared table toolkit: expandable rows + persisted page state
+
+Two more generic, registration-style pieces alongside the pagination
+toolkit (section 11), built against `views/processes/ProcessesList.jsx`
+and wired into that page only so far - the next page that wants either
+adopts the hook/component directly, no copy-pasting.
+
+**Expandable rows** (`hooks/useExpandableRows.js` +
+`components/table/ExpandToggleButton.jsx` / `ExpandAllToggleButton.jsx`):
+the hook owns no state itself - it's pure `isExpanded`/`toggleOne`/
+`allExpanded`/`toggleAll` logic over an `expandedIds` array + setter the
+caller already has (from `usePersistedState` below, or a plain
+`useState([])` if a page doesn't want persistence). `toggleAll`/
+`allExpanded` take the relevant id list as an argument rather than binding
+it once, since "which rows are visible right now" is page-specific (e.g.
+only the current page of a paginated table) and changes every render.
+`ExpandAllToggleButton` is the one-line header counterpart: give it
+`ids`/`expandedIds`/`setExpandedIds` and it renders nothing when there's
+nothing expandable, otherwise the same `ExpandToggleButton` used per-row.
+
+**Persisted page state** (`hooks/usePersistedState.js` +
+`utils/cookies.js`): filters, search text, page size, and which rows are
+expanded are the kind of thing someone sets up while actually using a
+page and expects to survive a refresh - not durable data, so a cookie, not
+Postgres. `usePersistedState(cookieName, defaults)` treats `defaults` as a
+**registration**, not just a fallback: its keys are exactly what gets
+read from / written to the cookie (as one JSON blob), its values are what
+a first visit (or a field a stale cookie doesn't have yet) starts from. A
+field removed from `defaults` later stops being read even if an old
+cookie still has it - the schema decides what exists, not the cookie.
+Returns `[state, setState]` where `setState(partial)` shallow-merges and
+re-persists the whole object, same ergonomics as the app's Redux
+`dispatch({type:'set', ...})` pattern elsewhere.
+
+`usePagination` (section 11) still owns `page`/`pageSize` itself and knows
+nothing about persistence - it gained one optional `onPageSizeChange`
+callback, fired whenever `setPageSize` runs, so a page can mirror the new
+size into its own persisted state without the pagination hook needing to
+care where (or whether) that goes. The current page number is
+deliberately **not** persisted - reopening a page and landing on page 4 of
+what's now a different, unfiltered list would be more confusing than
+useful; page size is a stable preference, current position isn't.
+
+`ProcessesList.jsx`'s registration:
+```js
+const PERSISTED_DEFAULTS = {
+  groupFilter: '', typeFilter: '', search: '', pageSize: 10, expandedIds: [],
+}
+```
+
+## 18. Running the stack
 
 ```
 cp .env.example .env      # adjust values

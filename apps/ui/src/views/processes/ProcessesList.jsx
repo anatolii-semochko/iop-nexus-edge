@@ -23,12 +23,26 @@ import {
 } from '@coreui/react'
 import { api } from '../../api/client'
 import { useProcessLiveState } from '../../api/useLiveProcess'
+import ExpandAllToggleButton from '../../components/table/ExpandAllToggleButton'
 import ExpandToggleButton from '../../components/table/ExpandToggleButton'
 import TablePagination from '../../components/table/TablePagination'
 import TableSearchInput from '../../components/table/TableSearchInput'
+import { useExpandableRows } from '../../hooks/useExpandableRows'
 import { usePagination } from '../../hooks/usePagination'
+import { usePersistedState } from '../../hooks/usePersistedState'
 import LiveBadge from '../devices/LiveBadge'
 import TemperatureProcessPanel from './TemperatureProcessPanel'
+
+// Registration for usePersistedState (AGENTS.md section 17) - these five
+// fields, and only these, survive a refresh; every key's value here is
+// also its default for a first-ever visit.
+const PERSISTED_DEFAULTS = {
+  groupFilter: '',
+  typeFilter: '',
+  search: '',
+  pageSize: 10,
+  expandedIds: [],
+}
 
 // process.kind -> its expandable detail component (AGENTS.md section 10).
 // Only one kind-pair exists today (temperature-control/-monitor share the
@@ -135,10 +149,10 @@ const ProcessRow = ({ process, expanded, onToggleExpand, onReload, onError }) =>
 const ProcessesList = () => {
   const [processes, setProcesses] = useState(null)
   const [error, setError] = useState(null)
-  const [groupFilter, setGroupFilter] = useState('')
-  const [typeFilter, setTypeFilter] = useState('')
-  const [search, setSearch] = useState('')
-  const [expandedIds, setExpandedIds] = useState(new Set())
+  const [pageState, setPageState] = usePersistedState('nexusedge.processes', PERSISTED_DEFAULTS)
+  const { groupFilter, typeFilter, search, expandedIds } = pageState
+  const setExpandedIds = (ids) => setPageState({ expandedIds: ids })
+  const { isExpanded, toggleOne } = useExpandableRows(expandedIds, setExpandedIds)
 
   const reload = () => {
     api
@@ -162,33 +176,19 @@ const ProcessesList = () => {
       (!typeFilter || p.type === typeFilter) &&
       (!search || p.name.toLowerCase().includes(search.toLowerCase())),
   )
-  const { page, pageSize, pageItems, totalItems, setPage, setPageSize } = usePagination(filtered)
+  const { page, pageSize, pageItems, totalItems, setPage, setPageSize } = usePagination(filtered, {
+    pageSize: pageState.pageSize,
+    onPageSizeChange: (size) => setPageState({ pageSize: size }),
+  })
 
   if (error && !processes) return <CAlert color="danger">{error}</CAlert>
   if (!processes) return <CSpinner color="primary" />
 
-  const toggleExpand = (id) => {
-    setExpandedIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
-
-  // "Expand/collapse all" only ever considers the current page's rows that
-  // actually have a panel (KIND_PANELS) - toggling doesn't touch rows on
-  // other pages, matching what's actually visible.
+  // "Expand/collapse all" (ExpandAllToggleButton, in the header) only ever
+  // considers the current page's rows that actually have a panel
+  // (KIND_PANELS) - toggling doesn't touch rows on other pages, matching
+  // what's actually visible.
   const expandableIds = pageItems.filter((p) => KIND_PANELS[p.kind]).map((p) => p.id)
-  const allExpanded = expandableIds.length > 0 && expandableIds.every((id) => expandedIds.has(id))
-
-  const toggleExpandAll = () => {
-    setExpandedIds((prev) => {
-      const next = new Set(prev)
-      expandableIds.forEach((id) => (allExpanded ? next.delete(id) : next.add(id)))
-      return next
-    })
-  }
 
   return (
     <CCard className="mb-4">
@@ -217,7 +217,7 @@ const ProcessesList = () => {
             <CFormSelect
               size="sm"
               value={groupFilter}
-              onChange={(e) => setGroupFilter(e.target.value)}
+              onChange={(e) => setPageState({ groupFilter: e.target.value })}
             >
               <option value="">All groups</option>
               {groups.map((g) => (
@@ -231,7 +231,7 @@ const ProcessesList = () => {
             <CFormSelect
               size="sm"
               value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value)}
+              onChange={(e) => setPageState({ typeFilter: e.target.value })}
             >
               <option value="">All types</option>
               <option value="controllable">Controllable</option>
@@ -239,7 +239,11 @@ const ProcessesList = () => {
             </CFormSelect>
           </CCol>
           <CCol xs="auto">
-            <TableSearchInput value={search} onSearch={setSearch} placeholder="Search by name..." />
+            <TableSearchInput
+              value={search}
+              onSearch={(value) => setPageState({ search: value })}
+              placeholder="Search by name..."
+            />
           </CCol>
         </CRow>
         {filtered.length === 0 ? (
@@ -256,9 +260,11 @@ const ProcessesList = () => {
                     Actions
                   </CTableHeaderCell>
                   <CTableHeaderCell scope="col" className="text-end">
-                    {expandableIds.length > 0 && (
-                      <ExpandToggleButton expanded={allExpanded} onClick={toggleExpandAll} />
-                    )}
+                    <ExpandAllToggleButton
+                      ids={expandableIds}
+                      expandedIds={expandedIds}
+                      setExpandedIds={setExpandedIds}
+                    />
                   </CTableHeaderCell>
                 </CTableRow>
               </CTableHead>
@@ -267,8 +273,8 @@ const ProcessesList = () => {
                   <ProcessRow
                     key={process.id}
                     process={process}
-                    expanded={expandedIds.has(process.id)}
-                    onToggleExpand={() => toggleExpand(process.id)}
+                    expanded={isExpanded(process.id)}
+                    onToggleExpand={() => toggleOne(process.id)}
                     onReload={reload}
                     onError={setError}
                   />
