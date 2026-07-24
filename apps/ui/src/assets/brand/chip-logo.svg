@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <circle cx="50" cy="50" r="46" fill="#FFFFFF"/>
+  <g fill="#454542">
+    <rect x="56.175" y="15.225" width="7" height="7"/>
+    <rect x="63.375" y="22.425" width="7" height="7"/>
+    <rect x="70.575" y="29.625" width="7" height="7"/>
+    <rect x="77.775" y="36.825" width="7" height="7"/>
+    <rect x="77.775" y="56.175" width="7" height="7"/>
+    <rect x="70.575" y="63.375" width="7" height="7"/>
+    <rect x="63.375" y="70.575" width="7" height="7"/>
+    <rect x="56.175" y="77.775" width="7" height="7"/>
+    <rect x="36.825" y="77.775" width="7" height="7"/>
+    <rect x="29.625" y="70.575" width="7" height="7"/>
+    <rect x="22.425" y="63.375" width="7" height="7"/>
+    <rect x="15.225" y="56.175" width="7" height="7"/>
+    <rect x="15.225" y="36.825" width="7" height="7"/>
+    <rect x="22.425" y="29.625" width="7" height="7"/>
+    <rect x="29.625" y="22.425" width="7" height="7"/>
+    <rect x="36.825" y="15.225" width="7" height="7"/>
+    <polygon points="50,14 86,50 50,86 14,50"/>
+  </g>
+</svg>
