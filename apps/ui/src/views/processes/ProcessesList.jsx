@@ -69,20 +69,25 @@ const ProcessRow = ({ process, expanded, onToggleExpand, onReload, onError }) =>
   }
 
   const Panel = KIND_PANELS[process.kind]
+  // While a row is expanded, its own bottom border would sit right between
+  // it and its detail panel, reading as an odd extra divider inside what's
+  // visually one block - drop it there and let the panel row's own bottom
+  // border be the only line, separating this whole process from the next.
+  const noBorderWhenExpanded = expanded && Panel ? 'border-bottom-0' : undefined
 
   return (
     <>
       <CTableRow color={critical ? 'danger' : undefined}>
-        <CTableDataCell>{process.name}</CTableDataCell>
-        <CTableDataCell>{process.group_name}</CTableDataCell>
-        <CTableDataCell>
+        <CTableDataCell className={noBorderWhenExpanded}>{process.name}</CTableDataCell>
+        <CTableDataCell className={noBorderWhenExpanded}>{process.group_name}</CTableDataCell>
+        <CTableDataCell className={noBorderWhenExpanded}>
           {status ? (
             <CBadge color={statusColor(status)}>{status.toUpperCase()}</CBadge>
           ) : (
             <CBadge color="info">Running</CBadge>
           )}
         </CTableDataCell>
-        <CTableDataCell className="text-end">
+        <CTableDataCell className={`text-end ${noBorderWhenExpanded ?? ''}`}>
           {process.actions.map((action) => {
             const isCurrent = action.toLowerCase() === status
             return (
@@ -101,7 +106,10 @@ const ProcessRow = ({ process, expanded, onToggleExpand, onReload, onError }) =>
             )
           })}
         </CTableDataCell>
-        <CTableDataCell className="text-end" style={{ width: '2rem' }}>
+        <CTableDataCell
+          className={`text-end ${noBorderWhenExpanded ?? ''}`}
+          style={{ width: '2rem' }}
+        >
           {Panel && <ExpandToggleButton expanded={expanded} onClick={onToggleExpand} />}
         </CTableDataCell>
       </CTableRow>
@@ -168,6 +176,20 @@ const ProcessesList = () => {
     })
   }
 
+  // "Expand/collapse all" only ever considers the current page's rows that
+  // actually have a panel (KIND_PANELS) - toggling doesn't touch rows on
+  // other pages, matching what's actually visible.
+  const expandableIds = pageItems.filter((p) => KIND_PANELS[p.kind]).map((p) => p.id)
+  const allExpanded = expandableIds.length > 0 && expandableIds.every((id) => expandedIds.has(id))
+
+  const toggleExpandAll = () => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev)
+      expandableIds.forEach((id) => (allExpanded ? next.delete(id) : next.add(id)))
+      return next
+    })
+  }
+
   return (
     <CCard className="mb-4">
       {error && (
@@ -224,7 +246,7 @@ const ProcessesList = () => {
           <CAlert color="info">No processes match this filter.</CAlert>
         ) : (
           <>
-            <CTable hover responsive>
+            <CTable responsive>
               <CTableHead>
                 <CTableRow>
                   <CTableHeaderCell scope="col">Name</CTableHeaderCell>
@@ -233,7 +255,11 @@ const ProcessesList = () => {
                   <CTableHeaderCell scope="col" className="text-end">
                     Actions
                   </CTableHeaderCell>
-                  <CTableHeaderCell scope="col" />
+                  <CTableHeaderCell scope="col" className="text-end">
+                    {expandableIds.length > 0 && (
+                      <ExpandToggleButton expanded={allExpanded} onClick={toggleExpandAll} />
+                    )}
+                  </CTableHeaderCell>
                 </CTableRow>
               </CTableHead>
               <CTableBody>

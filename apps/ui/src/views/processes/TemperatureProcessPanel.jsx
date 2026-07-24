@@ -58,7 +58,7 @@ const TemperatureProcessPanel = ({ process, onConfigChange }) => {
   const heaterActive = (live.Heater ? live.Heater.value : device.resources?.Heater?.value) === true
 
   return (
-    <div className="p-3">
+    <div className="p-3 pt-0">
       <CRow className="align-items-center g-4">
         <CCol xs="auto">
           <div className="text-body-secondary small">Min</div>
