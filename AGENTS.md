@@ -35,7 +35,7 @@ plugins/        protocol/device-driver/UI/storage/AI plugins (empty for now)
 devices/        device/node type definitions for physical & virtual devices,
                 see section 7 (empty for now)
 examples/       example configurations / usage (empty for now)
-docs/           project documentation (empty for now)
+docs/           architecture vision (PROJECT_MASTER-1.1.md) and screenshots (images/)
 ```
 
 This repo is the **platform only**. Domain applications (e.g. Smart House)
