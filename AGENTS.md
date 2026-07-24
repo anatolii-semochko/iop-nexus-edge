@@ -612,9 +612,11 @@ AGENTS.md's original "critical processes that can't be stopped").
 **Where things live** (same split as devices — Postgres is the design-time
 registry, Redis is live state that changes every tick):
 
-- `processes` table (`apps/api/migrations`): `id, name, group_name, type
+- `processes` table (`apps/api/migrations`): `id, name, group_id, type
   (controllable|permanent), kind, actions text[], device_id, config jsonb`.
-  `kind` is a discriminator (e.g. `temperature-control`,
+  `group_id` references `process_groups` (id, name) - a real, independently
+  manageable entity, not a free-text column (section 19). `kind` is a
+  discriminator (e.g. `temperature-control`,
   `temperature-monitor`) selecting which control-loop function
   `apps/orchestrator` runs for it — not a generic plugin system yet (that's
   future work per section 4's "plugin lifecycle"), just a fixed
@@ -1033,7 +1035,55 @@ const PERSISTED_DEFAULTS = {
 }
 ```
 
-## 18. Running the stack
+## 19. Process groups + generic manage-named-list popup + filter-row convention
+
+**Process groups are a real entity now**, not a free-text column
+(`apps/api/migrations/..._create-process-groups-table.ts`): `process_groups
+(id, name unique)`, `processes.group_id` references it (`ON DELETE
+RESTRICT` as a DB-level backstop). The old `processes.group_name` text
+column is gone entirely - `GET /processes` joins `process_groups` for
+display (`routes/processes.ts`'s `PROCESS_SELECT`). Renaming a group used
+to mean find/replace across every process row sharing that string; now
+it's one `UPDATE` on one row. An empty group can now exist and be listed,
+which a name derived from `SELECT DISTINCT group_name FROM processes`
+could never show.
+
+`routes/processGroups.ts` (no auth gate, same as every other
+devices/nodes/processes route - section 13): `GET/POST/PATCH/DELETE
+/process-groups`. Every group response carries a computed `deletable`
+(false if any process still references it) - the one place that check is
+encoded, mirroring the `users` route's `deletable`/`deactivatable` pattern
+(section 13): the UI only ever disables a button based on what the server
+already decided, never re-implements the rule. `DELETE` checks and returns
+a friendly `400 {"error": "group is not empty"}` before ever reaching the
+FK constraint.
+
+**`components/ManageNamedListModal.jsx`** - the generic popup asked for so
+this isn't rebuilt per entity: add-one / inline-rename-one /
+delete-one-if-`deletable` over a `{id, name, deletable}` list, everything
+domain-specific (title, labels, the three async callbacks) passed as
+props. Groups is its first and only consumer today - the next similar
+"manage a small named list" popup reuses this instead of a copy-paste.
+
+**Filter-row convention**: every list page's filter row now reserves its
+last, non-`xs="auto"` `CCol` (`className="d-flex justify-content-end"`) as
+a right-aligned block for page-level action buttons - filters flow left
+to right, actions live in that one flex-end column. `ProcessesList.jsx` is
+the first to use it: a `cilReload` **reset-filters** button, `color=
+"warning"`, rendered only while `groupFilter || typeFilter || search` is
+truthy, clearing all three. This is a layout convention (plain
+`CRow`/`CCol`), not a component - there's nothing to abstract beyond "put
+your buttons in this column," so nothing was built beyond documenting it
+here.
+
+One wrinkle worth remembering: `TableSearchInput` (section 11)
+deliberately owns its typing state after mount and never resyncs from a
+changed `value` prop, so `setPageState({search: ''})` alone doesn't clear
+what's actually showing in the box. `ProcessesList.jsx` forces a remount
+via a `key` bumped on every reset (`key={searchResetToken}`) instead of
+touching `TableSearchInput`'s debounce logic.
+
+## 20. Running the stack
 
 ```
 cp .env.example .env      # adjust values

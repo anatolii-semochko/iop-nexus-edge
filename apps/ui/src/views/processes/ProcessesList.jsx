@@ -21,8 +21,11 @@ import {
   CToastClose,
   CToaster,
 } from '@coreui/react'
+import { cilFilterX, cilGroup } from '@coreui/icons'
 import { api } from '../../api/client'
 import { useProcessLiveState } from '../../api/useLiveProcess'
+import IconButton from '../../components/IconButton'
+import ManageNamedListModal from '../../components/ManageNamedListModal'
 import ExpandAllToggleButton from '../../components/table/ExpandAllToggleButton'
 import ExpandToggleButton from '../../components/table/ExpandToggleButton'
 import TablePagination from '../../components/table/TablePagination'
@@ -148,6 +151,13 @@ const ProcessRow = ({ process, expanded, onToggleExpand, onReload, onError }) =>
  */
 const ProcessesList = () => {
   const [processes, setProcesses] = useState(null)
+  const [groups, setGroups] = useState([])
+  const [groupsModalVisible, setGroupsModalVisible] = useState(false)
+  // Bumped on "reset filters" to force TableSearchInput to remount with a
+  // blank value - it deliberately owns its own typing state after mount
+  // (AGENTS.md section 11), so an external setPageState({search: ''}) alone
+  // wouldn't clear what's actually showing in the box.
+  const [searchResetToken, setSearchResetToken] = useState(0)
   const [error, setError] = useState(null)
   const [pageState, setPageState] = usePersistedState('nexusedge.processes', PERSISTED_DEFAULTS)
   const { groupFilter, typeFilter, search, expandedIds } = pageState
@@ -164,12 +174,25 @@ const ProcessesList = () => {
       .catch((err) => setError(err.message))
   }
 
+  const reloadGroups = () => {
+    api
+      .listProcessGroups()
+      .then(setGroups)
+      .catch((err) => setError(err.message))
+  }
+
   useEffect(reload, [])
+  useEffect(reloadGroups, [])
+
+  const hasActiveFilters = Boolean(groupFilter || typeFilter || search)
+  const handleResetFilters = () => {
+    setPageState({ groupFilter: '', typeFilter: '', search: '' })
+    setSearchResetToken((t) => t + 1)
+  }
 
   // Hooks must run unconditionally on every render, so pagination is
   // computed here (against a safe `[]` fallback before data loads) rather
   // than after the early error/loading returns below.
-  const groups = [...new Set((processes ?? []).map((p) => p.group_name))].sort()
   const filtered = (processes ?? []).filter(
     (p) =>
       (!groupFilter || p.group_name === groupFilter) &&
@@ -212,7 +235,7 @@ const ProcessesList = () => {
         <strong>Processes</strong> <LiveBadge />
       </CCardHeader>
       <CCardBody>
-        <CRow className="mb-3 g-2">
+        <CRow className="mb-3 g-2 align-items-center">
           <CCol xs="auto">
             <CFormSelect
               size="sm"
@@ -221,8 +244,8 @@ const ProcessesList = () => {
             >
               <option value="">All groups</option>
               {groups.map((g) => (
-                <option key={g} value={g}>
-                  {g}
+                <option key={g.id} value={g.name}>
+                  {g.name}
                 </option>
               ))}
             </CFormSelect>
@@ -240,10 +263,30 @@ const ProcessesList = () => {
           </CCol>
           <CCol xs="auto">
             <TableSearchInput
+              key={searchResetToken}
               value={search}
               onSearch={(value) => setPageState({ search: value })}
               placeholder="Search by name..."
             />
+          </CCol>
+          {/* Right-aligned action-button block (AGENTS.md section 17) - the
+              filter row's own convention: filters flow left to right,
+              per-page actions sit in this last, flex-end column. */}
+          <CCol className="d-flex justify-content-end gap-2">
+            <IconButton
+              icon={cilGroup}
+              onClick={() => setGroupsModalVisible(true)}
+              ariaLabel="Manage groups"
+            />
+            {hasActiveFilters && (
+              <IconButton
+                icon={cilFilterX}
+                color="warning"
+                variant={undefined}
+                onClick={handleResetFilters}
+                ariaLabel="Reset filters"
+              />
+            )}
           </CCol>
         </CRow>
         {filtered.length === 0 ? (
@@ -291,6 +334,27 @@ const ProcessesList = () => {
           </>
         )}
       </CCardBody>
+      <ManageNamedListModal
+        visible={groupsModalVisible}
+        onClose={() => setGroupsModalVisible(false)}
+        title="Groups"
+        addLabel="Add Group"
+        namePlaceholder="Group name"
+        items={groups}
+        onAdd={async (name) => {
+          await api.createProcessGroup(name)
+          reloadGroups()
+        }}
+        onRename={async (id, name) => {
+          await api.renameProcessGroup(id, name)
+          reloadGroups()
+          reload()
+        }}
+        onDelete={async (id) => {
+          await api.deleteProcessGroup(id)
+          reloadGroups()
+        }}
+      />
     </CCard>
   )
 }

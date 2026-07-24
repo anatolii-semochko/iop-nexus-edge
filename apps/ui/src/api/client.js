@@ -71,6 +71,13 @@ export const api = {
     request(`/processes/${id}/config`, { method: 'PATCH', body: JSON.stringify(config) }),
   doProcessAction: (id, action) =>
     request(`/processes/${id}/action`, { method: 'POST', body: JSON.stringify({ action }) }),
+  // Process groups (AGENTS.md section 10/17 - a real, admin-managed entity).
+  listProcessGroups: () => request('/process-groups'),
+  createProcessGroup: (name) =>
+    request('/process-groups', { method: 'POST', body: JSON.stringify({ name }) }),
+  renameProcessGroup: (id, name) =>
+    request(`/process-groups/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+  deleteProcessGroup: (id) => request(`/process-groups/${id}`, { method: 'DELETE' }),
   // Auth (AGENTS.md section 13 - UI login only, not per-endpoint API
   // authorization).
   login: (username, password) =>

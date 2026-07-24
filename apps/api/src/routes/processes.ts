@@ -15,6 +15,10 @@ interface ProcessConfig {
 interface ProcessRow {
   id: number;
   name: string;
+  group_id: number;
+  // Joined from process_groups (AGENTS.md section 10/17) - group_name
+  // itself isn't a column on this table anymore, groups are a real,
+  // independently manageable entity now (routes/processGroups.ts).
   group_name: string;
   type: "controllable" | "permanent";
   kind: string;
@@ -27,9 +31,15 @@ interface ProcessRow {
 
 const IMPLEMENTED_ACTIONS = new Set(["ON", "OFF"]);
 
+const PROCESS_SELECT = `
+  SELECT p.*, g.name AS group_name
+  FROM processes p
+  JOIN process_groups g ON g.id = p.group_id
+`;
+
 export async function processRoutes(app: FastifyInstance): Promise<void> {
   app.get("/processes", async () => {
-    const result = await pool.query<ProcessRow>("SELECT * FROM processes ORDER BY group_name, name");
+    const result = await pool.query<ProcessRow>(`${PROCESS_SELECT} ORDER BY g.name, p.name`);
     return Promise.all(result.rows.map(withLiveState));
   });
 
@@ -100,7 +110,7 @@ export async function processRoutes(app: FastifyInstance): Promise<void> {
 }
 
 async function findProcess(id: string): Promise<ProcessRow | undefined> {
-  const result = await pool.query<ProcessRow>("SELECT * FROM processes WHERE id = $1", [id]);
+  const result = await pool.query<ProcessRow>(`${PROCESS_SELECT} WHERE p.id = $1`, [id]);
   return result.rows[0];
 }
 

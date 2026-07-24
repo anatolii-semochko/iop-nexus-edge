@@ -10,6 +10,7 @@ import { config } from "./config.js";
 import { authRoutes } from "./routes/auth.js";
 import { deviceRoutes } from "./routes/devices.js";
 import { nodeRoutes } from "./routes/nodes.js";
+import { processGroupRoutes } from "./routes/processGroups.js";
 import { processRoutes } from "./routes/processes.js";
 import { userRoutes } from "./routes/users.js";
 
@@ -36,6 +37,7 @@ await app.register(authRoutes);
 await app.register(userRoutes);
 await app.register(nodeRoutes);
 await app.register(deviceRoutes);
+await app.register(processGroupRoutes);
 await app.register(processRoutes);
 
 app.listen({ port: config.port, host: config.host }).catch((err) => {
