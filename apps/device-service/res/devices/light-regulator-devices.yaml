@@ -1,0 +1,16 @@
+# The Light Regulator device instance (devices/standalone/light-regulator/,
+# AGENTS.md section 7) - separate file from example-devices.yaml, which is
+# the smoke-test fixture only and is meant to be removed once real device
+# types exist; this one is real and stays.
+deviceList:
+  - name: "light-regulator-01"
+    profileName: "NexusEdge-LightRegulator"
+    description: "Universal 0-100 linear regulator (virtual light dimmer dial)"
+    labels:
+      - "sensor"
+      - "standalone"
+    protocols:
+      backend:
+        mode: "virtual"
+      virtual:
+        "initial.Level": 50

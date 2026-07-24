@@ -1,0 +1,242 @@
+# EdgeX Foundry, Palau release (4.0.2), no-security profile.
+#
+# Trimmed to the minimum service set needed as a protocol/hardware
+# abstraction layer for NexusEdge: core-metadata, core-data, core-command,
+# core-keeper (registry/config), plus their required dependencies
+# (core-common-config-bootstrapper, EdgeX's own Postgres instance, and the
+# mosquitto broker core-keeper uses as its internal message bus).
+#
+# Demo/optional EdgeX services from the official generated compose file
+# (app-rules-engine, device-rest, device-virtual, support-notifications,
+# support-scheduler, ekuiper rules engine, edgex-ui) are intentionally
+# left out — not part of the "minimum needed kit".
+#
+# Source reference: edgexfoundry/edgex-compose, palau branch,
+# docker-compose-no-secty.yml
+#
+# Run together with docker-compose.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.edgex.yml up
+
+name: nexus-edge
+
+services:
+  edgex-postgres:
+    container_name: edgex-postgres
+    hostname: edgex-postgres
+    image: postgres:16.3-alpine
+    restart: always
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /run
+    environment:
+      POSTGRES_DB: edgex_db
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - edgex-db-data:/var/lib/postgresql/data
+    networks:
+      - nexus-edge-network
+
+  edgex-mqtt-broker:
+    container_name: edgex-mqtt-broker
+    hostname: edgex-mqtt-broker
+    image: eclipse-mosquitto:2.0.22
+    command:
+      - /usr/sbin/mosquitto
+      - -c
+      - /mosquitto-no-auth.conf
+    restart: always
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    user: "2002:2001"
+    networks:
+      - nexus-edge-network
+
+  edgex-core-common-config-bootstrapper:
+    container_name: edgex-core-common-config-bootstrapper
+    hostname: edgex-core-common-config-bootstrapper
+    image: edgexfoundry/core-common-config-bootstrapper:4.0.2
+    command:
+      - /core-common-config-bootstrapper
+      - --registry
+      - -cp=keeper.http://edgex-core-keeper:59890
+    restart: "no"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    user: "2002:2001"
+    depends_on:
+      edgex-core-keeper:
+        condition: service_started
+        required: true
+    environment:
+      ALL_SERVICES_DATABASE_HOST: edgex-postgres
+      ALL_SERVICES_MESSAGEBUS_HOST: edgex-mqtt-broker
+      ALL_SERVICES_REGISTRY_HOST: edgex-core-keeper
+      APP_SERVICES_CLIENTS_CORE_METADATA_HOST: edgex-core-metadata
+      DEVICE_SERVICES_CLIENTS_CORE_METADATA_HOST: edgex-core-metadata
+      EDGEX_SECURITY_SECRET_STORE: "false"
+    networks:
+      - nexus-edge-network
+
+  edgex-core-keeper:
+    container_name: edgex-core-keeper
+    hostname: edgex-core-keeper
+    image: edgexfoundry/core-keeper:4.0.2
+    restart: always
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    user: "2002:2001"
+    depends_on:
+      edgex-postgres:
+        condition: service_started
+        required: true
+    environment:
+      DATABASE_HOST: edgex-postgres
+      EDGEX_SECURITY_SECRET_STORE: "false"
+      MESSAGEBUS_AUTHMODE: none
+      MESSAGEBUS_HOST: edgex-mqtt-broker
+      MESSAGEBUS_PORT: "1883"
+      MESSAGEBUS_PROTOCOL: tcp
+      MESSAGEBUS_SECRETNAME: ""
+      MESSAGEBUS_TYPE: mqtt
+      SERVICE_HOST: edgex-core-keeper
+    ports:
+      - "127.0.0.1:59890:59890"
+    networks:
+      - nexus-edge-network
+
+  edgex-core-metadata:
+    container_name: edgex-core-metadata
+    hostname: edgex-core-metadata
+    image: edgexfoundry/core-metadata:4.0.2
+    command:
+      - --registry
+      - -cp=keeper.http://edgex-core-keeper:59890
+    restart: always
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    user: "2002:2001"
+    depends_on:
+      edgex-core-keeper:
+        condition: service_started
+        required: true
+      edgex-postgres:
+        condition: service_started
+        required: true
+    environment:
+      EDGEX_SECURITY_SECRET_STORE: "false"
+      SERVICE_HOST: edgex-core-metadata
+    ports:
+      - "127.0.0.1:59881:59881"
+    networks:
+      - nexus-edge-network
+
+  edgex-core-data:
+    container_name: edgex-core-data
+    hostname: edgex-core-data
+    image: edgexfoundry/core-data:4.0.2
+    command:
+      - --registry
+      - -cp=keeper.http://edgex-core-keeper:59890
+    restart: always
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    user: "2002:2001"
+    depends_on:
+      edgex-core-common-config-bootstrapper:
+        condition: service_started
+        required: true
+      edgex-core-keeper:
+        condition: service_started
+        required: true
+      edgex-postgres:
+        condition: service_started
+        required: true
+    environment:
+      EDGEX_SECURITY_SECRET_STORE: "false"
+      SERVICE_HOST: edgex-core-data
+    ports:
+      - "127.0.0.1:59880:59880"
+    networks:
+      - nexus-edge-network
+
+  edgex-core-command:
+    container_name: edgex-core-command
+    hostname: edgex-core-command
+    image: edgexfoundry/core-command:4.0.2
+    command:
+      - --registry
+      - -cp=keeper.http://edgex-core-keeper:59890
+    restart: always
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    user: "2002:2001"
+    depends_on:
+      edgex-core-common-config-bootstrapper:
+        condition: service_started
+        required: true
+      edgex-core-keeper:
+        condition: service_started
+        required: true
+      edgex-core-metadata:
+        condition: service_started
+        required: true
+      edgex-postgres:
+        condition: service_started
+        required: true
+    environment:
+      EDGEX_SECURITY_SECRET_STORE: "false"
+      EXTERNALMQTT_URL: tcp://edgex-mqtt-broker:1883
+      SERVICE_HOST: edgex-core-command
+    ports:
+      - "127.0.0.1:59882:59882"
+    networks:
+      - nexus-edge-network
+
+  # Custom device-service (Go, EdgeX Device SDK) - not part of the official
+  # edgex-compose reference file above. Hosts both the CAN bus transport and
+  # the Virtual Node Runtime, switching per device (see AGENTS.md section 6).
+  # No official EdgeX device service exists for CAN, so this is our own code
+  # rather than a vendored image (see AGENTS.md section 5).
+  device-service:
+    container_name: nexus-edge-device-service
+    build:
+      context: .
+      dockerfile: apps/device-service/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      edgex-core-common-config-bootstrapper:
+        condition: service_started
+        required: true
+      edgex-core-keeper:
+        condition: service_started
+        required: true
+      edgex-core-metadata:
+        condition: service_started
+        required: true
+      edgex-core-data:
+        condition: service_started
+        required: true
+      edgex-core-command:
+        condition: service_started
+        required: true
+    environment:
+      EDGEX_SECURITY_SECRET_STORE: "false"
+      SERVICE_HOST: device-service
+    ports:
+      - "127.0.0.1:59999:59999"
+    networks:
+      - nexus-edge-network
+
+networks:
+  nexus-edge-network: {}
+
+volumes:
+  edgex-db-data:

@@ -1,0 +1,17 @@
+Writable:
+  LogLevel: "INFO"
+
+Service:
+  Host: "0.0.0.0"
+  Port: 59999
+  StartupMsg: "NexusEdge device-service started"
+
+MessageBus:
+  Optional:
+    ClientId: "device-nexus-edge"
+
+Device:
+  ProfilesDir: "./res/profiles"
+  DevicesDir: "./res/devices"
+  Discovery:
+    Enabled: false

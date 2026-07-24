@@ -1,0 +1,7 @@
+# Forbidden-state rules for this device type, consumed by the central
+# Model State Validator (apps/api/src/validator.ts) - see AGENTS.md
+# section 7. Empty: a single read-only sensor resource has nothing to
+# conflict with. Present as a file anyway so every device type has the
+# same predictable shape rather than some having safety.yaml and others
+# silently not.
+forbidden: []

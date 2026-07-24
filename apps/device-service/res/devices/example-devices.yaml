@@ -1,0 +1,22 @@
+# Smoke-test fixture only - proves the physical/virtual switch and the
+# Virtual Node Runtime work end-to-end. Remove once real device types exist
+# under devices/ (see AGENTS.md section 7) and are provisioned the intended
+# way (via the Device Registry, not a static file here).
+deviceList:
+  - name: "example-virtual-sensor-01"
+    profileName: "NexusEdge-Example-Virtual"
+    description: "Example virtual device (Virtual Node Runtime smoke test)"
+    labels:
+      - "example"
+    protocols:
+      backend:
+        mode: "virtual"
+      virtual:
+        "initial.Switch": false
+        "initial.Temperature": 21.5
+        "initial.Heater": false
+        "initial.Cooler": false
+    autoEvents:
+      - interval: "10s"
+        onChange: false
+        sourceName: "Temperature"
