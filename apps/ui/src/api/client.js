@@ -89,4 +89,5 @@ export const api = {
     formData.append('avatar', file)
     return request(`/users/${id}/avatar`, { method: 'POST', body: formData })
   },
+  deleteAvatar: (id) => request(`/users/${id}/avatar`, { method: 'DELETE' }),
 }

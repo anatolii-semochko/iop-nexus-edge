@@ -23,6 +23,7 @@ import {
 } from '@coreui/react'
 import { api } from '../../api/client'
 import { useProcessLiveState } from '../../api/useLiveProcess'
+import ExpandToggleButton from '../../components/table/ExpandToggleButton'
 import TablePagination from '../../components/table/TablePagination'
 import TableSearchInput from '../../components/table/TableSearchInput'
 import { usePagination } from '../../hooks/usePagination'
@@ -101,11 +102,7 @@ const ProcessRow = ({ process, expanded, onToggleExpand, onReload, onError }) =>
           })}
         </CTableDataCell>
         <CTableDataCell className="text-end" style={{ width: '2rem' }}>
-          {Panel && (
-            <CButton size="sm" color="link" className="p-0" onClick={onToggleExpand}>
-              {expanded ? '▾' : '▸'}
-            </CButton>
-          )}
+          {Panel && <ExpandToggleButton expanded={expanded} onClick={onToggleExpand} />}
         </CTableDataCell>
       </CTableRow>
       {expanded && Panel && (

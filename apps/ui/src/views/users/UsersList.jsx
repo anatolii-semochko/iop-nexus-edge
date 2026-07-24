@@ -15,6 +15,8 @@ import {
   CTableHeaderCell,
   CTableRow,
 } from '@coreui/react'
+import CIcon from '@coreui/icons-react'
+import { cilCheck, cilX } from '@coreui/icons'
 import { api } from '../../api/client'
 import TablePagination from '../../components/table/TablePagination'
 import TableSearchInput from '../../components/table/TableSearchInput'
@@ -153,13 +155,35 @@ const UsersList = () => {
                     {pageItems.map((user) => (
                       <CTableRow key={user.id}>
                         <CTableDataCell>
-                          {user.avatar_path ? (
-                            <CAvatar src={`/api/uploads/avatars/${user.avatar_path}`} size="md" />
-                          ) : (
-                            <CAvatar color="secondary" textColor="white" size="md">
-                              {(user.display_name ?? user.username)[0].toUpperCase()}
+                          <div className="position-relative d-inline-block">
+                            {user.avatar_path ? (
+                              <CAvatar src={`/api/uploads/avatars/${user.avatar_path}`} size="md" />
+                            ) : (
+                              <CAvatar color="secondary" textColor="white" size="md">
+                                {(user.display_name ?? user.username)[0].toUpperCase()}
+                              </CAvatar>
+                            )}
+                            {/* Same active/inactive flag as the avatar field
+                                in UserForm.jsx - not an action here either.
+                                Sized smaller here (proportional to the "md"
+                                CAvatar this sits on, vs the form's "4rem"
+                                one) - the form's own 1.25rem badge looked
+                                right against a much bigger avatar, but was
+                                oversized against this smaller one. */}
+                            <CAvatar
+                              color={user.active ? 'success' : 'danger'}
+                              textColor="white"
+                              className="position-absolute p-0 d-flex align-items-center justify-content-center"
+                              style={{
+                                width: '0.85rem',
+                                height: '0.85rem',
+                                top: '-0.15rem',
+                                right: '-0.15rem',
+                              }}
+                            >
+                              <CIcon icon={user.active ? cilCheck : cilX} height={8} width={8} />
                             </CAvatar>
-                          )}
+                          </div>
                         </CTableDataCell>
                         <CTableDataCell>{user.username}</CTableDataCell>
                         <CTableDataCell>{user.display_name ?? '-'}</CTableDataCell>

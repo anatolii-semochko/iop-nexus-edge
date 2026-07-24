@@ -187,4 +187,14 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
 
     return { avatarUrl: `/uploads/avatars/${filename}` };
   });
+
+  app.delete<{ Params: { id: string } }>("/users/:id/avatar", async (request, reply) => {
+    const user = await findUser(request.params.id);
+    if (!user) return reply.code(404).send({ error: "user not found" });
+    if (!user.avatar_path) return reply.code(204).send();
+
+    await pool.query("UPDATE users SET avatar_path = NULL, updated_at = now() WHERE id = $1", [user.id]);
+    await unlink(path.join(config.uploads.avatarsDir, user.avatar_path)).catch(() => {});
+    return reply.code(204).send();
+  });
 }
