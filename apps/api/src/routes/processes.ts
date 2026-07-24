@@ -10,6 +10,16 @@ interface ProcessConfig {
   // process raises its critical flag - see the seed migration for why
   // (AGENTS.md section 10).
   linkedProcessIds?: number[];
+  // resource-monitor thresholds (AGENTS.md section 21) - percentages, same
+  // loose "shape depends on kind" jsonb as min/max above. A threshold of 0
+  // (or omitted) means "don't check this metric" - the orchestrator, not
+  // this route, is what interprets that.
+  cpuMax?: number;
+  ramMax?: number;
+  diskMax?: number;
+  cpuWarnMax?: number;
+  ramWarnMax?: number;
+  diskWarnMax?: number;
 }
 
 interface ProcessRow {
@@ -51,28 +61,37 @@ export async function processRoutes(app: FastifyInstance): Promise<void> {
     return withLiveState(process);
   });
 
-  // "permanent" processes have no min/max concept enforced here - the type
-  // is the same jsonb shape for every kind (loose, like devices.
-  // capabilities), min/max only apply to the two temperature-* kinds today.
-  app.patch<{ Params: { id: string }; Body: { min?: number; max?: number } }>(
-    "/processes/:id/config",
-    async (request, reply) => {
-      const process = await findProcess(request.params.id);
-      if (!process) {
-        return reply.code(404).send({ error: "process not found" });
-      }
+  // Same endpoint serves every kind's config fields (min/max for
+  // temperature-*, cpuMax/ramMax/diskMax for resource-monitor) - the body is
+  // a partial patch merged onto whatever's already there, same loose jsonb
+  // approach as devices.capabilities. The min<=max guard only fires when a
+  // request actually touches min/max.
+  app.patch<{
+    Params: { id: string };
+    Body: {
+      min?: number;
+      max?: number;
+      cpuMax?: number;
+      ramMax?: number;
+      diskMax?: number;
+      cpuWarnMax?: number;
+      ramWarnMax?: number;
+      diskWarnMax?: number;
+    };
+  }>("/processes/:id/config", async (request, reply) => {
+    const process = await findProcess(request.params.id);
+    if (!process) {
+      return reply.code(404).send({ error: "process not found" });
+    }
 
-      const min = request.body.min ?? process.config.min;
-      const max = request.body.max ?? process.config.max;
-      if (min !== undefined && max !== undefined && max < min) {
-        return reply.code(400).send({ error: "max cannot be less than min" });
-      }
+    const config: ProcessConfig = { ...process.config, ...request.body };
+    if (config.min !== undefined && config.max !== undefined && config.max < config.min) {
+      return reply.code(400).send({ error: "max cannot be less than min" });
+    }
 
-      const config: ProcessConfig = { ...process.config, min, max };
-      await pool.query("UPDATE processes SET config = $1, updated_at = now() WHERE id = $2", [config, process.id]);
-      return { status: "ok", config };
-    },
-  );
+    await pool.query("UPDATE processes SET config = $1, updated_at = now() WHERE id = $2", [config, process.id]);
+    return { status: "ok", config };
+  });
 
   // Only ON/OFF exist today (the two seeded processes need nothing else) -
   // START/PAUSE/STOP are named in the general process concept but not
@@ -107,6 +126,37 @@ export async function processRoutes(app: FastifyInstance): Promise<void> {
     await processRegistry.setCritical(process.id, request.body.critical, "orchestrator");
     return { status: "ok" };
   });
+
+  // Same as /critical above, but for the less severe warn threshold
+  // (AGENTS.md section 21) - a resource-monitor metric past its warn max
+  // but not yet its error max highlights the row yellow, not red.
+  app.post<{ Params: { id: string }; Body: { warning: boolean } }>("/processes/:id/warning", async (request, reply) => {
+    const process = await findProcess(request.params.id);
+    if (!process) {
+      return reply.code(404).send({ error: "process not found" });
+    }
+
+    await processRegistry.setWarning(process.id, request.body.warning, "orchestrator");
+    return { status: "ok" };
+  });
+
+  // Orchestrator-driven only, same as /critical above - a resource-monitor
+  // process pushes its latest CPU/RAM/disk readings here every tick
+  // (AGENTS.md section 21). Published on the message bus unconditionally
+  // (processRegistry.setMetrics) - the UI subscribes to the live feed for
+  // these now, the same as status/critical/warning, not a separate poll.
+  app.post<{ Params: { id: string }; Body: { cpu: number; ram: number; disk: number } }>(
+    "/processes/:id/metrics",
+    async (request, reply) => {
+      const process = await findProcess(request.params.id);
+      if (!process) {
+        return reply.code(404).send({ error: "process not found" });
+      }
+
+      await processRegistry.setMetrics(process.id, request.body, "orchestrator");
+      return { status: "ok" };
+    },
+  );
 }
 
 async function findProcess(id: string): Promise<ProcessRow | undefined> {
@@ -115,9 +165,11 @@ async function findProcess(id: string): Promise<ProcessRow | undefined> {
 }
 
 async function withLiveState(process: ProcessRow) {
-  const [status, critical] = await Promise.all([
+  const [status, critical, warning, metrics] = await Promise.all([
     process.type === "controllable" ? processRegistry.getStatus(process.id) : Promise.resolve(undefined),
     processRegistry.getCritical(process.id),
+    processRegistry.getWarning(process.id),
+    processRegistry.getMetrics(process.id),
   ]);
-  return { ...process, status, critical };
+  return { ...process, status, critical, warning, metrics };
 }

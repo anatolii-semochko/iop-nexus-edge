@@ -463,12 +463,21 @@ today just the Light Regulator's `Level`), falling back to the generic
 table row otherwise. The Dev Simulator's generic override column is instant
 - no "Set" button - for `Bool` (checkbox) and any device-type-specific
 control (e.g. the Light Regulator's slider, debounced 150ms so dragging
-doesn't flood the API); a `NumericStepper` component (±1 buttons plus a
-signed two-decimal-place text input, `apps/ui/src/views/devices/
-NumericStepper.jsx`) is the one control that still has an explicit commit
-step (Enter or "Set") for anything else (e.g. `Temperature`) - free-typing a
-number a character at a time must not fire a write per keystroke. It also
-shows a device-wide "Auto value" column next to "Current value" (both
+doesn't flood the API); a `NumericStepper` component (`apps/ui/src/views/
+devices/NumericStepper.jsx`) is the +/- control for anything else (e.g.
+`Temperature`) - no free-text input at all (an earlier version had one,
+gated on matching an exact signed two-decimal pattern before "Set" would
+even enable, which was confusing enough to remove entirely), each button
+commits immediately. A quick click steps once; holding past 1 second
+starts auto-repeating every 50ms until released (standard spinner-control
+behavior), with a `window`-level `pointerup`/`pointercancel` listener as a
+safety net so a release outside the button - a real drag off the edge, not
+just a testing artifact - can't leave the repeat running forever. Callers
+can optionally pass `min`/`max` to clamp the value (unbounded by default);
+`ResourceMonitorPanel.jsx` passes `min={0} max={100}` since its thresholds
+are percentages - a held repeat that hits the clamp stops itself rather
+than continuing to fire identical commits for as long as the button stays
+down. It also shows a device-wide "Auto value" column next to "Current value" (both
 turn red on mismatch) for controllable resources, and renames "Release to
 Auto" to "Auto", shown only while a resource is actually `MANUAL`.
 
@@ -729,9 +738,10 @@ busy, reading as the whole table jumping.
   `Temperature` (`NaN`) as "not critical" rather than failing safe — a real
   safety system should probably do the opposite; not fixed, called out
   explicitly rather than left quiet.
-- `START`/`PAUSE`/`STOP` actions, and any process `kind` beyond the two
-  temperature-\* ones, don't exist — `RUNNERS`/`IMPLEMENTED_ACTIONS` are
-  small fixed maps, not a plugin system.
+- `START`/`PAUSE`/`STOP` actions don't exist —
+  `RUNNERS`/`IMPLEMENTED_ACTIONS` are small fixed maps, not a plugin system.
+  A third `kind`, `resource-monitor`, now exists alongside the two
+  temperature-\* ones — see section 21.
 - No automated tests — verified live (docker compose, both directions:
   temperature swung out of range and back, process turned `OFF` mid-cooling
   and back `ON`), same testing posture as the rest of this codebase.
@@ -1096,3 +1106,148 @@ make down / make down-all
 
 No service is expected to run outside Docker. See `Makefile` for all
 available targets.
+
+## 21. Resource Monitor (`resource-monitor` process kind)
+
+A permanent host-health process (`apps/orchestrator/src/processes/
+resourceMonitor.ts`) — CPU/RAM/disk load, seeded by `apps/api/migrations/
+..._seed-resource-monitor-process.ts` into a new "System" group, no
+`device_id` (it watches the orchestrator's own host, not an EdgeX device —
+`device_id` was already nullable for exactly this kind of case). Same
+"reuse the existing `critical` concept" approach as `temperature-monitor`
+(section 10) rather than inventing a parallel one.
+
+**Library choice**: no dependency at all, not even `systeminformation`
+(the original suggestion) — Node built-ins cover everything needed:
+`os.cpus()` (CPU%, via the idle/total tick delta between two consecutive
+1-second samples — `os.cpus()` reports cumulative ticks since boot, not a
+point-in-time load, so a single sample can't give a percentage),
+`os.totalmem()`/`os.freemem()` (RAM%), and `fs.statfsSync("/")` (disk%,
+stable in Node since 18.15 — same `used/(used+bavail)` formula `df` itself
+uses for its Use% column). `systeminformation` bundles many unrelated
+subsystems (GPU, bluetooth, USB, battery, etc.) for a project whose stated
+target is Raspberry-Pi minimalism — not worth the weight for three numbers
+Node already exposes directly.
+
+**Container vs. host accuracy** (a real open question, not silently
+assumed): CPU/RAM read from `/proc` inside the orchestrator container
+reflect the real *host* values, and disk usage from the container's own
+root filesystem tracks the host disk's real free space — both **only**
+because `docker-compose.yml` sets no cgroup cpu/mem limit and no storage
+quota on the `orchestrator` service. This holds for this project's
+single-host/Raspberry-Pi deployment target; it would not hold unmodified in
+a setup where the orchestrator's container itself is resource-constrained
+(a host-filesystem bind-mount and cgroup-aware reads would be needed then,
+not attempted here).
+
+**Where things live** (same split as section 10): thresholds are in
+`processes.config` jsonb — Postgres, design-time, writable via the same
+generic `PATCH /processes/:id/config` every other kind's config already
+uses (the handler merges whatever fields a request body actually contains,
+rather than hardcoding `min`/`max`). Two tiers per metric: `cpuMax`/
+`ramMax`/`diskMax` (error — red row, the original `critical` concept) and
+`cpuWarnMax`/`ramWarnMax`/`diskWarnMax` (warning — yellow row, a second,
+less severe Redis flag added alongside `critical`). **A threshold of 0 (or
+omitted) disables that specific check** — per metric, independently, not
+an all-or-nothing gate on the whole tick the way temperature-monitor's
+`min`/`max` are.
+
+Live readings **are** pushed through `publishProcessEvent`/the WebSocket
+feed, same as `status`/`critical`/`warning` — but `processRegistry.
+setMetrics` is the one publisher in this codebase that does it
+*unconditionally*, not just on an actual change (`getStatus`/`setCritical`/
+`setWarning` all skip the publish when the value already matches, exactly
+to avoid a 1-second tick loop flooding the bus with identical events - see
+their own doc comments). Metrics don't have that luxury: the whole point
+is a live-updating reading, and re-publishing an unchanged disk% every tick
+is *correct* here, not a bug to guard against. This wasn't the original
+design - the first version had the UI poll `GET /processes/:id` once a
+second instead, deliberately avoiding the bus for exactly the "flood it"
+reason above. That reasoning didn't hold up: the orchestrator already
+calls `setMetrics` exactly once per tick regardless, so "publish once a
+second" comes for free from that existing cadence, and the polling
+approach left this one feed on a completely different transport from
+every other kind of live process state for no real benefit - reworked
+during this session once that inconsistency was pointed out. `GET
+/processes`/`GET /processes/:id` still merge the latest reading in as
+`metrics: {cpu, ram, disk}` too, purely as the initial snapshot a page
+load starts from before its first live event arrives (same role status/
+critical/warning's REST fields already played) - `apps/ui/src/api/
+client.js` no longer has a `getProcess` method, since nothing polls
+anymore.
+
+**Warning tier**: `processRegistry.getWarning`/`setWarning` and `POST
+/processes/:id/warning` mirror `getCritical`/`setCritical`/`POST
+/processes/:id/critical` exactly (same no-op-unless-changed, same
+`publishProcessEvent` on an actual flip). The orchestrator computes both
+every tick and error always wins: `warning` is only ever raised when
+`critical` is false, so a metric already past its error max never leaves
+the row flickering between red and yellow — it's one or the other.
+Sending and consuming actual warning notifications (e.g. an email/Slack
+alert) is intentionally out of scope for now — this only wires up the
+threshold, the state, and the row color.
+
+**Tick throttling**: CPU/RAM are read every 1-second tick like every other
+`kind`; disk is checked at most once a minute (module-scope cache in
+`resourceMonitor.ts`, keyed on nothing but time — there's one host, not one
+per process) since disk usage barely moves and `statfsSync` gains nothing
+from being called every second.
+
+**UI** (`apps/ui/src/views/processes/ResourceMonitorPanel.jsx`): three
+rows, not three processes — CPU/RAM/Disk, each with its live % in large
+type, a "Warning Max%" `NumericStepper` and, right after it, an "Error
+Max%" one (step 1, same component `TemperatureProcessPanel` uses, clamped
+`min={0} max={100}` here since these are percentages - see section 7's
+`NumericStepper` entry for the hold-to-repeat mechanism itself) for that
+metric's own two thresholds. The row itself (`ProcessesList.jsx`) picks
+`danger`/red over `warning`/yellow over nothing, same precedence as the
+orchestrator's own critical-wins-over-warning logic — confirmed live by
+dropping `cpuMax` to 1% (row turns red), then raising it back above the
+current reading and lowering `cpuWarnMax` instead (row turns yellow).
+Independently, **inside** the panel, each metric's own current-value text
+is colored `text-danger-emphasis`/`text-warning-emphasis` (Bootstrap/CoreUI
+utility classes, computed client-side from that metric's own value against
+its own thresholds - not from the row-level `critical`/`warning` flags)
+whenever that specific metric, not necessarily the process as a whole, is
+the one past its threshold - these are deliberately the emphasis variants,
+not plain `text-danger`/`text-warning`, since they're designed to stay
+readable against the row's own tinted `danger`/`warning` background rather
+than assuming a plain one.
+
+**1-minute levels chart** (`ResourceLevelsChart.jsx`, sitting to the right
+of the three rows): a rolling 60-second CPU/RAM/Disk line chart, one hand-
+rolled inline SVG, not a charting dependency - same "Node built-ins/no
+extra package" call already made for the metrics themselves. There is no
+server-side history endpoint; the chart is fed purely from the panel's own
+`useProcessLiveState` subscription (the same live feed that already drives
+`metrics` for the three rows), buffered client-side into a `history` array
+capped at `MAX_SAMPLES` (60) samples and reset to empty every time the row
+is re-expanded - "the
+last minute of what this browser tab has actually observed since opening
+the panel," not a true historical record. The newest sample always pins to
+the chart's right edge; with fewer than 60 samples the line only occupies
+the right portion of the width and fills in leftward, rather than
+stretching a handful of points across the full width and looking
+misleadingly zoomed out. Disk's line is visibly "steppy" (flat, then a
+jump) rather than smooth like CPU/RAM - an honest reflection of disk only
+being checked once a minute server-side, not a chart bug.
+
+Layout: the chart stretches to the full height of the three metric rows
+and all the remaining width (parent width minus the rows' own columns) via
+a flex row (`d-flex align-items-stretch`) with the rows in a plain auto-
+width column and the chart in a `flex-grow-1` one. The chart's own root is
+`position: absolute; inset: 0` against that `flex-grow-1` column (itself
+`position: relative`), **not** `height: 100%` in normal flow - the
+`flex-grow-1` column has no in-flow content of its own to give it a
+height, so a plain percentage height there is circular (this chart would
+be the only reason that column has any size at all) and the SVG falls back
+to its own viewBox aspect ratio applied to the correctly-resolved width,
+which rendered as a huge square blowing out past the whole table (caught
+live, screenshotted, and fixed during this session - worth remembering for
+any future "fill a flex sibling's height" component: absolute-position the
+sized content instead of nesting percentage heights through it).
+
+**Known limitation**: the first tick after an orchestrator restart has no
+previous CPU sample to diff against (see above) — that one tick reports
+`cpu: 0` and skips both the critical and warning checks entirely rather
+than risk a false reading off a meaningless first sample.

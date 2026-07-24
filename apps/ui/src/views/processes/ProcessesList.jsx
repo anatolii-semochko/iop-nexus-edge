@@ -34,6 +34,7 @@ import { useExpandableRows } from '../../hooks/useExpandableRows'
 import { usePagination } from '../../hooks/usePagination'
 import { usePersistedState } from '../../hooks/usePersistedState'
 import LiveBadge from '../devices/LiveBadge'
+import ResourceMonitorPanel from './ResourceMonitorPanel'
 import TemperatureProcessPanel from './TemperatureProcessPanel'
 
 // Registration for usePersistedState (AGENTS.md section 17) - these five
@@ -48,12 +49,13 @@ const PERSISTED_DEFAULTS = {
 }
 
 // process.kind -> its expandable detail component (AGENTS.md section 10).
-// Only one kind-pair exists today (temperature-control/-monitor share the
-// same panel), same plain-map approach as DEVICE_TYPE_SIMULATORS/
-// DEVICE_TYPE_CONTROLS in the Devices pages.
+// Same plain-map approach as DEVICE_TYPE_SIMULATORS/DEVICE_TYPE_CONTROLS in
+// the Devices pages - temperature-control/-monitor share one panel,
+// resource-monitor (section 21) has its own.
 const KIND_PANELS = {
   'temperature-control': TemperatureProcessPanel,
   'temperature-monitor': TemperatureProcessPanel,
+  'resource-monitor': ResourceMonitorPanel,
 }
 
 const statusColor = (status) => (status === 'on' ? 'success' : 'secondary')
@@ -68,6 +70,10 @@ const ProcessRow = ({ process, expanded, onToggleExpand, onReload, onError }) =>
   const live = useProcessLiveState(process.id)
   const status = live.status ?? process.status
   const critical = live.critical ?? process.critical
+  const warning = live.warning ?? process.warning
+  // Error always wins over warning (AGENTS.md section 21) - a row is never
+  // both, so this is a simple precedence pick, not two independent styles.
+  const rowColor = critical ? 'danger' : warning ? 'warning' : undefined
   // Which specific action is in flight, not a single shared boolean - only
   // the button the user actually clicked shows a spinner; the other one
   // (already disabled, since it matches the pre-click status) never did.
@@ -94,7 +100,7 @@ const ProcessRow = ({ process, expanded, onToggleExpand, onReload, onError }) =>
 
   return (
     <>
-      <CTableRow color={critical ? 'danger' : undefined}>
+      <CTableRow color={rowColor}>
         <CTableDataCell className={noBorderWhenExpanded}>{process.name}</CTableDataCell>
         <CTableDataCell className={noBorderWhenExpanded}>{process.group_name}</CTableDataCell>
         <CTableDataCell className={noBorderWhenExpanded}>
@@ -131,7 +137,7 @@ const ProcessRow = ({ process, expanded, onToggleExpand, onReload, onError }) =>
         </CTableDataCell>
       </CTableRow>
       {expanded && Panel && (
-        <CTableRow color={critical ? 'danger' : undefined}>
+        <CTableRow color={rowColor}>
           <CTableDataCell colSpan={5} className="p-0">
             <Panel process={process} onConfigChange={onReload} />
           </CTableDataCell>

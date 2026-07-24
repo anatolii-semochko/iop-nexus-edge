@@ -22,8 +22,26 @@ export interface ProcessRecord {
   type: "controllable" | "permanent";
   kind: string;
   device_id: number | null;
-  config: { min?: number; max?: number; linkedProcessIds?: number[] };
+  config: {
+    min?: number;
+    max?: number;
+    linkedProcessIds?: number[];
+    // resource-monitor thresholds (AGENTS.md section 21), percentages. 0 or
+    // undefined means "don't check this metric".
+    cpuMax?: number;
+    ramMax?: number;
+    diskMax?: number;
+    cpuWarnMax?: number;
+    ramWarnMax?: number;
+    diskWarnMax?: number;
+  };
   status?: "on" | "off";
+}
+
+export interface ProcessMetrics {
+  cpu: number;
+  ram: number;
+  disk: number;
 }
 
 export interface DeviceReading {
@@ -50,5 +68,15 @@ export const apiClient = {
     request(`/processes/${processId}/critical`, {
       method: "POST",
       body: JSON.stringify({ critical }),
+    }),
+  setMetrics: (processId: number, metrics: ProcessMetrics) =>
+    request(`/processes/${processId}/metrics`, {
+      method: "POST",
+      body: JSON.stringify(metrics),
+    }),
+  setWarning: (processId: number, warning: boolean) =>
+    request(`/processes/${processId}/warning`, {
+      method: "POST",
+      body: JSON.stringify({ warning }),
     }),
 };
