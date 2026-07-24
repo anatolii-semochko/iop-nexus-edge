@@ -23,6 +23,9 @@ import {
 } from '@coreui/react'
 import { api } from '../../api/client'
 import { useProcessLiveState } from '../../api/useLiveProcess'
+import TablePagination from '../../components/table/TablePagination'
+import TableSearchInput from '../../components/table/TableSearchInput'
+import { usePagination } from '../../hooks/usePagination'
 import LiveBadge from '../devices/LiveBadge'
 import TemperatureProcessPanel from './TemperatureProcessPanel'
 
@@ -129,6 +132,7 @@ const ProcessesList = () => {
   const [error, setError] = useState(null)
   const [groupFilter, setGroupFilter] = useState('')
   const [typeFilter, setTypeFilter] = useState('')
+  const [search, setSearch] = useState('')
   const [expandedIds, setExpandedIds] = useState(new Set())
 
   const reload = () => {
@@ -143,13 +147,20 @@ const ProcessesList = () => {
 
   useEffect(reload, [])
 
+  // Hooks must run unconditionally on every render, so pagination is
+  // computed here (against a safe `[]` fallback before data loads) rather
+  // than after the early error/loading returns below.
+  const groups = [...new Set((processes ?? []).map((p) => p.group_name))].sort()
+  const filtered = (processes ?? []).filter(
+    (p) =>
+      (!groupFilter || p.group_name === groupFilter) &&
+      (!typeFilter || p.type === typeFilter) &&
+      (!search || p.name.toLowerCase().includes(search.toLowerCase())),
+  )
+  const { page, pageSize, pageItems, totalItems, setPage, setPageSize } = usePagination(filtered)
+
   if (error && !processes) return <CAlert color="danger">{error}</CAlert>
   if (!processes) return <CSpinner color="primary" />
-
-  const groups = [...new Set(processes.map((p) => p.group_name))].sort()
-  const filtered = processes.filter(
-    (p) => (!groupFilter || p.group_name === groupFilter) && (!typeFilter || p.type === typeFilter),
-  )
 
   const toggleExpand = (id) => {
     setExpandedIds((prev) => {
@@ -208,35 +219,47 @@ const ProcessesList = () => {
               <option value="permanent">Permanent</option>
             </CFormSelect>
           </CCol>
+          <CCol xs="auto">
+            <TableSearchInput value={search} onSearch={setSearch} placeholder="Search by name..." />
+          </CCol>
         </CRow>
         {filtered.length === 0 ? (
           <CAlert color="info">No processes match this filter.</CAlert>
         ) : (
-          <CTable hover responsive>
-            <CTableHead>
-              <CTableRow>
-                <CTableHeaderCell scope="col">Name</CTableHeaderCell>
-                <CTableHeaderCell scope="col">Group</CTableHeaderCell>
-                <CTableHeaderCell scope="col">Status</CTableHeaderCell>
-                <CTableHeaderCell scope="col" className="text-end">
-                  Actions
-                </CTableHeaderCell>
-                <CTableHeaderCell scope="col" />
-              </CTableRow>
-            </CTableHead>
-            <CTableBody>
-              {filtered.map((process) => (
-                <ProcessRow
-                  key={process.id}
-                  process={process}
-                  expanded={expandedIds.has(process.id)}
-                  onToggleExpand={() => toggleExpand(process.id)}
-                  onReload={reload}
-                  onError={setError}
-                />
-              ))}
-            </CTableBody>
-          </CTable>
+          <>
+            <CTable hover responsive>
+              <CTableHead>
+                <CTableRow>
+                  <CTableHeaderCell scope="col">Name</CTableHeaderCell>
+                  <CTableHeaderCell scope="col">Group</CTableHeaderCell>
+                  <CTableHeaderCell scope="col">Status</CTableHeaderCell>
+                  <CTableHeaderCell scope="col" className="text-end">
+                    Actions
+                  </CTableHeaderCell>
+                  <CTableHeaderCell scope="col" />
+                </CTableRow>
+              </CTableHead>
+              <CTableBody>
+                {pageItems.map((process) => (
+                  <ProcessRow
+                    key={process.id}
+                    process={process}
+                    expanded={expandedIds.has(process.id)}
+                    onToggleExpand={() => toggleExpand(process.id)}
+                    onReload={reload}
+                    onError={setError}
+                  />
+                ))}
+              </CTableBody>
+            </CTable>
+            <TablePagination
+              page={page}
+              pageSize={pageSize}
+              totalItems={totalItems}
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
+            />
+          </>
         )}
       </CCardBody>
     </CCard>

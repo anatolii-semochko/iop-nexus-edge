@@ -18,6 +18,10 @@ import { legacy_createStore as createStore } from 'redux'
 const initialState = {
   sidebarShow: true,
   theme: 'light',
+  // Logged-in user (AGENTS.md section 13), or null when signed out. Set via
+  // `dispatch({ type: 'set', user })` - the same generic reducer as every
+  // other piece of state here, read with `useSelector((state) => state.user)`.
+  user: null,
 }
 
 /**

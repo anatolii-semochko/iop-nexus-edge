@@ -10,12 +10,17 @@
 const BASE = '/api'
 
 async function request(path, options = {}) {
+  // FormData (avatar upload) needs the browser to set its own multipart
+  // boundary in Content-Type - never set it ourselves for that case.
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData
   const res = await fetch(`${BASE}${path}`, {
-    // Only set Content-Type when there's actually a body - Fastify's
+    // Only set Content-Type when there's actually a JSON body - Fastify's
     // default JSON parser rejects an empty body sent with this header
     // (FST_ERR_CTP_EMPTY_JSON_BODY), which bodyless requests like
-    // releaseResource below otherwise trigger.
-    headers: options.body ? { 'Content-Type': 'application/json' } : {},
+    // releaseResource below otherwise trigger. Cookies (the session - see
+    // AGENTS.md section 13) ride along automatically since this is always a
+    // same-origin request, no explicit `credentials` option needed.
+    headers: options.body && !isFormData ? { 'Content-Type': 'application/json' } : {},
     ...options,
   })
   if (!res.ok) {
@@ -66,4 +71,22 @@ export const api = {
     request(`/processes/${id}/config`, { method: 'PATCH', body: JSON.stringify(config) }),
   doProcessAction: (id, action) =>
     request(`/processes/${id}/action`, { method: 'POST', body: JSON.stringify({ action }) }),
+  // Auth (AGENTS.md section 13 - UI login only, not per-endpoint API
+  // authorization).
+  login: (username, password) =>
+    request('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
+  logout: () => request('/auth/logout', { method: 'POST' }),
+  getCurrentUser: () => request('/auth/me'),
+  // User management (admin-only server-side - see apps/api/src/routes/users.ts).
+  listUsers: () => request('/users'),
+  getUser: (id) => request(`/users/${id}`),
+  createUser: (data) => request('/users', { method: 'POST', body: JSON.stringify(data) }),
+  updateUser: (id, data) =>
+    request(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteUser: (id) => request(`/users/${id}`, { method: 'DELETE' }),
+  uploadAvatar: (id, file) => {
+    const formData = new FormData()
+    formData.append('avatar', file)
+    return request(`/users/${id}/avatar`, { method: 'POST', body: formData })
+  },
 }

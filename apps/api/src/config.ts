@@ -36,4 +36,18 @@ export const config = {
     coreDataUrl: `http://${required("EDGEX_CORE_DATA_HOST")}:${process.env.EDGEX_CORE_DATA_PORT ?? 59880}`,
     coreCommandUrl: `http://${required("EDGEX_CORE_COMMAND_HOST")}:${process.env.EDGEX_CORE_COMMAND_PORT ?? 59882}`,
   },
+  // UI login only (AGENTS.md section 13) - not per-endpoint API
+  // authorization, which stays a separate, not-yet-started task.
+  auth: {
+    jwtSecret: required("JWT_SECRET"),
+    tokenTtl: process.env.JWT_EXPIRES_IN ?? "12h",
+    cookieName: "nexus_edge_session",
+    // Only over HTTPS in production - this platform runs over plain HTTP on
+    // a local network today, no TLS termination configured anywhere yet.
+    secureCookies: process.env.NODE_ENV === "production",
+  },
+  uploads: {
+    avatarsDir: process.env.AVATAR_UPLOAD_DIR ?? "/workspace/apps/api/uploads/avatars",
+    avatarMaxSizeBytes: Number(process.env.AVATAR_MAX_SIZE_BYTES ?? 2 * 1024 * 1024),
+  },
 };

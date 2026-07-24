@@ -24,6 +24,7 @@ import {
   cilExternalLink,
   cilNotes,
   cilPencil,
+  cilPeople,
   cilPuzzle,
   cilSettings,
   cilSitemap,
@@ -126,6 +127,20 @@ const _nav = [
     name: 'Processes',
     to: '/processes',
     icon: <CIcon icon={cilSettings} customClassName="nav-icon" />,
+  },
+  {
+    component: CNavTitle,
+    name: 'Settings',
+  },
+  {
+    component: CNavItem,
+    name: 'Users',
+    to: '/users',
+    icon: <CIcon icon={cilPeople} customClassName="nav-icon" />,
+    // Filtered out for non-admins in AppSidebar.jsx (AGENTS.md section 13) -
+    // the server-side 403 on /users is the real guard, this just avoids
+    // showing a link that would fail for most signed-in users.
+    adminOnly: true,
   },
   {
     component: CNavTitle,
@@ -588,11 +603,6 @@ const _nav = [
         component: CNavItem,
         name: 'Login',
         to: '/login',
-      },
-      {
-        component: CNavItem,
-        name: 'Register',
-        to: '/register',
       },
       {
         component: CNavItem,

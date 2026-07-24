@@ -71,6 +71,8 @@ services:
       - rabbitmq
     ports:
       - "${API_PORT}:${API_PORT}"
+    volumes:
+      - api-avatars:${AVATAR_UPLOAD_DIR}
     networks:
       - nexus-edge-network
 
@@ -111,3 +113,4 @@ volumes:
   postgres-data:
   redis-data:
   rabbitmq-data:
+  api-avatars:

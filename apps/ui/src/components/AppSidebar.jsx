@@ -56,6 +56,11 @@ const AppSidebar = () => {
   const dispatch = useDispatch()
   const unfoldable = useSelector((state) => state.sidebarUnfoldable)
   const sidebarShow = useSelector((state) => state.sidebarShow)
+  const user = useSelector((state) => state.user)
+  // `adminOnly` items (AGENTS.md section 13, e.g. Users) are hidden for
+  // everyone else - the real guard is the server-side 403 on those routes,
+  // this just avoids showing a link most signed-in users can't use.
+  const items = navigation.filter((item) => !item.adminOnly || user?.roles?.includes('admin'))
 
   return (
     <CSidebar
@@ -79,7 +84,7 @@ const AppSidebar = () => {
           onClick={() => dispatch({ type: 'set', sidebarShow: false })}
         />
       </CSidebarHeader>
-      <AppSidebarNav items={navigation} />
+      <AppSidebarNav items={items} />
       <CSidebarFooter className="border-top d-none d-lg-flex">
         <CSidebarToggler
           onClick={() => dispatch({ type: 'set', sidebarUnfoldable: !unfoldable })}

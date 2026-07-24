@@ -734,7 +734,198 @@ busy, reading as the whole table jumping.
   temperature swung out of range and back, process turned `OFF` mid-cooling
   and back `ON`), same testing posture as the rest of this codebase.
 
-## 11. Running the stack
+## 11. UI list tables: pagination, filtering and shared helpers
+
+A universal, reusable pagination/filter toolkit for `apps/ui` table views,
+modeled on the *architecture* (not the code — different stack: `fetch` not
+axios, CoreUI free not `-pro`) of an existing reference project
+(`sevenstime-backoffice`) the user pointed at for this purpose.
+
+**Client-side, not server-side — deliberate, confirmed choice.** That
+reference project paginates server-side (Symfony/Doctrine, `page`/`limit` →
+`{items, total}`, a near-duplicate `COUNT` query per list). This platform's
+list volumes are tens of rows (devices/nodes/processes on a single
+Raspberry Pi), not thousands, and every list endpoint already returns its
+full result set with no query params at all. Changing `GET /nodes`,
+`/devices`, `/processes` (and a future `/users` endpoint, once UI
+authorization — the next roadmap step — adds one) to `page`/`limit` +
+`{items, total}` just to serve a row count that's currently
+2–3 would be scope with no present payoff. Chosen instead: the API keeps
+returning full arrays; a small client-side toolkit paginates/filters
+in-memory. Revisit only if a list's real row count grows into the
+hundreds+.
+
+**Files** (`apps/ui/src/`):
+- `hooks/useDebouncedValue.js` — generic `useDebouncedValue(value, delayMs)`.
+  Standalone (not tied to a text input) so any rapidly-changing state can be
+  debounced in one line instead of a page-local `useEffect`+`setTimeout`
+  pair (which is what the reference project does inline in every view —
+  factored out here instead).
+- `hooks/usePagination.js` — `usePagination(items, { pageSize })` → `{ page,
+  pageSize, totalItems, totalPages, pageItems, setPage, setPageSize }`.
+  Operates on an already-filtered array; never touches filtering itself.
+  `page` is clamped against the live `totalPages` on every read (not stored
+  pre-clamped), so a filter/search change that shrinks the result set can
+  never strand the view on a page number that no longer exists — no
+  "reset page to 1 on filter change" boilerplate needed in the caller,
+  unlike the reference project's manual `setCurrentPage(1)` in every filter
+  handler.
+- `components/table/TablePagination.jsx` — controlled, presentational:
+  page-size `<select>`, "showing X–Y of Z" info, numbered `CPagination`
+  controls (max 5 visible page numbers, sliding window). Owns no state —
+  pair it with `usePagination` above. Splits the reference project's
+  `PaginatorInfo`/`PaginatorControls` pair into one component since nothing
+  here needs them separately.
+- `components/table/TableSearchInput.jsx` — a `CFormInput` wired straight to
+  `useDebouncedValue`; the raw keystroke value stays local (so typing never
+  lags) and only the debounced value reaches the caller's `onSearch`.
+- `utils/format.js` — `formatDateTime(iso)`, `formatRelativeTime(iso)` (`"5
+  minutes ago"`, `"never"` for a nullish timestamp), `isStale(iso,
+  thresholdMs)`. Pure functions, no API/state — display helpers for the
+  `created_at`/`updated_at`/`last_heartbeat_at` columns Postgres already
+  returns on every node/device row but that nothing rendered before this.
+  `isStale` is intentionally unused for now — a staleness threshold would be
+  a config value (AGENTS.md section 1: no hardcoded config in code), and
+  there is still no heartbeat producer to make one meaningful (same gap
+  noted in sections 9/10); wire it up once both exist instead of inventing a
+  threshold now.
+
+**Wiring a new list page** (the whole point — "universal, minimal glue"):
+```jsx
+const filtered = items.filter(/* page-specific predicate(s) */)
+const { page, pageSize, pageItems, totalItems, setPage, setPageSize } = usePagination(filtered)
+// render pageItems instead of filtered/items in the table body, then:
+<TablePagination page={page} pageSize={pageSize} totalItems={totalItems}
+  onPageChange={setPage} onPageSizeChange={setPageSize} />
+```
+Filter *predicates* stay page-specific (a text search, a dropdown, or both —
+`ProcessesList` keeps its existing group/type `CFormSelect`s and adds a name
+search on top) since what's filterable genuinely differs per table; only
+the pagination mechanics and the search-input debouncing are shared.
+
+**Already wired**: `views/devices/NodesList.jsx` (search across
+name/type/location, `TablePagination`, new "Last heartbeat" column via
+`formatRelativeTime`), `views/devices/DevicesList.jsx` (search across
+name/type, `TablePagination`), `views/processes/ProcessesList.jsx` (kept its
+group/type dropdowns, added a name search box, `TablePagination` — the
+pagination hook is called unconditionally before the loading/error early
+returns, since hooks can't follow a conditional `return`).
+
+**Helper categories considered and deliberately NOT built yet** (surveyed
+from the reference project so this list — not the code — could be reused;
+described here precisely so a future session doesn't rebuild what already
+exists above, or build these before they're actually needed):
+- **Query-string builder** (`buildQueryString(params)`, dropping
+  empty/null values) — the reference project gets this for free from axios;
+  nothing in this codebase issues a GET with query params yet (pagination
+  above is client-side). Build it the day a server-side query param
+  actually appears, not before.
+- **Global toast helper** (a `window.toast.{success,error,info}` API backed
+  by one mounted component, decoupling "trigger a toast" from "render a
+  toast") — the reference project uses this to toast from non-component
+  code (API error handlers). Every toast in this codebase today is a
+  page-local `CToast` (`ProcessesList.jsx`, `DevSimulator.jsx`) triggered
+  from a component that's already rendering; no non-component call site
+  exists yet to justify the indirection.
+- **Currency/number formatting** — the reference project formats USD/token
+  balances; there is no money/balance concept anywhere in this platform.
+  Skip entirely unless one appears.
+- **Permissions/roles helper** (a generic `roles()` hook reading many
+  possible permissions, an `AccessDeniedBlock`) — UI authorization (section
+  13) landed with only one meaningful role (`admin`) and a single inline
+  check (`user.roles.includes('admin')`) everywhere it's needed
+  (`AppSidebar.jsx`, `AppHeaderDropdown.jsx`) — a generic multi-permission
+  hook would be solving a problem that doesn't exist yet.
+- **`objectToFormData` / generic file-upload helper** — avatar upload
+  (section 13) turned out to need only a single `FormData` + one `<input
+  type="file">` call site (`UserForm.jsx`), not a reusable helper; revisit if
+  a second upload flow appears.
+- **`fetchErrorMessage`-style error normalization** — already effectively
+  covered by `apps/ui/src/api/client.js`'s `request()`, which extracts
+  `body.reason ?? body.error` from a non-2xx JSON response; no need to add a
+  second, separately-named helper that does the same thing.
+
+## 13. UI authorization (login, users, roles, avatars)
+
+Login-gates the admin panel itself (AGENTS.md's original "Ми додаємо
+наступні кроки" roadmap, step 2). **Deliberately NOT done here**: per-endpoint
+API authorization — `/nodes`, `/devices`, `/processes`, `/system/*` remain
+completely open, unauthenticated, exactly as before. Only two route groups
+are actually gated: `/auth/*` and `/users/*`. That's a separate, much larger
+future task (would need to decide what an EdgeX-adjacent device-control API
+protected by roles even looks like) — not something this step should block
+on or half-implement.
+
+**Session mechanism** — one JWT, httpOnly cookie, no refresh token:
+- `POST /auth/login` verifies `bcryptjs` against `users.password_hash`,
+  signs a JWT (`{sub, username, roles}`, `@fastify/jwt`, `JWT_EXPIRES_IN`
+  env, default `12h`) and sets it as an httpOnly, `SameSite=Strict` cookie
+  (`nexus_edge_session`) — never readable from JS, so `apps/ui` never
+  handles the token directly, only the `user` object the login/`/auth/me`
+  response bodies return.
+- No separate refresh token / Redis-backed session store — a expired
+  session just means logging in again. Simpler, and there's no multi-device
+  revocation requirement yet to justify the extra moving part.
+- `requireAuth`/`requireAdmin` (`apps/api/src/auth.ts`) are the only two
+  route guards in the codebase. `userRoutes` (`apps/api/src/routes/
+  users.ts`) applies `requireAdmin` via a single `app.addHook("preHandler",
+  requireAdmin)` at the top of the plugin — every `/users/*` route needs it,
+  a per-route list would just be repetition. `authRoutes` only guards
+  `GET /auth/me` (login/logout must work unauthenticated, obviously).
+- `apps/ui/src/components/AuthGate.jsx` wraps the whole authenticated shell
+  (the `*` route in `App.jsx`, around `DefaultLayout`) — calls `GET
+  /auth/me` once on mount to recover a session across a page refresh (the
+  cookie already rides along), redirects to `/login` on any failure.
+  `views/pages/login/Login.jsx` no longer has a "Sign up" link/`/register`
+  route — this is an admin-managed user model, not self-registration, and
+  the old CoreUI demo `Register.jsx` page was deleted (dead code that would
+  have actively contradicted this design if left in).
+
+**Users** (`apps/api/migrations/..._create-users-table.ts`,
+`routes/users.ts`):
+- `users.roles` is a Postgres `text[]`, not a comma-joined string — the
+  schema supports more than one role per user even though `admin` is the
+  only role that means anything today (`ALLOWED_ROLES` in `routes/users.ts`
+  is the single source of truth for what's valid; extending it later is a
+  code change, not a migration).
+- Two seeded, protected accounts (`..._seed-default-users.ts`, passwords
+  from `ADMIN_DEFAULT_PASSWORD`/`SYSTEM_DEFAULT_PASSWORD` env, hashed at
+  migration time — same "change-me placeholder in `.env.example`"
+  convention as every other credential here, not a stronger generated-secret
+  scheme, for consistency): `admin` (role `admin`, can never be deleted or
+  deactivated) and `system` (no roles, can never be deleted, *can* be
+  deactivated). `PROTECTED_USERNAMES`/`NON_DEACTIVATABLE_USERNAMES` in
+  `routes/users.ts` are the one place this is encoded — every response
+  includes computed `deletable`/`deactivatable` booleans so `apps/ui` only
+  ever disables buttons based on what the server already decided, never
+  re-implements the rule.
+- Passwords hashed with `bcryptjs` (pure JS, not native `bcrypt`/`argon2`) —
+  deliberately, to avoid a native build toolchain (python3/make/g++) in the
+  Docker build stage and per-architecture prebuilt binaries, given this
+  platform's explicit Raspberry Pi target (section 1).
+
+**Avatars**: `POST /users/:id/avatar` (`@fastify/multipart`, PNG/JPEG/WebP
+only, size-limited by `AVATAR_MAX_SIZE_BYTES`) writes to
+`config.uploads.avatarsDir` (`AVATAR_UPLOAD_DIR` env, a dedicated
+`api-avatars` Docker volume — not baked into the image, survives rebuilds)
+under a random filename (`${userId}-${uuid}.ext}`), never the client-supplied
+name. Served back via `@fastify/static` at `/uploads/avatars/*` on the API
+itself — reachable from the browser at `/api/uploads/avatars/*` through the
+existing nginx `/api/` proxy (`apps/ui/nginx.conf.template`), no new nginx
+location needed. Deleting a user or replacing their avatar unlinks the old
+file best-effort (a missing file on disk never blocks the DB write).
+
+**apps/ui**: session `user` lives in the existing generic Redux store
+(`store.js`, `dispatch({type:'set', user})`) — the same pattern already used
+for `sidebarShow`/`theme`, not a new Context/state library. `AppSidebar.jsx`
+filters nav items flagged `adminOnly: true` (just the new Settings → Users
+entry, `_nav.jsx`) against `user.roles` — cosmetic only, the real gate is the
+server's 403; hiding the link just avoids showing signed-in non-admins a
+link that would fail. `UsersList.jsx`/`UserForm.jsx` reuse the pagination/
+search toolkit from section 11 (proof it's actually "minimal glue" per-page,
+not just descriptive).
+
+## 14. Running the stack
 
 ```
 cp .env.example .env      # adjust values
