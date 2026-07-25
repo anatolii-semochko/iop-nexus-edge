@@ -26,16 +26,17 @@ export interface DeviceEventEnvelope {
 
 // First expansion of the bus beyond the "device" domain (AGENTS.md section
 // 10) - a process's on/off status, critical flag, (section 21) warning
-// flag, or resource-monitor metrics. "metrics" is the odd one out here:
-// the other three only publish on an actual change (see processRegistry's
-// no-op-unless-different guard) - metrics publishes unconditionally, once
-// per orchestrator tick, so ".changed" in the routing key is a slight
-// misnomer for it specifically, kept anyway for one shared scheme rather
-// than a special case.
+// flag, resource-monitor metrics, or (section 22) its active WEM message
+// list. "metrics" is the odd one out here: the other four only publish on
+// an actual change (see processRegistry's no-op-unless-different guard,
+// and processMessages.syncActiveMessages' own changed-tracking) - metrics
+// publishes unconditionally, once per orchestrator tick, so ".changed" in
+// the routing key is a slight misnomer for it specifically, kept anyway
+// for one shared scheme rather than a special case.
 export interface ProcessEventEnvelope {
   domain: "process";
   entityId: number;
-  field: "status" | "critical" | "warning" | "metrics";
+  field: "status" | "critical" | "warning" | "metrics" | "messages";
   value: unknown;
   timestamp: string;
   source: string;

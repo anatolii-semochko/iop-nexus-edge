@@ -1,15 +1,12 @@
 import type { FastifyInstance } from "fastify";
 
 import { pool } from "../db.js";
+import * as processMessages from "../processMessages.js";
 import * as processRegistry from "../processRegistry.js";
 
 interface ProcessConfig {
   min?: number;
   max?: number;
-  // Every process (including itself) whose row should highlight when this
-  // process raises its critical flag - see the seed migration for why
-  // (AGENTS.md section 10).
-  linkedProcessIds?: number[];
   // resource-monitor thresholds (AGENTS.md section 21) - percentages, same
   // loose "shape depends on kind" jsonb as min/max above. A threshold of 0
   // (or omitted) means "don't check this metric" - the orchestrator, not
@@ -157,6 +154,55 @@ export async function processRoutes(app: FastifyInstance): Promise<void> {
       return { status: "ok" };
     },
   );
+
+  // Orchestrator-driven only, same as /critical above - the shared WEM
+  // dedup/reconciliation mechanism (AGENTS.md section 22). A process sends
+  // the *complete current set* of codes it considers active for one type
+  // each time it re-evaluates, not just newly-appearing ones - see
+  // processMessages.syncActiveMessages for how that reconciles into
+  // inserted/updated/resolved rows.
+  app.post<{
+    Params: { id: string };
+    Body: {
+      type: processMessages.MessageType;
+      entries: processMessages.MessageInput[];
+      autoResolve?: processMessages.AutoResolveMode;
+    };
+  }>("/processes/:id/messages", async (request, reply) => {
+    const process = await findProcess(request.params.id);
+    if (!process) {
+      return reply.code(404).send({ error: "process not found" });
+    }
+
+    await processMessages.syncActiveMessages(
+      process.id,
+      request.body.type,
+      request.body.entries,
+      "orchestrator",
+      request.body.autoResolve,
+    );
+    return { status: "ok" };
+  });
+
+  // UI-driven dismiss - `hidden` is a single global flag (confirmed with
+  // the user, not per-user), so this hides the message for everyone, not
+  // just whoever clicked it. No :id/messages nesting check against
+  // `messageId` here - a message's own id is already globally unique,
+  // same reasoning as e.g. avatar routes not re-validating the user id.
+  app.patch<{ Params: { messageId: string }; Body: { hidden: boolean } }>(
+    "/process-messages/:messageId",
+    async (request, reply) => {
+      try {
+        await processMessages.setHidden(Number(request.params.messageId), request.body.hidden);
+      } catch (err) {
+        if (err instanceof processMessages.MessageNotDismissableError) {
+          return reply.code(400).send({ error: err.message });
+        }
+        throw err;
+      }
+      return { status: "ok" };
+    },
+  );
 }
 
 async function findProcess(id: string): Promise<ProcessRow | undefined> {
@@ -165,11 +211,12 @@ async function findProcess(id: string): Promise<ProcessRow | undefined> {
 }
 
 async function withLiveState(process: ProcessRow) {
-  const [status, critical, warning, metrics] = await Promise.all([
+  const [status, critical, warning, metrics, messages] = await Promise.all([
     process.type === "controllable" ? processRegistry.getStatus(process.id) : Promise.resolve(undefined),
     processRegistry.getCritical(process.id),
     processRegistry.getWarning(process.id),
     processRegistry.getMetrics(process.id),
+    processMessages.listActiveMessages(process.id),
   ]);
-  return { ...process, status, critical, warning, metrics };
+  return { ...process, status, critical, warning, metrics, messages };
 }

@@ -631,8 +631,7 @@ registry, Redis is live state that changes every tick):
   future work per section 4's "plugin lifecycle"), just a fixed
   `Record<kind, runner>` map (`apps/orchestrator/src/index.ts`).
   `config` is loose jsonb like `devices.capabilities` — shape depends on
-  `kind`; today just `{min, max, linkedProcessIds}` for the temperature-\*
-  kinds.
+  `kind`; today just `{min, max}` for the temperature-\* kinds.
 - Live state — **Redis**, in `apps/api/src/processRegistry.ts` (mirrors
   `dualDevicesModel.ts`): `process:{id}:status` (`on`/`off`, controllable
   only — a `permanent` process has no status key at all, meaningless for
@@ -691,12 +690,22 @@ general concept but nothing uses them yet), `POST /processes/:id/critical`
    State Validator already forbids on the write path (section 6) — this is
    intentional defense-in-depth (a stuck relay or a bypass of the API
    wouldn't go through the validator at all), not redundant dead code.
-   `critical` is raised for every id in `config.linkedProcessIds`
-   (`[1, 2]` for this pair — both itself and the process it watches, so
-   both rows highlight in the UI, not just the monitor's own) and clears
+   `critical` is raised for **this process's own id only** and clears
    itself automatically the instant conditions normalize (confirmed by
    design, not a latch requiring acknowledgment — a deliberate choice, not
-   an oversight).
+   an oversight). Also emits `error`-type WEM entries for the same two
+   conditions (`temperature_out_of_range`, `cooler_heater_conflict` -
+   section 22), so they show up in the UI's message row, not just the
+   boolean flag.
+   **Previously** this also force-propagated its own `critical` onto the
+   `temperature-control` process it watches, via `config.linkedProcessIds`
+   (`[1, 2]` — both itself and the controllable process, so both rows
+   highlighted). Removed — flagged by the user as a kludge from before WEM
+   existed that didn't fit the intended architecture (a permanent
+   monitor's own failure forcing an unrelated controllable process into
+   critical as a side effect). `apps/api/migrations/
+   ..._remove-temperature-monitor-linked-process-ids.ts` strips the now-
+   unused key from the already-seeded row's config.
 
 **UI** (`apps/ui/src/views/processes/ProcessesList.jsx`, nav "Orchestration
 › Processes"): group/type filters, a table row per process — name, group,
@@ -1261,3 +1270,237 @@ sized content instead of nesting percentage heights through it).
 previous CPU sample to diff against (see above) — that one tick reports
 `cpu: 0` and skips both the critical and warning checks entirely rather
 than risk a false reading off a meaningless first sample.
+
+## 22. Logging + WEM (Warnings/Errors/Messages)
+
+First slice of a larger, explicitly-scoped-down logging/notifications
+system - three new Postgres tables and their services, wired into real
+producers, plus one new UI row. Deliberately **not** built yet (per the
+user's own phased request): a Messages Configuration page (group
+management, the warning/error 1-4 level→period scale), a process's own
+"which message groups does this send to" editor, the `messenger` process
+kind that would actually deliver WEM to devices/users/email/SMS, and any
+browsing/filtering UI for the two append-only log tables below - those
+are named as future work, not started.
+
+**`device_command_logs`** (`apps/api/src/deviceCommandLog.ts`) - one row
+per call to any of the Devices API's four mutating endpoints
+(`routes/devices.ts`: write/auto/release/simulate), logged as an
+*attempt*, not gated on success - a rejected command (forbidden state,
+EdgeX 4xx) is often the more interesting thing to audit, so this runs
+before those checks, not after. `source` is always `"api"` today, same
+simplification `dualDevicesModel.ts` itself already makes (it doesn't
+distinguish a human/UI-driven call from an orchestrator-driven one either
+- there's no per-request actor identity to attach, since device routes
+have no auth middleware - AGENTS.md section 13's "deliberately NOT done"
+still holds, not revisited here).
+
+**`sensor_reading_logs`** (`apps/api/src/sensorReadingLog.ts`) - one row
+per readOnly (sensor) resource value, hooked inside
+`dualDevicesModel.publishReading` itself rather than at the `/simulate`
+route that's its only caller today - so a future real EdgeX push/poll
+path (none exists yet - section 6/9 already note this) logs here too
+automatically. No filtering yet, logs unconditionally ("хардкодимо,
+пропускаємо все" per the request) - a real deployment's write volume on
+constrained flash storage is a known, explicitly deferred concern (the
+user's own framing: logs "can in the future be stored externally, e.g. on
+lightweight microcomputers with write limits, or be turned off").
+
+Both of the above are **append-only** and best-effort - modeled on
+`messaging.ts`'s own `publish()` (a logging failure must never break the
+real operation it's observing), each wraps its own insert in try/catch and
+just warns on failure rather than propagating.
+
+**`process_messages`** (`apps/api/src/processMessages.ts`) - WEM proper,
+layered alongside a process's existing `critical`/`warning` Redis flags
+(section 10/21), not a replacement. Unlike the two logs above, a row here
+has a lifecycle, not just a timestamp:
+
+- `code` is a stable machine identifier for *which* condition this is
+  (`"cpu_error"`, not the human-readable text) - what dedup actually
+  compares. `level` is currently just a placeholder integer (`1` for
+  every entry resource-monitor produces) - there's no Messages
+  Configuration page yet to give the 1-4 scale from the original request
+  real meaning.
+- `hidden` is a single **global** flag (confirmed with the user - not
+  per-user; whoever dismisses a message, it's dismissed for everyone).
+- `resolved_at IS NULL` means still active. For `type` `warning`/`error`,
+  set automatically once the condition that raised it clears. For type
+  `message`, **never** set automatically - a message is a one-shot
+  notification ("backup completed at 03:00"), not a condition that can
+  later become false the way a threshold breach can; it only leaves the
+  active list via a user dismissing it (`setHidden`). This distinction
+  was missed in the first pass and corrected mid-session once flagged.
+- A partial unique index, `(process_id, type, code) WHERE resolved_at IS
+  NULL`, enforces "at most one active row per condition" at the DB level
+  too, not just in application code.
+
+**`syncActiveMessages(processId, type, entries, source)`** - the shared
+dedup/reconciliation mechanism the original request asked for ("step 4").
+A process calls this with the *complete current set* of codes it
+considers active for one `type`, not just newly-appearing ones (mirrors
+how `resourceMonitor.ts` already recomputes cpu/ram/disk fully every
+tick, not incrementally). Diffs that against the DB inside one
+transaction: a new code is INSERTed; a still-active code has its
+`level`/`text` refreshed in place *only if they actually changed* (a live
+reading like "CPU at 90%" becoming "CPU at 95%" doesn't count as a new
+occurrence); a code no longer present gets `resolved_at` set (types
+`warning`/`error` only, per above). Publishes the process's complete
+active list (`field: "messages"`, `ProcessEventEnvelope` -
+`messaging.ts`) exactly once per call, and only if something in the diff
+actually changed - same no-redundant-publish principle as
+`setCritical`/`setWarning`, just computed over a set instead of a single
+boolean, since a boolean only has two states to compare and this has to
+diff two code sets. `setHidden` (UI-driven dismiss) publishes the same
+event after toggling, so every viewer's row updates immediately.
+
+**Real producer**: `resourceMonitor.ts` (section 21) now calls
+`apiClient.syncMessages` twice per tick - once for `"error"`, once for
+`"warning"` - one entry per metric that's currently past its respective
+threshold, independent of the row-level `critical`/`warning` flags (so
+CPU and RAM can each carry their own message simultaneously). This was
+the minimal real wiring needed to make the UI row below actually
+demonstrable end-to-end rather than dead code - confirmed live: CPU
+pushed over its error threshold produced `cpu_error`, RAM over its warn
+threshold produced `ram_warning` at the same time, both sorted
+error-first; restoring a threshold auto-resolved and removed its message;
+dismissing one while the condition was still active correctly hid only
+that one row (verified via direct DB/log inspection, not just the UI, to
+rule out a false read from browser-automation testing noise).
+`temperatureMonitor.ts` (section 10) is the second real producer, added
+once the user noticed Temperature Control never showed any WEM entries
+despite raising `critical` - it wasn't wired to `syncMessages` at all
+originally, only the boolean flag.
+
+**Badges**: `apps/ui/src/utils/wem.js`'s `wemBadgeClass(type)` is the one
+shared helper for how WEM-classified text gets colored, used by both
+`WemRow.jsx` (the message list) and `ResourceMonitorPanel.jsx` (each
+metric's own value, badged when its zone is `warning`/`error`, plain when
+`normal`) - a solid/bright background (`bg-danger`/`bg-warning`/
+`bg-success`, not the pale `-subtle` variant used for row highlighting
+elsewhere) with `rounded-pill` corners, always paired with plain black
+text rather than a matching-tinted one - the bright background is already
+the signal, and `ResourceMonitorPanel`'s metric values no longer change
+their *text* color by zone at all (an earlier version did, via
+`text-danger-emphasis`/`text-warning-emphasis` - replaced per explicit
+user direction: text is always black, the background is what changes).
+
+**Row order**: Messages are no longer their own table row at all - they
+render *inside* the detail panel's cell, after the panel's own content
+(`ProcessesList.jsx`'s `ProcessRow`: plain row → [detail panel + `WemRow`]
+as one cell, only when expanded). Earlier versions gave Messages their own
+row, first below the panel, then above it, independent of expand/collapse
+- both left the collapsed table jumping up/down as conditions came and
+went, since a row could appear/disappear at any time regardless of user
+action. Nesting `WemRow` inside the already-expandable panel cell means
+messages only ever show once the user has deliberately opened that
+process, so the collapsed table's layout is stable no matter what's
+happening underneath. This also simplified the border logic: the plain
+row drops its bottom border exactly when `expanded && Panel`, and the
+panel row (when it renders) is unconditionally last, no more conditional
+border-dropping needed on `WemRow` itself.
+
+**Dismiss only applies to `type: "message"`** - clarified after the first
+pass had every type's `.btn-close` wired up the same way. An error/warning
+is tied to a live condition; it's visible for exactly as long as that
+condition holds and leaves the active list on its own once resolved (via
+`syncActiveMessages`), with **no** user-facing way to hide it early. Only
+a one-shot `message` (no ongoing condition to clear) leaves the active
+list via the user reading and dismissing it. Enforced twice, not just
+once:
+- **UI** (`WemRow.jsx`) only renders the `.btn-close` when
+  `message.type === "message"` - error/warning lines render with no
+  dismiss control at all.
+- **API** (`processMessages.setHidden`) independently rejects
+  `hidden: true` for any other type before touching the row, throwing
+  `MessageNotDismissableError` - caught in `routes/processes.ts`'s PATCH
+  handler and turned into a 400 - so a stray/non-UI call can't hide an
+  active error/warning either, same defense-in-depth reasoning as
+  `temperature-monitor`'s independent safety check.
+
+**API surface** (`routes/processes.ts`): `POST /processes/:id/messages`
+(orchestrator-only, body `{ type, entries }`) and `PATCH
+/process-messages/:messageId` (UI-driven, body `{ hidden }` - no
+`:id/messages` nesting check, a message's own id is already globally
+unique; 400 if `hidden: true` targets a non-`message` entry, per above).
+`GET /processes`/`GET /processes/:id` merge in `messages:
+ProcessMessage[]` (active, non-hidden, pre-sorted) via
+`listActiveMessages`, same "REST gives the initial snapshot, the live
+feed keeps it current" role `metrics`/`critical`/`warning` already play.
+`listActiveMessages`'s sort tiebreaks on `created_at` via `new Date(...)`,
+not `.localeCompare` - `pg` hands back `timestamptz` columns as `Date`
+objects, not strings, so the original `.localeCompare` only surfaced once
+two active entries actually tied on type+level (single-message testing
+never exercises that path) and then threw, 500-ing `GET /processes`
+entirely.
+
+**UI** (`apps/ui/src/views/processes/WemRow.jsx`): a plain content block
+(not a table row - see "Row order" above) rendered as the last thing
+inside a process's own detail panel cell, right after `<Panel />`, only
+when that process is both expanded and has a panel for its kind
+(`KIND_PANELS`) - a process kind with no panel currently has no way to
+show messages either, but every real WEM producer today (`resource-
+monitor`, `temperature-monitor`) does have one. Each message is its own
+line, numbered continuously (not renumbered per type) in already-server-
+sorted order, colored per its own `type` via the shared `wemBadgeClass`
+helper (see "Badges" above) - not per the row as a whole, since one
+process can have errors, warnings, and messages active concurrently. A
+small `.btn-close`, only on `message` lines (see above), calls `PATCH
+/process-messages/:id`.
+
+**Disk-specific `message` notice** (`resourceMonitor.ts`): on top of the
+regular per-metric error/warning entries every metric gets, Disk
+additionally gets a `message` (`disk_warning_notice`/`disk_error_notice`)
+whenever it's over its warning/error max - CPU and RAM deliberately don't
+get this, it's Disk-only by request, not a fourth generic per-metric
+loop. Sent via its own `syncMessages(process.id, "message", entries,
+"when-hidden")` call, same tick as the existing error/warning calls.
+
+That trailing `"when-hidden"` is `autoResolve` (`syncActiveMessages`'s
+5th param, added after this notice first shipped, type
+`"always" | "when-hidden" | "never"`) - **not** the default for `type:
+"message"` (`"never"`), and deliberately overridden here. Went through
+two bugs before landing on this three-way design; both real user reports
+against the same feature:
+
+1. First version left `autoResolve` at its `"never"` default. A dismissed
+   notice then stayed hidden forever: `syncActiveMessages` had no signal
+   it ever needed resolving, so a later re-trigger just re-found the same
+   still-hidden row by its unchanging code and rewrote its text in place
+   - reported as "closed it, then raised and lowered the limits again, no
+   new message ever showed back up."
+2. Fixed by adding a plain boolean `autoResolve: true`, resolving the row
+   unconditionally whenever Disk dropped back under threshold - **whether
+   or not the user had dismissed it yet**. That broke rule 1 the other
+   way: a message the user hadn't closed would vanish on its own the
+   instant Disk normalized, reported as "the green message disappears
+   together with the warning condition, but it should only disappear when
+   someone hides it."
+
+The fix for both at once is conditioning resolution on `hidden`, not
+applying it unconditionally: `"when-hidden"` only resolves a row on a
+missing code if that row is *already* dismissed (`hidden = true`) -
+that's the case that needs a fresh row to appear when the condition later
+re-triggers. A row still showing (`hidden = false`) is left alone even
+after its code goes missing, so it keeps satisfying "message: visible
+until the user closes it" (rule 1) with no time limit tied to the
+underlying reading. Once the user does dismiss it, the *next* tick where
+the code is still missing (or already was) resolves it then, via the same
+codepath - `resolved_at` and `hidden` are independent columns throughout,
+dismissing never touches the former and resolving never touches the
+latter. A later re-trigger finds no still-active row for that code (the
+old one now has `resolved_at` set, outside the partial unique index's
+`WHERE resolved_at IS NULL` scope) and INSERTs a fresh one - undismissed,
+back in the active list.
+
+`"always"` (the default for warning/error) resolves unconditionally,
+matching their original behavior exactly - they're never dismissable in
+the first place (`hidden` is always `false` for them), so `"always"` and
+`"when-hidden"` would coincide for that type anyway; `"always"` is kept
+explicit rather than derived, since it's the simpler/original semantics
+and doesn't depend on this notice's later fixes. `"never"` remains the
+default for `type: "message"` overall, correct for a true one-shot
+notification that's sent once and never re-asserted (e.g. the still-
+hypothetical "backup completed at 03:00") - such a producer has no
+"missing from this call" signal to act on in the first place, since it
+only ever calls once.

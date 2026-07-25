@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { CCol, CRow } from '@coreui/react'
 import { api } from '../../api/client'
 import { useProcessLiveState } from '../../api/useLiveProcess'
+import { wemBadgeClass } from '../../utils/wem'
 import NumericStepper from '../devices/NumericStepper'
 import ResourceLevelsChart, { MAX_SAMPLES } from './ResourceLevelsChart'
 
@@ -13,20 +14,14 @@ const METRIC_ROWS = [
 
 // A threshold of 0 (or unset) disables that check - same rule as the
 // orchestrator's own `exceeds()` (resourceMonitor.ts, AGENTS.md section
-// 21). Purely a display concern: this only decides which class colors
-// *this one metric's* current-value text, independent of the row-level
+// 21). Purely a display concern: this only decides which badge colors
+// *this one metric's* current-value chip, independent of the row-level
 // critical/warning flags the orchestrator computes for the whole process.
 const zoneFor = (value, warnMax, errorMax) => {
   if (value === undefined) return 'normal'
   if (errorMax && value > errorMax) return 'error'
   if (warnMax && value > warnMax) return 'warning'
   return 'normal'
-}
-
-const ZONE_CLASS = {
-  error: 'text-danger-emphasis',
-  warning: 'text-warning-emphasis',
-  normal: '',
 }
 
 /**
@@ -88,8 +83,13 @@ const ResourceMonitorPanel = ({ process, onConfigChange }) => {
               <CCol xs="auto" style={{ width: '6.5rem' }}>
                 <div className="text-body-secondary small">{label}</div>
                 <div
-                  className={ZONE_CLASS[zone]}
-                  style={{ fontSize: '1.9rem', fontWeight: 600, lineHeight: 1, whiteSpace: 'nowrap' }}
+                  className={`text-black d-inline-block ${zone === 'normal' ? '' : `${wemBadgeClass(zone)} px-2`}`}
+                  style={{
+                    fontSize: '1.9rem',
+                    fontWeight: 600,
+                    lineHeight: 1,
+                    whiteSpace: 'nowrap',
+                  }}
                 >
                   {value !== undefined ? `${value.toFixed(1)}%` : '-'}
                 </div>

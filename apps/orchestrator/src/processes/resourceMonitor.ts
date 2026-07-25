@@ -18,7 +18,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 
-import { apiClient, type ProcessRecord } from "../apiClient.js";
+import { apiClient, type MessageInput, type ProcessRecord } from "../apiClient.js";
 
 // os.cpus() reports cumulative tick counts since boot, not a point-in-time
 // load - CPU% needs the delta between two samples, kept in module scope
@@ -76,6 +76,12 @@ function exceeds(value: number, threshold: number | undefined): boolean {
   return threshold !== undefined && threshold !== 0 && value > threshold;
 }
 
+const METRICS = [
+  { key: "cpu", label: "CPU" },
+  { key: "ram", label: "RAM" },
+  { key: "disk", label: "Disk" },
+] as const;
+
 export async function runResourceMonitor(process: ProcessRecord): Promise<void> {
   const { cpuMax, ramMax, diskMax, cpuWarnMax, ramWarnMax, diskWarnMax } = process.config;
 
@@ -93,6 +99,10 @@ export async function runResourceMonitor(process: ProcessRecord): Promise<void> 
 
   await apiClient.setMetrics(process.id, { cpu, ram, disk });
 
+  const values = { cpu, ram, disk };
+  const maxByKey = { cpu: cpuMax, ram: ramMax, disk: diskMax };
+  const warnMaxByKey = { cpu: cpuWarnMax, ram: ramWarnMax, disk: diskWarnMax };
+
   const critical = exceeds(cpu, cpuMax) || exceeds(ram, ramMax) || exceeds(disk, diskMax);
   // Only reported once it's not already critical - error takes precedence
   // over warning (a red row, not a yellow one, once past the error max).
@@ -100,4 +110,62 @@ export async function runResourceMonitor(process: ProcessRecord): Promise<void> 
 
   await apiClient.setCritical(process.id, critical);
   await apiClient.setWarning(process.id, warning);
+
+  // WEM (AGENTS.md section 22) - per metric, not per overall critical/
+  // warning flag above, so e.g. CPU and RAM can each show their own
+  // message if both happen to be over threshold at once. `level` is a
+  // placeholder 1 for every entry - there's no Messages Configuration
+  // page yet (deferred) to give the 1-4 level scale real meaning.
+  const errorEntries: MessageInput[] = [];
+  const warningEntries: MessageInput[] = [];
+  for (const { key, label } of METRICS) {
+    const value = values[key];
+    if (exceeds(value, maxByKey[key])) {
+      errorEntries.push({
+        code: `${key}_error`,
+        level: 1,
+        text: `${label} at ${value.toFixed(1)}% exceeds error threshold ${maxByKey[key]}%`,
+      });
+    } else if (exceeds(value, warnMaxByKey[key])) {
+      warningEntries.push({
+        code: `${key}_warning`,
+        level: 1,
+        text: `${label} at ${value.toFixed(1)}% exceeds warning threshold ${warnMaxByKey[key]}%`,
+      });
+    }
+  }
+  await apiClient.syncMessages(process.id, "error", errorEntries);
+  await apiClient.syncMessages(process.id, "warning", warningEntries);
+
+  // Disk-only addition on top of the generic error/warning above: a
+  // `message` notice (AGENTS.md section 22 - dismissible via the UI's X,
+  // unlike the plain warning/error entries above it). CPU/RAM
+  // deliberately don't get this - just the standard error/warning
+  // entries above - this is Disk-specific by request, not a fourth
+  // generic per-metric loop.
+  //
+  // `autoResolve: "when-hidden"` (unlike a true one-shot message) - this
+  // producer re-evaluates and re-asserts the same code every tick for as
+  // long as Disk stays over threshold, exactly like the warning/error
+  // entries do, so a *dismissed* notice should still resolve once Disk
+  // drops back down (letting a later re-trigger surface a fresh,
+  // undismissed row instead of silently rewriting the still-hidden one in
+  // place) - but a notice the user hasn't dismissed yet must stay visible
+  // even after Disk drops back down, per rule 1 ("message: visible until
+  // the user closes it"), which plain `"always"` would violate.
+  const messageEntries: MessageInput[] = [];
+  if (exceeds(disk, diskMax)) {
+    messageEntries.push({
+      code: "disk_error_notice",
+      level: 1,
+      text: `Disk at ${disk.toFixed(1)}% exceeds error threshold ${diskMax}%`,
+    });
+  } else if (exceeds(disk, diskWarnMax)) {
+    messageEntries.push({
+      code: "disk_warning_notice",
+      level: 1,
+      text: `Disk at ${disk.toFixed(1)}% exceeds warning threshold ${diskWarnMax}%`,
+    });
+  }
+  await apiClient.syncMessages(process.id, "message", messageEntries, "when-hidden");
 }

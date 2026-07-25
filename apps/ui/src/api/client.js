@@ -71,6 +71,12 @@ export const api = {
     request(`/processes/${id}/config`, { method: 'PATCH', body: JSON.stringify(config) }),
   doProcessAction: (id, action) =>
     request(`/processes/${id}/action`, { method: 'POST', body: JSON.stringify({ action }) }),
+  // WEM (AGENTS.md section 22) - global dismiss, not per-user.
+  hideMessage: (messageId) =>
+    request(`/process-messages/${messageId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ hidden: true }),
+    }),
   // Process groups (AGENTS.md section 10/17 - a real, admin-managed entity).
   listProcessGroups: () => request('/process-groups'),
   createProcessGroup: (name) =>

@@ -36,6 +36,7 @@ import { usePersistedState } from '../../hooks/usePersistedState'
 import LiveBadge from '../devices/LiveBadge'
 import ResourceMonitorPanel from './ResourceMonitorPanel'
 import TemperatureProcessPanel from './TemperatureProcessPanel'
+import WemRow from './WemRow'
 
 // Registration for usePersistedState (AGENTS.md section 17) - these five
 // fields, and only these, survive a refresh; every key's value here is
@@ -74,6 +75,9 @@ const ProcessRow = ({ process, expanded, onToggleExpand, onReload, onError }) =>
   // Error always wins over warning (AGENTS.md section 21) - a row is never
   // both, so this is a simple precedence pick, not two independent styles.
   const rowColor = critical ? 'danger' : warning ? 'warning' : undefined
+  // Only actually rendered once the row is expanded (AGENTS.md section
+  // 22) - see WemRow below, nested at the end of the detail panel.
+  const messages = live.messages ?? process.messages ?? []
   // Which specific action is in flight, not a single shared boolean - only
   // the button the user actually clicked shows a spinner; the other one
   // (already disabled, since it matches the pre-click status) never did.
@@ -92,10 +96,11 @@ const ProcessRow = ({ process, expanded, onToggleExpand, onReload, onError }) =>
   }
 
   const Panel = KIND_PANELS[process.kind]
-  // While a row is expanded, its own bottom border would sit right between
-  // it and its detail panel, reading as an odd extra divider inside what's
-  // visually one block - drop it there and let the panel row's own bottom
-  // border be the only line, separating this whole process from the next.
+  // Messages now render *inside* the expanded detail panel itself (its
+  // last piece, after Panel's own content - see WemRow.jsx), not as their
+  // own always-visible row - so they can no longer make the collapsed
+  // table jump when they appear/disappear, and the only row that can ever
+  // follow the plain row is the panel row.
   const noBorderWhenExpanded = expanded && Panel ? 'border-bottom-0' : undefined
 
   return (
@@ -140,6 +145,7 @@ const ProcessRow = ({ process, expanded, onToggleExpand, onReload, onError }) =>
         <CTableRow color={rowColor}>
           <CTableDataCell colSpan={5} className="p-0">
             <Panel process={process} onConfigChange={onReload} />
+            <WemRow messages={messages} />
           </CTableDataCell>
         </CTableRow>
       )}
