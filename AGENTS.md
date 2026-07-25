@@ -1107,6 +1107,16 @@ make down / make down-all
 No service is expected to run outside Docker. See `Makefile` for all
 available targets.
 
+Postgres is reachable from the host (not just from other containers) at
+`127.0.0.1:${POSTGRES_HOST_PORT}` (default `55432`, e.g. `psql -h
+127.0.0.1 -p 55432 -U $POSTGRES_USER -d $POSTGRES_DB`) - a separate .env
+variable from `POSTGRES_PORT`, which is what containers use to reach each
+other over the docker network and stays `5432` regardless. Deliberately
+non-standard so it doesn't collide with a Postgres already running
+natively on the host's own `5432`. Redis/RabbitMQ don't have an
+equivalent - their host-side `ports:` mappings in `docker-compose.yml`
+still reuse `REDIS_PORT`/`RABBITMQ_PORT` directly, unchanged.
+
 ## 21. Resource Monitor (`resource-monitor` process kind)
 
 A permanent host-health process (`apps/orchestrator/src/processes/
