@@ -35,6 +35,14 @@ export interface ProcessRecord {
     diskWarnMax?: number;
   };
   status?: "on" | "off";
+  // Fleet-wide, unfiltered by any user's "hidden" dismissal (AGENTS.md's
+  // Active Zummer section) - the active-buzzer process reads these across
+  // every process to decide whether to sound, deliberately not the
+  // `messages` field GET /processes also returns (that one excludes
+  // hidden entries, which would let a dismissed notification silence a
+  // still-active physical alarm).
+  critical: boolean;
+  warning: boolean;
 }
 
 export interface ProcessMetrics {
@@ -64,9 +72,24 @@ export interface DeviceRecord {
   resources: Record<string, DeviceReading | null>;
 }
 
+// Mirrors apps/api's message_levels row shape (AGENTS.md's Active Zummer
+// section) - see apps/orchestrator/src/alarmPolicy.ts for what consumes
+// this.
+export interface MessageLevelRecord {
+  type: "warning" | "error";
+  level: number;
+  mode: "off" | "constant" | "shortBeep" | "longBeep";
+  period_deciseconds: number;
+}
+
 export const apiClient = {
   listProcesses: () => request<ProcessRecord[]>("/processes"),
   getDevice: (deviceId: number) => request<DeviceRecord>(`/devices/${deviceId}`),
+  // AGENTS.md's Active Zummer section - the admin-configured beep policy
+  // per (type, level), read fresh every tick rather than cached, since an
+  // admin edit in Settings -> Message Levels should take effect on the
+  // very next tick, not require an orchestrator restart.
+  getMessageLevels: () => request<MessageLevelRecord[]>("/message-levels"),
   // Orchestrator-driven write - only reaches EdgeX while the resource is
   // still AUTO (AGENTS.md section 6); always records the intended value
   // even while a human has it overridden MANUAL via the UI.

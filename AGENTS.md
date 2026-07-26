@@ -2198,3 +2198,139 @@ size every other `size="sm"` control in the row uses, section 23's
 original finding). `active` prop controls its own visibility (`null` when
 false) - one prop covers both "should this render" and "onClick", not two
 things every caller has to gate separately.
+
+## 27. Active Zummer (first sound-output process/device)
+
+The platform's first physical-alarm device and the first real consumer of
+Message Levels (section 22/23's `message_levels` table, which sat as
+config-storage only until now). A single active buzzer - built-in tone
+generator, driven purely 0/1 - modeled as a real device type under
+`devices/standalone/active-buzzer/` (same layout as `light-regulator`,
+section 7): `contract.schema.ts`, `edgex-device-profile.yaml` (mirrored
+into `apps/device-service/res/profiles/NexusEdge-ActiveBuzzer.yaml` +
+`res/devices/active-buzzer-devices.yaml`, seeded into Postgres by
+`apps/api/migrations/..._seed-active-buzzer-device.ts` - device `active-
+buzzer-01`, single non-`readOnly` `Buzzer` resource, ordinary AUTO/MANUAL
+actuator like Cooler/Heater, not a sensor). No `runtime/`/`firmware/` yet -
+same reasoning as light-regulator, nothing for either to add over the
+generic Virtual Node Runtime, and no hardware exists yet. **Real mapping,
+not built yet**: CAN -> STM32 -> a single digital output port (Port0/1) -
+the user's own stated plan, to be implemented once the ordered hardware
+arrives.
+
+**Process**: `active-buzzer` kind, "Active Zummer", controllable (`ON`/
+`OFF` - an operator can globally silence/enable the feature, same Switch
+UI as Temperature Control), seeded by `apps/api/migrations/..._seed-
+active-buzzer-process.ts` into the existing `System` process group,
+`device_id` -> `active-buzzer-01`. No process-level config (unlike
+Temperature Control's min/max) - the entire beep policy lives in
+`message_levels`, shared across every future sound-output process, not
+duplicated per-process.
+
+### Alarm policy (`apps/orchestrator/src/alarmPolicy.ts`)
+
+A new shared module, deliberately not buried inside the buzzer's own
+process file - the user's own stated plan is more than one sound-output
+device eventually (some controllable, some not), each needing the same
+priority/lookup logic without re-deriving it. `determineAlarmPlan(
+activeLevelsByType, messageLevels)`:
+
+- **Priority**: `ALARM_TYPE_PRIORITY = ["error", "warning"]` - error always
+  wins today (confirmed with the user, who explicitly said priority
+  handling will grow later - more types, and real per-producer severity
+  levels beyond the placeholder `1` every kind sends today). An ordered
+  array, not a hardcoded if/else, so extending this later is a one-line
+  change here, not a rewrite of every caller.
+- Within the winning type, the *highest* active level wins; that exact
+  `(type, level)` row's `mode`/`period_deciseconds` (Settings -> Message
+  Levels, already-existing UI, no changes needed there) is the plan. A
+  configured `"off"` at the winning type/level stops there - it does
+  **not** fall through to a lower-priority type, since the higher-priority
+  condition is still genuinely active; the admin simply chose silence for
+  it. This "off doesn't fall through" behavior is a deliberate design
+  choice (not explicitly specified by the user), reasoned from how a real
+  hierarchical alarm panel behaves - revisit if that turns out wrong.
+- Only level 1 is real today for both types (matches the user's own
+  request scope - "error 1", "warning 1"; levels 2-4 deferred, same as
+  every other level already was).
+
+**Safety-critical data source**: `activeLevelsByType` is deliberately
+**not** derived from any process's `messages` array (`GET /processes`'
+`withLiveState`) - that field excludes entries a user has hidden
+(dismissed) in the notification center (section 22/25), and a dismissed
+notification must never silence a still-active physical alarm (dismissing
+means "I've seen it", not "the condition cleared"). Instead,
+`activeBuzzer.ts` derives a synthetic `[1]`/`[]` per type straight from
+the existing unfiltered `critical`/`warning` booleans (`process.critical`/
+`process.warning`, now also declared on `apiClient.ts`'s `ProcessRecord` -
+previously undeclared there even though `GET /processes` always returned
+them, since no orchestrator process had ever needed to *read* another
+process's flags before this one).
+
+### Private tick (`apps/orchestrator/src/processes/activeBuzzer.ts`)
+
+The shared 1s `RUNNERS` tick (`index.ts`) is too coarse to pulse a buzzer
+sub-second, so `runActiveBuzzer` only *decides*, once a second, whether a
+private per-process timer should be running and with what period - the
+timer itself does the actual fast toggling, independent of the main loop:
+
+- `constant` mode needs no timer - `Buzzer` is just held `true` directly
+  for as long as the condition (and the process) stays on, exactly as the
+  original request specified ("постійний сигнал обробляється без тіку").
+- `shortBeep`/`longBeep` start a `setInterval` at the admin's own
+  `period_deciseconds` (the repeat cadence, already user-editable); each
+  firing sets `Buzzer` true then a `setTimeout` turns it back off after a
+  fixed **on-duration constant** - `SHORT_BEEP_ON_DECISECONDS = 2` (200ms
+  chirp) / `LONG_BEEP_ON_DECISECONDS = 8` (800ms tone), invented defaults
+  since no real hardware/spec existed yet to derive them from (per the
+  user's own instruction: the per-level `mode` choice is *which* of these
+  two fixed patterns plays, not a per-level tunable duration). Clamped to
+  never exceed the period itself, so a misconfigured short period doesn't
+  produce a negative off-window.
+- Timers are keyed by `process.id` (a `Map`), not a single module-level
+  handle - nothing stops a second buzzer-kind process existing later.
+  Restarts only when `mode`/`periodDeciseconds` actually changed (not
+  every tick) - same "no-op when nothing changed" discipline as
+  `setCritical`/`setWarning`.
+- `ON`->`OFF` edge handling mirrors `temperatureControl.ts` exactly: forces
+  `Buzzer` false (and stops any running timer) once, on the transition,
+  not unconditionally every tick while off.
+- Reaction latency to a condition resolving is up to 1s (the shared tick's
+  own cadence) before the private timer stops - acceptable and consistent
+  with every other kind's `critical`/`warning` transition latency; only
+  the beep *pattern itself* needed sub-second precision, not the
+  react-to-resolution edge.
+
+`apiClient.ts` gained `getMessageLevels()` (`GET /message-levels`, read
+fresh every tick - an admin edit in Settings should take effect on the
+very next tick, not require a restart) and a `MessageLevelRecord` type
+mirroring the table's own snake_case `period_deciseconds` (no camelCase
+transform happens server-side for reads, only the PATCH body accepts
+camelCase).
+
+### UI
+
+`apps/ui/src/views/processes/ActiveBuzzerPanel.jsx` (new `KIND_PANELS`
+entry) - no config to edit (unlike Temperature Control), just a live
+visualization via the shared `BuzzerIndicator` atom (section 26 - built
+ahead of time, unwired, specifically for this) fed by
+`useDeviceLiveState(process.device_id)`, same live-preferred-over-REST
+pattern as `TemperatureProcessPanel`. `devices/standalone/active-buzzer/
+ui/control/ActiveBuzzerControl.jsx` (registered in `DeviceDetail.jsx`'s
+`DEVICE_TYPE_CONTROLS`, matching light-regulator's convention) is a
+separate, self-contained lamp - device-type components can't import
+`BuzzerIndicator` directly (cross-package `@coreui/react`/app-component
+boundary, section 7), so it's visually identical but independently
+implemented. No custom `ui/simulator` - a plain `Bool` actuator is already
+well served by the Dev Simulator's generic instant checkbox, unlike
+light-regulator's ranged `Level`.
+
+Verified live: `error` level 1 set to `constant` sounded the buzzer solid
+the instant a real error (Temperature Safety Monitor) went active, and
+silenced it the instant the condition cleared - no page reload, in both
+the Processes panel and the Devices detail page. `warning` level 1 set to
+`longBeep` at a fast test period showed genuine on/off pulsing (sampled
+device state across ~2s). Turning the process `OFF` mid-error correctly
+forced and held the buzzer silent despite the fleet-wide error staying
+active, then resumed reacting to it immediately on `ON`. Console clean
+throughout; test thresholds/periods reset to their prior values afterward.

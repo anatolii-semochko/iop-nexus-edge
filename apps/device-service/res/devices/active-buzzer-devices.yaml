@@ -1,0 +1,15 @@
+# The Active Zummer device instance (devices/standalone/active-buzzer/,
+# AGENTS.md section 7) - separate file from example-devices.yaml, which is
+# the smoke-test fixture only.
+deviceList:
+  - name: "active-buzzer-01"
+    profileName: "NexusEdge-ActiveBuzzer"
+    description: "Active buzzer with built-in tone generator"
+    labels:
+      - "actuator"
+      - "standalone"
+    protocols:
+      backend:
+        mode: "virtual"
+      virtual:
+        "initial.Buzzer": false

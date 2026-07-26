@@ -26,6 +26,7 @@ import TablePagination from '../../components/table/TablePagination'
 import TableSearchInput from '../../components/table/TableSearchInput'
 import { useExpandableRows } from '../../hooks/useExpandableRows'
 import { usePagination } from '../../hooks/usePagination'
+import ActiveBuzzerPanel from './ActiveBuzzerPanel'
 import ProcessSettingsModal from './ProcessSettingsModal'
 import ResourceMonitorPanel from './ResourceMonitorPanel'
 import TemperatureProcessPanel from './TemperatureProcessPanel'
@@ -34,11 +35,13 @@ import WemRow from './WemRow'
 // process.kind -> its expandable detail component (AGENTS.md section 10).
 // Same plain-map approach as DEVICE_TYPE_SIMULATORS/DEVICE_TYPE_CONTROLS in
 // the Devices pages - temperature-control/-monitor share one panel,
-// resource-monitor (section 21) has its own.
+// resource-monitor (section 21) has its own, active-buzzer (Active Zummer
+// section) has its own.
 export const KIND_PANELS = {
   'temperature-control': TemperatureProcessPanel,
   'temperature-monitor': TemperatureProcessPanel,
   'resource-monitor': ResourceMonitorPanel,
+  'active-buzzer': ActiveBuzzerPanel,
 }
 
 const statusColor = (status) => (status === 'on' ? 'success' : 'secondary')

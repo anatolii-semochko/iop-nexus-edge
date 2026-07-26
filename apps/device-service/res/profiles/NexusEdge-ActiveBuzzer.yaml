@@ -1,0 +1,23 @@
+# Real device type, provisioned under devices/ (AGENTS.md section 7) -
+# source of truth is devices/standalone/active-buzzer/contract.schema.ts,
+# kept identical here by hand (no automated provisioning flow yet - see
+# that folder's docs/README.md).
+apiVersion: "v2"
+name: "NexusEdge-ActiveBuzzer"
+manufacturer: "NexusEdge"
+model: "active-buzzer-01"
+labels:
+  - "actuator"
+  - "standalone"
+description: "Active buzzer with built-in tone generator - single binary output"
+
+deviceResources:
+  - name: "Buzzer"
+    isHidden: false
+    description: "Built-in generator - true sounds, false is silent"
+    properties:
+      valueType: "Bool"
+      readWrite: "RW"
+      defaultValue: "false"
+
+deviceCommands: []
