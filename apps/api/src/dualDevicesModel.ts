@@ -13,6 +13,7 @@
 import { logger } from "./logger.js";
 import { publishDeviceEvent } from "./messaging.js";
 import { redis } from "./redis.js";
+import { logReading } from "./sensorReadingLog.js";
 
 export type Mode = "AUTO" | "MANUAL";
 
@@ -100,7 +101,11 @@ async function publishState(deviceId: number, resource: string, state: ResourceS
  * readOnly (sensor) resource that has no Dual Devices Model state at all -
  * no `dvm:*` keys, no mode/valueAuto/valueManual, just the value itself.
  * Called from the .../simulate write path (routes/devices.ts), which is
- * the only way such a resource's value ever changes.
+ * the only way such a resource's value ever changes today - and, once a
+ * real EdgeX push/poll path exists, where that would call in too, which is
+ * exactly why sensor_reading_logs (AGENTS.md section 22) is logged from
+ * here rather than from the /simulate route itself: every reading gets
+ * logged regardless of where it actually came from.
  */
 export async function publishReading(deviceId: number, resource: string, value: unknown, source: string): Promise<void> {
   const timestamp = new Date().toISOString();
@@ -110,6 +115,7 @@ export async function publishReading(deviceId: number, resource: string, value: 
     logger.warn({ err, deviceId, resource }, "failed to refresh state cache");
   }
 
+  await logReading({ deviceId, resource, value, source });
   await publishDeviceEvent({ domain: "device", entityId: deviceId, resource, value, timestamp, source });
 }
 

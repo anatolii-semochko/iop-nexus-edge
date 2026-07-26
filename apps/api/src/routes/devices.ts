@@ -2,6 +2,7 @@ import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 
 import * as dualDevicesModel from "../dualDevicesModel.js";
 import { pool } from "../db.js";
+import { logCommand } from "../deviceCommandLog.js";
 import { EdgeXError, listEdgeXDevices, readResource, writeResource, type EdgeXDeviceStatus } from "../edgex.js";
 import { resourcesNeededFor, validateWrite, type ForbiddenRule } from "../validator.js";
 
@@ -119,6 +120,12 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
           .send({ error: `resource '${resource}' is read-only - it has no AUTO/MANUAL mode`, hint: "use .../simulate for dev testing" });
       }
 
+      // Logged as an attempt, not just a success (AGENTS.md section 22) -
+      // a rejected command is often the more interesting thing to audit,
+      // so this runs before the forbidden-state/EdgeX checks below, not
+      // gated on them succeeding.
+      await logCommand({ deviceId: device.id, resource, action: "write", value, source: "api" });
+
       const forbidden = await checkForbidden(device, resource, value, device.edgex_device_name, app.log);
       if (!forbidden.ok) {
         return reply.code(409).send({ error: "forbidden state", reason: forbidden.reason });
@@ -154,6 +161,8 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
           .send({ error: `resource '${resource}' is not read-only`, hint: `use PUT .../resources/${resource} instead` });
       }
 
+      await logCommand({ deviceId: device.id, resource, action: "simulate", value, source: "api" });
+
       if (!(await writeOrReject(reply, device.edgex_device_name, resource, value))) return;
       // No Dual Devices Model state for a readOnly resource, but the new
       // reading still needs to reach the state:* cache and nexus.events -
@@ -166,9 +175,8 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
 
   // Orchestrator-driven equivalent of the write path above: records
   // valueAuto, but only reaches EdgeX if the resource is currently in AUTO
-  // mode (a manual override keeps winning until released). Nothing calls
-  // this yet - apps/orchestrator has no automation logic yet - but it's the
-  // real Devices API surface for when it does.
+  // mode (a manual override keeps winning until released). Called every
+  // tick by apps/orchestrator/src/processes/temperatureControl.ts.
   app.put<{ Params: { id: string; resource: string }; Body: { value: unknown } }>(
     "/devices/:id/resources/:resource/auto",
     async (request, reply) => {
@@ -184,6 +192,8 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
       if (findResourceCapability(device, resource)?.readOnly) {
         return reply.code(400).send({ error: `resource '${resource}' is read-only - it has no AUTO/MANUAL mode` });
       }
+
+      await logCommand({ deviceId: device.id, resource, action: "auto", value, source: "api" });
 
       const forbidden = await checkForbidden(device, resource, value, device.edgex_device_name, app.log);
       if (!forbidden.ok) {
@@ -211,6 +221,8 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
       if (findResourceCapability(device, resource)?.readOnly) {
         return reply.code(400).send({ error: `resource '${resource}' is read-only - it has no AUTO/MANUAL mode` });
       }
+
+      await logCommand({ deviceId: device.id, resource, action: "release", source: "api" });
 
       const state = await dualDevicesModel.release(device.id, resource);
       if (state.valueAuto !== undefined) {

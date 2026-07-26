@@ -2,28 +2,71 @@ import { useEffect, useState } from 'react'
 import { subscribeToLiveEvents } from './liveSocket'
 
 /**
- * Live per-process overlay - {status, critical} - patched in as events
- * arrive over the shared WebSocket (apps/messaging-gateway, AGENTS.md
- * section 9/10), on top of whatever a page already loaded via REST.
- * Subscribes once, keyed by every process's own id - same reasoning as
- * useDeviceLiveState (apps/ui/src/api/useLiveDevice.js): avoids a
- * setState-in-effect reset and keeps one shared listener regardless of how
- * many process rows are on screen.
+ * Live state for every process at once - {[id]: {status, critical,
+ * warning, metrics, messages, dashboardFlaggedAt}} - patched in as events
+ * arrive over the shared WebSocket (apps/messaging-gateway). AGENTS.md
+ * section 24: every message on `event.domain === 'process'` is a full
+ * fleet-wide snapshot (`event.processes`, one entry per process), so a
+ * *single* incoming event replaces every process's entry in one pass, not
+ * one field on one process at a time the way the retired per-field scheme
+ * did. `useProcessLiveState` below is the common per-row case; this one is
+ * for a caller that needs to look across every process at once (Dashboard
+ * tab eligibility - see DashboardTab.jsx) rather than one row's own
+ * overlay.
+ *
+ * Cadence note: `metrics`/`status`/`dashboardFlaggedAt` only refresh on the
+ * broadcast's own timer (`PROCESS_STATE_BROADCAST_INTERVAL_MS`, default 5s
+ * - not the orchestrator's 1s compute tick) unless a `critical`/`warning`/
+ * new-message change on *some* process piggybacks an urgent broadcast
+ * sooner - a resource-monitor panel's live chart samples at that same
+ * cadence now, not every second.
  */
-export function useProcessLiveState(processId) {
+export function useProcessesLiveState() {
   const [byProcess, setByProcess] = useState({})
 
   useEffect(
     () =>
       subscribeToLiveEvents(({ event }) => {
-        if (event.domain !== 'process') return
-        setByProcess((prev) => ({
-          ...prev,
-          [event.entityId]: { ...prev[event.entityId], [event.field]: event.value },
-        }))
+        if (event.domain !== 'process' || event.eventType !== 'snapshot') return
+        setByProcess((prev) => {
+          const next = { ...prev }
+          for (const entry of event.processes) {
+            next[entry.id] = entry
+          }
+          return next
+        })
       }),
     [],
   )
 
-  return byProcess[processId] ?? {}
+  return byProcess
+}
+
+/** One process's own slice of useProcessesLiveState above - the common
+ * per-row case (ProcessesTable.jsx's ProcessRow, ResourceMonitorPanel.jsx). */
+export function useProcessLiveState(processId) {
+  return useProcessesLiveState()[processId] ?? {}
+}
+
+/**
+ * Notification center unread counters (AGENTS.md section 25) -
+ * {message, warning, error} - riding the same fleet snapshot event as
+ * useProcessesLiveState above, not a separate WebSocket message; apps/api's
+ * processBroadcast.ts folds them into the same envelope specifically so
+ * this is one subscription, not two.
+ */
+export function useUnreadCounts() {
+  const [counts, setCounts] = useState({ message: 0, warning: 0, error: 0 })
+
+  useEffect(
+    () =>
+      subscribeToLiveEvents(({ event }) => {
+        if (event.domain !== 'process' || event.eventType !== 'snapshot' || !event.unreadCounts)
+          return
+        setCounts(event.unreadCounts)
+      }),
+    [],
+  )
+
+  return counts
 }

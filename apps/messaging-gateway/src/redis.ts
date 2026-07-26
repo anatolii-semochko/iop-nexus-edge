@@ -7,7 +7,16 @@ export const redis = new Redis({
   port: config.redis.port,
 });
 
+// A dedicated connection for Pub/Sub (AGENTS.md section 24) - once a
+// connection issues SUBSCRIBE it can no longer run regular commands
+// (GET/MGET/etc, ioredis's own constraint), so the process-state "wake up
+// and re-read" signal from apps/api needs its own connection, separate
+// from `redis` above which readStateSnapshot/readProcessStateSnapshot use
+// for plain reads. `duplicate()` shares the same connection options.
+export const subscriberRedis = redis.duplicate();
+
 const STATE_KEY_PREFIX = "state:";
+const PROCESS_STATE_KEY = "process:state:latest";
 
 export interface CachedState {
   deviceId: string;
@@ -50,4 +59,34 @@ export async function readStateSnapshot(): Promise<CachedState[]> {
     }
   });
   return snapshot;
+}
+
+export interface ProcessFleetSnapshot {
+  processes: unknown[];
+  // Notification center (AGENTS.md section 25) - Redis-backed unread
+  // counters, assembled by apps/api's processBroadcast.ts and relayed
+  // as-is here, same as `processes`.
+  unreadCounts: Record<string, number>;
+  timestamp: string;
+  source: string;
+}
+
+/**
+ * The whole fleet's public process state, straight off the one cache key
+ * apps/api's processBroadcast.ts writes on every timer tick and every
+ * urgent trigger (AGENTS.md section 24). Unlike `state:*` above (many
+ * keys, one per device resource), this is a single pre-assembled JSON
+ * blob - this service never touches Postgres and never assembles the
+ * fleet itself, it only relays what apps/api already put together. `null`
+ * if apps/api hasn't broadcast yet (e.g. this service started before it
+ * did) - callers treat that the same as "no processes yet", not an error.
+ */
+export async function readProcessStateSnapshot(): Promise<ProcessFleetSnapshot | null> {
+  const raw = await redis.get(PROCESS_STATE_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as ProcessFleetSnapshot;
+  } catch {
+    return null;
+  }
 }

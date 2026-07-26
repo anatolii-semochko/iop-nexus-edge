@@ -129,7 +129,7 @@ core stack and its custom device-service. Default login is `admin` /
 whatever you set `ADMIN_DEFAULT_PASSWORD` to in `.env` — change it before
 running this anywhere reachable.
 
-See `Makefile` for all available targets and `AGENTS.md` section 16 for
+See `Makefile` for all available targets and `AGENTS.md` section 20 for
 details.
 
 ## Project status & docs

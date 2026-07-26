@@ -16,7 +16,10 @@ const DEFAULT_PAGE_SIZE = 10
  * that no longer exists - no "reset page to 1 on filter change" boilerplate
  * required in the view.
  */
-export function usePagination(items, { pageSize: initialPageSize = DEFAULT_PAGE_SIZE } = {}) {
+export function usePagination(
+  items,
+  { pageSize: initialPageSize = DEFAULT_PAGE_SIZE, onPageSizeChange } = {},
+) {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(initialPageSize)
 
@@ -38,9 +41,12 @@ export function usePagination(items, { pageSize: initialPageSize = DEFAULT_PAGE_
     setPage,
     // Changing page size while on, say, page 5 could otherwise land the
     // user on a page number that no longer makes sense - jump back to 1.
+    // `onPageSizeChange` is a plain notification hook - this hook doesn't
+    // know or care whether a caller persists the new size anywhere.
     setPageSize: (size) => {
       setPageSize(size)
       setPage(1)
+      onPageSizeChange?.(size)
     },
   }
 }

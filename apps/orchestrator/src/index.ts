@@ -3,6 +3,8 @@ import Fastify from "fastify";
 import { apiClient, type ProcessRecord } from "./apiClient.js";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
+import { runActiveBuzzer } from "./processes/activeBuzzer.js";
+import { runResourceMonitor } from "./processes/resourceMonitor.js";
 import { runTemperatureControl } from "./processes/temperatureControl.js";
 import { runTemperatureMonitor } from "./processes/temperatureMonitor.js";
 
@@ -14,6 +16,8 @@ const TICK_INTERVAL_MS = 1000;
 const RUNNERS: Record<string, (process: ProcessRecord) => Promise<void>> = {
   "temperature-control": runTemperatureControl,
   "temperature-monitor": runTemperatureMonitor,
+  "resource-monitor": runResourceMonitor,
+  "active-buzzer": runActiveBuzzer,
 };
 
 async function tick(): Promise<void> {

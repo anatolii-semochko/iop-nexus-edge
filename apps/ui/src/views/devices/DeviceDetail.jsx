@@ -18,13 +18,14 @@ import { api } from '../../api/client'
 import { useDeviceLiveState } from '../../api/useLiveDevice'
 import LiveBadge from './LiveBadge'
 import LightRegulatorControl from 'devices/standalone/light-regulator/ui/control/LightRegulatorControl.jsx'
+import ActiveBuzzerControl from 'devices/standalone/active-buzzer/ui/control/ActiveBuzzerControl.jsx'
 
 // device.type -> {resourceName: ControlComponent} - a device type's own
 // ui/control component (AGENTS.md section 7), for the one resource it
-// applies to. Same pattern as DEVICE_TYPE_SIMULATORS in DevSimulator.jsx;
-// only one real device type exists today, so a plain map is enough.
+// applies to. Same pattern as DEVICE_TYPE_SIMULATORS in DevSimulator.jsx.
 const DEVICE_TYPE_CONTROLS = {
   'light-regulator': { Level: LightRegulatorControl },
+  'active-buzzer': { Buzzer: ActiveBuzzerControl },
 }
 
 const formatValue = (reading) => {

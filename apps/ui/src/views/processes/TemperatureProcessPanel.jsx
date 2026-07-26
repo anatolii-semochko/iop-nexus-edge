@@ -2,20 +2,15 @@ import React, { useEffect, useState } from 'react'
 import { CCol, CRow } from '@coreui/react'
 import { api } from '../../api/client'
 import { useDeviceLiveState } from '../../api/useLiveDevice'
+import StatusIndicator from '../../components/indicators/StatusIndicator'
 import NumericStepper from '../devices/NumericStepper'
 
-const Indicator = ({ active, color, label }) => (
+// Label wrapper stays local - StatusIndicator itself is the elementary
+// visual primitive (just the light), not aware of what it's labeling.
+const LabeledIndicator = ({ active, color, label }) => (
   <div className="text-center">
     <div className="text-body-secondary small">{label}</div>
-    <div
-      style={{
-        width: 48,
-        height: 48,
-        borderRadius: '50%',
-        margin: '0 auto',
-        backgroundColor: active ? color : '#adb5bd',
-      }}
-    />
+    <StatusIndicator active={active} color={color} />
   </div>
 )
 
@@ -58,7 +53,7 @@ const TemperatureProcessPanel = ({ process, onConfigChange }) => {
   const heaterActive = (live.Heater ? live.Heater.value : device.resources?.Heater?.value) === true
 
   return (
-    <div className="p-3">
+    <div className="p-3 pt-0">
       <CRow className="align-items-center g-4">
         <CCol xs="auto">
           <div className="text-body-secondary small">Min</div>
@@ -83,10 +78,10 @@ const TemperatureProcessPanel = ({ process, onConfigChange }) => {
           </div>
         </CCol>
         <CCol xs="auto">
-          <Indicator active={coolerActive} color="#3b82f6" label="Cooler" />
+          <LabeledIndicator active={coolerActive} color="#3b82f6" label="Cooler" />
         </CCol>
         <CCol xs="auto">
-          <Indicator active={heaterActive} color="#dc3545" label="Heater" />
+          <LabeledIndicator active={heaterActive} color="#dc3545" label="Heater" />
         </CCol>
       </CRow>
     </div>

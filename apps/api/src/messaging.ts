@@ -7,6 +7,16 @@ import { logger } from "./logger.js";
 // Shared topic exchange every publisher (this app today, others later) and
 // consumer (apps/messaging-gateway) in the platform uses - see AGENTS.md
 // section 9 for the routing-key scheme and envelope shape.
+//
+// Device domain only (AGENTS.md section 24) - process public state
+// deliberately does NOT go through this exchange. Its only consumers are
+// this same service (REST) and apps/messaging-gateway (WS fan-out), never
+// an independent subscriber that would benefit from a durable topic
+// exchange the way device commands/telemetry do (potentially many future
+// consumers, persistence across a brief outage). It flows through Redis
+// instead - processRegistry.ts's `process:{id}:public` hash plus
+// processBroadcast.ts's cache key and pub/sub notify - keeping
+// `nexus.events` for what it's actually for.
 export const EVENTS_EXCHANGE = "nexus.events";
 
 export interface DeviceEventEnvelope {
@@ -24,17 +34,6 @@ export interface DeviceEventEnvelope {
   source: string;
 }
 
-// First expansion of the bus beyond the "device" domain (AGENTS.md section
-// 10) - a process's on/off status or critical flag flipping.
-export interface ProcessEventEnvelope {
-  domain: "process";
-  entityId: number;
-  field: "status" | "critical";
-  value: unknown;
-  timestamp: string;
-  source: string;
-}
-
 const connection = amqp.connect([config.rabbitmq.url]);
 connection.on("connect", () => logger.info("connected to RabbitMQ"));
 connection.on("disconnect", (params) => logger.warn({ err: params.err }, "disconnected from RabbitMQ"));
@@ -46,9 +45,9 @@ const channelWrapper: ChannelWrapper = connection.createChannel({
 /**
  * Publishes onto `nexus.events`. Best-effort by design: a publish failure
  * (RabbitMQ briefly unreachable, etc.) must never break the write path
- * this is called from (dualDevicesModel.ts / processRegistry.ts) -
- * amqp-connection-manager already buffers/retries under the hood, this
- * just guards against it rejecting outright.
+ * this is called from (dualDevicesModel.ts) - amqp-connection-manager
+ * already buffers/retries under the hood, this just guards against it
+ * rejecting outright.
  */
 async function publish(routingKey: string, envelope: unknown): Promise<void> {
   try {
@@ -60,8 +59,4 @@ async function publish(routingKey: string, envelope: unknown): Promise<void> {
 
 export function publishDeviceEvent(envelope: DeviceEventEnvelope): Promise<void> {
   return publish(`device.${envelope.entityId}.${envelope.resource}.updated`, envelope);
-}
-
-export function publishProcessEvent(envelope: ProcessEventEnvelope): Promise<void> {
-  return publish(`process.${envelope.entityId}.${envelope.field}.changed`, envelope);
 }
