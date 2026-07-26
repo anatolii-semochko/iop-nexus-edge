@@ -65,8 +65,9 @@ export async function getStatus(processId: number): Promise<ProcessStatus> {
 // Timer-only (AGENTS.md section 24) - a status flip is already reflected
 // immediately in whatever REST response the UI action that caused it is
 // driven from; it doesn't need the same out-of-band urgent broadcast as
-// critical/warning/new-messages.
-export async function setStatus(processId: number, status: ProcessStatus, source: string): Promise<void> {
+// critical/warning/new-messages. `_source` kept (unused) purely so every
+// setX(processId, value, source) sibling here shares one call shape.
+export async function setStatus(processId: number, status: ProcessStatus, _source: string): Promise<void> {
   const current = await getStatus(processId);
   if (current === status) return;
   await touch(processId, { status });
@@ -113,8 +114,9 @@ export async function getMetrics(processId: number): Promise<ProcessMetrics | un
 // this exactly once per tick (1s). Timer-only, same as setStatus - a
 // metrics reading a few seconds stale on the bus is not "urgent" the way a
 // fresh critical/warning transition is; the periodic broadcast picks it up
-// on its own cadence (PROCESS_STATE_BROADCAST_INTERVAL_MS).
-export async function setMetrics(processId: number, metrics: ProcessMetrics, source: string): Promise<void> {
+// on its own cadence (PROCESS_STATE_BROADCAST_INTERVAL_MS). `_source`
+// unused, same reason as setStatus's above.
+export async function setMetrics(processId: number, metrics: ProcessMetrics, _source: string): Promise<void> {
   await touch(processId, { metrics: JSON.stringify(metrics) });
 }
 

@@ -51,22 +51,24 @@ const zoneFor = (value, warnMax, errorMax) => {
 const ResourceMonitorPanel = ({ process, onConfigChange }) => {
   const live = useProcessLiveState(process.id)
   const metrics = live.metrics ?? process.metrics
+  // Initial window - computed once, at mount, straight from the useState
+  // initializer, not a separate effect that resets on `process.id` change:
+  // this panel only ever mounts fresh per expand (ProcessesTable.jsx's
+  // `{expanded && Panel && ...}` unmounts it on collapse), so `process.id`
+  // never actually changes under a live instance - an effect to "reset on
+  // process.id change" would be dead code that never re-fires.
   const [history, setHistory] = useState(() => (process.metrics ? [process.metrics] : []))
 
-  // Resets the window on (re-)mount only - a panel only mounts once per
-  // expand, so this never fires again for the same expand/collapse cycle.
-  useEffect(() => {
-    setHistory(process.metrics ? [process.metrics] : [])
-    // process.metrics deliberately excluded - only process.id identifies a
-    // genuinely new mount here, not every list refetch's new object.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [process.id])
-
-  // Appends each live event as it arrives - separate from the reset above
-  // so a re-render from an unrelated prop change (e.g. config edits
-  // elsewhere on the row) never resets history mid-flight.
+  // Appends each live event as it arrives, accumulating a rolling window -
+  // a genuine case for an effect (AGENTS.md section 21): this history
+  // can't be derived from the current render's props alone, it depends on
+  // the sequence of past live values received, which only an effect
+  // synchronizing with the external WebSocket stream can accumulate.
   useEffect(() => {
     if (!live.metrics) return
+    // Accumulating history across renders, not deriving state from
+    // current props - see comment above.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setHistory((prev) => [...prev, live.metrics].slice(-MAX_SAMPLES))
   }, [live.metrics])
 
