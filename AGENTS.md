@@ -1504,3 +1504,194 @@ notification that's sent once and never re-asserted (e.g. the still-
 hypothetical "backup completed at 03:00") - such a producer has no
 "missing from this call" signal to act on in the first place, since it
 only ever calls once.
+
+## 23. Processes page: tabs, Dashboard, and the three group entities
+
+The single flat Processes table (section 10/21/22) became a tabbed
+workspace: **Dashboard**, **All**, one dynamic tab per **Tab Group**
+(admin-ordered, see below), **Controllable**, **Permanent**, **Settings**
+- in that order, `apps/ui/src/views/processes/ProcessesList.jsx`'s
+`tabDefs`. Built on CoreUI 5.13's newer fully-controlled tabs API
+(`CTabs`/`CTabList`/`CTab`), first use of it anywhere in this app (the
+only prior tab-shaped UI was the sidebar's `CNavItem`/`CNavLink`, a
+different component family). Deliberately **not** `CTabContent`/
+`CTabPanel` for the bodies - reading CoreUI's source shows `CTabPanel`
+never unmounts an inactive panel (only toggles CSS classes), which would
+keep every tab's `ProcessesTable` - and every row inside it, each
+independently subscribed to the live WebSocket via `useProcessLiveState`
+- mounted simultaneously across every tab a process appears in.
+`ProcessesList` instead renders whichever tab's body is active via a
+plain conditional (`renderActiveTab()`), so only the current tab is ever
+mounted.
+
+### Three group entities, not one
+
+The page ended up needing three different "named group of processes"
+concepts, easy to conflate (an earlier pass genuinely did, see below) but
+serving unrelated purposes:
+
+- **Process Groups** (`process_groups`, `routes/processGroups.ts`,
+  unchanged since section 10/17) - the *technical* system a process
+  belongs to (heating, lighting, security, aquarium...). Drives the
+  existing Group column and its filter dropdown. Alphabetical only.
+- **Tab Groups** (`tab_groups` + `process_tab_groups`,
+  `routes/tabGroups.ts`) - an *operator's own curated workspace*:
+  whichever processes one operator wants to watch, regardless of which
+  Process Group they're technically in (an operator isn't necessarily
+  responsible for one whole technical system - they may need to watch
+  processes across several, for business-logic reasons unrelated to the
+  technical grouping). Each Tab Group is one dynamic page tab, in
+  admin-controlled `position` order - unlike Process Groups, order here
+  is a real UX concern since it's literally tab order.
+- **Message Groups** (`message_groups` + `process_message_groups`,
+  `routes/messageGroups.ts`) - WEM *notification routing* (section 22's
+  original "which message groups does this process send to" concept,
+  finally built): which recipient eventually gets which processes'
+  warnings/errors/messages. Deliberately decoupled from Process Groups
+  for the same reason as Tab Groups (an operator's notification needs
+  don't align with the technical grouping) - and *also* decoupled from
+  Tab Groups, since "which tab shows this process" and "who gets notified
+  about this process" are independent questions with independent
+  answers. No `position` - nothing here drives an ordered UI. The actual
+  delivery mechanism (who/what a "recipient" is, how a message physically
+  reaches them) is still deferred, same as the still-unbuilt `messenger`
+  process kind named in section 22 - this table is what a future
+  delivery mechanism would read from, not something that does anything
+  on its own yet.
+
+Tab Groups and Message Groups are structurally near-identical (admin-
+named list, many-to-many with processes via a join table, `ON DELETE
+CASCADE` both directions, freely deletable any time - no "must be empty"
+rule like Process Groups has) and both assigned per-process via the same
+popup (see below) - the only structural difference is Tab Groups'
+`position` column and its `PATCH /tab-groups/reorder` endpoint (validates
+the submitted id set exactly matches what currently exists, 400s on any
+mismatch, then reassigns `position = index` per entry in one
+transaction) - Message Groups has no reorder endpoint at all.
+
+**History**: the first pass built only one entity, named "Message
+Groups" in code, that did both Tab Groups' job (driving ordered dynamic
+tabs) and was described as the notification-routing concept - conflating
+the two. Flagged by the user with a concrete example of why they diverge
+(an operator watching processes across multiple Process Groups for
+business reasons, who should only receive notifications relevant to
+*their* work, not their whole technical system) - the fix was a rename
+(the tab-driving entity became "Tab Groups", freeing up "Message Groups"
+for a fresh, genuinely separate entity with the same name) rather than a
+new concept bolted onto the old one.
+
+### Filter bar
+
+Every listing tab renders through the shared `ProcessesTable`
+(`apps/ui/src/views/processes/ProcessesTable.jsx`, extracted from the
+original single-tab `ProcessesList.jsx` so Dashboard/All/each Tab
+Group/Controllable/Permanent share one implementation rather than
+duplicating table+pagination+expand-row logic six-plus times). Which
+filter controls a tab shows is **not** a single on/off switch - a
+`filters` prop (`{ search?, group?, type? }`) lets a tab declare any
+combination, and `ProcessesList.jsx`'s `TAB_FILTERS` map is the single
+place that decides the combination per tab key (any key not listed,
+i.e. every dynamic `tg:*` Tab Group tab, falls back to `TAB_FILTERS.all`)
+- changing a tab's filter bar later is a one-line edit there, no other
+file involved. Today: All/Controllable/Permanent/every Tab Group tab get
+Process Group + Type + Search; Dashboard gets Search only (its own
+`FILTERS` constant in `DashboardTab.jsx`); Settings has no listing at
+all. Type is intentionally left interactive (not disabled/locked) on
+Controllable/Permanent even though it's redundant there with the tab's
+own base scope - picking the "wrong" type just surfaces the existing
+empty-state message, which is simpler than special-casing those two tabs
+out of an otherwise uniform component.
+
+Persisted per-tab (`usePersistedState('nexusedge.processesPage', ...)` -
+a *new*, independent registration, not a repurposing of the older
+`'nexusedge.processes'` key from section 17, which is left alone/generic
+for whichever future page wants its own): `perTab[tabKey] = { search,
+pageSize, groupFilter, typeFilter }`. `expandedIds` is the one thing kept
+global rather than per-tab - the same process/detail-panel regardless of
+which tab it's viewed from. Note `usePersistedState` only merges
+top-level cookie keys (its own doc comment), not nested ones - a `perTab`
+entry for a tab that didn't exist yet when the cookie was last written
+needs its own `?? DEFAULT_TAB_STATE` fallback at read time, which
+`ProcessesList.jsx`'s `tabState()` helper provides.
+
+### Dashboard tab
+
+Every process that has *ever* had an active WEM entry since last
+cleared - `processes.dashboard_flagged_at` (nullable `timestamptz`), set
+once by `processMessages.maybeFlagForDashboard(processId)`: a single
+`UPDATE ... WHERE dashboard_flagged_at IS NULL AND EXISTS (SELECT 1 FROM
+process_messages WHERE process_id = $1 AND resolved_at IS NULL)`, called
+unconditionally at the end of every `syncActiveMessages` (cheap, one
+indexed `EXISTS`; idempotent via the `IS NULL` guard, safe to call
+whether or not this particular sync actually changed anything). Stays
+flagged - shown on Dashboard - until a user clicks the row's X, which
+only succeeds (`DELETE /processes/:id/dashboard-flag`, 400 otherwise)
+once the process is genuinely back to zero active entries
+(`processMessages.hasActiveEntries`, checked server-side, not just a
+client-side disabled state). Empty Dashboard renders a plain green "OK"
+`CAlert`, nothing to page through.
+
+`hasActiveWem` (in `GET /processes`' `withLiveState`) is **not** derived
+from the same response's `messages` array - `listActiveMessages` (used
+for `messages`) excludes `hidden` entries for *display* purposes, but
+the Dashboard flag/unflag rule cares about the underlying condition
+regardless of whether a user has hidden its notification, so it's a
+separate, unfiltered `hasActiveEntries` check. This value isn't
+live-pushed over the WebSocket (only `status`/`critical`/`warning`/
+`metrics`/`messages` are) - it can go briefly stale between a full
+`reload()` and the next one, which only ever makes the X *more*
+conservative (stays disabled a little longer than strictly necessary),
+never incorrectly enabled, since the server re-checks unconditionally
+regardless of what the client's disabled state implied.
+
+### Settings tab
+
+Four cards (`apps/ui/src/views/processes/SettingsTab.jsx`), each backed
+by the shared `apps/ui/src/components/NamedListManager.jsx` (extracted
+from the old `ManageNamedListModal.jsx` popup - AGENTS.md history: that
+popup's "Manage groups" button lived in the main toolbar; both are gone
+now that the form lives in this tab instead, and nothing else needed the
+modal wrapper, so it was deleted rather than kept unused):
+
+- **Process Groups** - unchanged CRUD, moved from the old popup.
+- **Tab Groups** - `orderable`, with up/down arrow buttons per row
+  (`NamedListManager`'s own `move()`: swaps the clicked row with its
+  neighbor in the *current displayed order* and resends the complete new
+  id array to `PATCH /tab-groups/reorder`, matching that endpoint's
+  "whole list, not a single move" contract).
+- **Message Groups** - same CRUD shape, not `orderable`.
+- **Message Levels** - `MessageLevelsForm.jsx`, a fixed 8-row matrix
+  (`message_levels` table: `type` × `level` 1-4, seeded by migration, no
+  add/remove - only `mode`/`period_deciseconds` per row are ever edited).
+  `mode` is one of `off`/`constant`/`shortBeep`/`longBeep`; period
+  (tenths of a second) is a plain `CFormInput type="number"`, not the
+  `NumericStepper` used elsewhere for click-and-hold device values -
+  `NumericStepper`'s own `format()` is hardcoded to `.toFixed(2)`, which
+  would misrender an integer decisecond count as `"5.00"`, and its whole
+  press-and-hold-repeat machinery is irrelevant to a rarely-touched
+  settings field. Config-storage only for now - nothing reads these
+  values to actually play a sound yet, same "not built yet" status as the
+  Message Groups delivery mechanism above.
+
+### Per-process Settings popup
+
+`apps/ui/src/views/processes/ProcessSettingsModal.jsx`, opened by a new,
+unconditional first action button on every row (`cilSettings`, white/
+outline like every other `IconButton` default - rendered *before* the
+per-kind action buttons so it's never hidden behind `process.actions`
+being empty for permanent processes). Two independent `CFormCheck`
+sections - Tab Groups and Message Groups - each its own fetch-on-open
+(`GET /processes/:id/tab-groups` / `.../message-groups`, just the id
+array) and its own locally-edited `Set`, saved together on one Save
+click (`Promise.all([setProcessTabGroups, setProcessMessageGroups])`,
+both `PUT`s replacing the complete membership set rather than an
+incremental add/remove). The sections mount only while the modal is
+actually open (`{visible && process && (...)}` inside `CModalBody`, not
+just CoreUI's own `visible`-styling) - otherwise every row's hidden popup
+would eagerly fetch membership for a process nobody has opened Settings
+for; mounting fresh each open also means each section's own `loading`
+state (initialized `true`) is correct on every reopen with no separate
+reset plumbing needed. `CModal` itself stays unconditionally rendered
+(only `visible` toggles) so CoreUI's own open/close transition still
+works - conditionally unmounting the whole modal component would skip
+that.

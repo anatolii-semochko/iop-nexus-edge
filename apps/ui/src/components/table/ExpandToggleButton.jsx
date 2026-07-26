@@ -15,6 +15,7 @@ const ExpandToggleButton = ({ expanded, onClick, size = 'sm' }) => (
     size={size}
     onClick={onClick}
     ariaLabel={expanded ? 'Collapse' : 'Expand'}
+    center
   />
 )
 

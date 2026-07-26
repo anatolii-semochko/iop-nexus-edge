@@ -84,6 +84,51 @@ export const api = {
   renameProcessGroup: (id, name) =>
     request(`/process-groups/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
   deleteProcessGroup: (id) => request(`/process-groups/${id}`, { method: 'DELETE' }),
+  // Tab Groups (AGENTS.md section 22) - an operator's own curated
+  // workspace, distinct from Process Groups above; admin-managed, ordered,
+  // each one a dynamic tab on the Processes page.
+  listTabGroups: () => request('/tab-groups'),
+  createTabGroup: (name) =>
+    request('/tab-groups', { method: 'POST', body: JSON.stringify({ name }) }),
+  renameTabGroup: (id, name) =>
+    request(`/tab-groups/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+  deleteTabGroup: (id) => request(`/tab-groups/${id}`, { method: 'DELETE' }),
+  reorderTabGroups: (orderedIds) =>
+    request('/tab-groups/reorder', { method: 'PATCH', body: JSON.stringify({ orderedIds }) }),
+  // Per-process Tab Group assignment.
+  getProcessTabGroups: (id) => request(`/processes/${id}/tab-groups`),
+  setProcessTabGroups: (id, tabGroupIds) =>
+    request(`/processes/${id}/tab-groups`, {
+      method: 'PUT',
+      body: JSON.stringify({ tabGroupIds }),
+    }),
+  // Message Groups (AGENTS.md section 22) - WEM notification routing,
+  // distinct from both Process Groups and Tab Groups above - not tied to
+  // either, no ordering (nothing here drives a tab).
+  listMessageGroups: () => request('/message-groups'),
+  createMessageGroup: (name) =>
+    request('/message-groups', { method: 'POST', body: JSON.stringify({ name }) }),
+  renameMessageGroup: (id, name) =>
+    request(`/message-groups/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+  deleteMessageGroup: (id) => request(`/message-groups/${id}`, { method: 'DELETE' }),
+  // Per-process Message Group assignment.
+  getProcessMessageGroups: (id) => request(`/processes/${id}/message-groups`),
+  setProcessMessageGroups: (id, messageGroupIds) =>
+    request(`/processes/${id}/message-groups`, {
+      method: 'PUT',
+      body: JSON.stringify({ messageGroupIds }),
+    }),
+  // Message Levels (AGENTS.md section 22) - fixed 8-row matrix, only
+  // mode/period are ever edited.
+  listMessageLevels: () => request('/message-levels'),
+  updateMessageLevel: (type, level, mode, periodDeciseconds) =>
+    request(`/message-levels/${type}/${level}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ mode, periodDeciseconds }),
+    }),
+  // Dashboard tab (AGENTS.md section 22) - clears the flag; the API 400s
+  // if the process still has active WEM entries.
+  clearDashboardFlag: (id) => request(`/processes/${id}/dashboard-flag`, { method: 'DELETE' }),
   // Auth (AGENTS.md section 13 - UI login only, not per-endpoint API
   // authorization).
   login: (username, password) =>

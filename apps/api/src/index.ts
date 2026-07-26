@@ -9,9 +9,12 @@ import Fastify from "fastify";
 import { config } from "./config.js";
 import { authRoutes } from "./routes/auth.js";
 import { deviceRoutes } from "./routes/devices.js";
+import { messageGroupRoutes } from "./routes/messageGroups.js";
+import { messageLevelRoutes } from "./routes/messageLevels.js";
 import { nodeRoutes } from "./routes/nodes.js";
 import { processGroupRoutes } from "./routes/processGroups.js";
 import { processRoutes } from "./routes/processes.js";
+import { tabGroupRoutes } from "./routes/tabGroups.js";
 import { userRoutes } from "./routes/users.js";
 
 const app = Fastify({ logger: true });
@@ -39,6 +42,9 @@ await app.register(nodeRoutes);
 await app.register(deviceRoutes);
 await app.register(processGroupRoutes);
 await app.register(processRoutes);
+await app.register(tabGroupRoutes);
+await app.register(messageGroupRoutes);
+await app.register(messageLevelRoutes);
 
 app.listen({ port: config.port, host: config.host }).catch((err) => {
   app.log.error(err);

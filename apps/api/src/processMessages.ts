@@ -160,6 +160,42 @@ export async function syncActiveMessages(
       source,
     });
   }
+
+  // Dashboard tab (AGENTS.md section 22) - unconditional, not gated behind
+  // `changed` above: cheap (one indexed EXISTS check) and simplest to just
+  // always check rather than reason about which specific diffs could have
+  // newly created the process's first-ever active row.
+  await maybeFlagForDashboard(processId);
+}
+
+// True the moment a process has *any* active (unresolved) entry, of any
+// type, regardless of `hidden` - deliberately not `listActiveMessages`
+// (which excludes hidden rows for *display* purposes). The Dashboard flag/
+// unflag rule cares about the underlying condition, not whether a user has
+// hidden its notification.
+export async function hasActiveEntries(processId: number): Promise<boolean> {
+  const { rows } = await pool.query<{ exists: boolean }>(
+    `SELECT EXISTS(SELECT 1 FROM process_messages WHERE process_id = $1 AND resolved_at IS NULL) AS exists`,
+    [processId],
+  );
+  return rows[0].exists;
+}
+
+// Flags a process for the Dashboard tab the instant it gets its first-ever
+// active WEM entry - stays flagged (see routes/processes.ts's dashboard-flag
+// DELETE endpoint) until a user explicitly clears it, and only once it's
+// back to zero active entries. Idempotent/no-op once already flagged - the
+// `dashboard_flagged_at IS NULL` guard is what makes this safe to call on
+// every sync rather than only on a genuinely new occurrence.
+async function maybeFlagForDashboard(processId: number): Promise<void> {
+  await pool.query(
+    `UPDATE processes
+     SET dashboard_flagged_at = now()
+     WHERE id = $1
+       AND dashboard_flagged_at IS NULL
+       AND EXISTS (SELECT 1 FROM process_messages WHERE process_id = $1 AND resolved_at IS NULL)`,
+    [processId],
+  );
 }
 
 // Active and not dismissed - what the UI's expandable WEM row shows.

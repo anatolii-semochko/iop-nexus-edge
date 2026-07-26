@@ -32,6 +32,11 @@ interface ProcessRow {
   actions: string[];
   device_id: number | null;
   config: ProcessConfig;
+  // Dashboard tab (AGENTS.md section 22) - set once, the instant this
+  // process first gets an active WEM entry (processMessages.
+  // maybeFlagForDashboard), cleared only via the dashboard-flag DELETE
+  // route below.
+  dashboard_flagged_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -203,6 +208,124 @@ export async function processRoutes(app: FastifyInstance): Promise<void> {
       return { status: "ok" };
     },
   );
+
+  // UI-driven - which Tab Groups (routes/tabGroups.ts) this process is
+  // currently curated into (AGENTS.md section 22). Fetched on-demand only
+  // when the per-process Settings popup opens, not folded into the main
+  // /processes payload above.
+  app.get<{ Params: { id: string } }>("/processes/:id/tab-groups", async (request, reply) => {
+    const process = await findProcess(request.params.id);
+    if (!process) {
+      return reply.code(404).send({ error: "process not found" });
+    }
+
+    const result = await pool.query<{ tab_group_id: number }>(
+      "SELECT tab_group_id FROM process_tab_groups WHERE process_id = $1",
+      [process.id],
+    );
+    return result.rows.map((row) => row.tab_group_id);
+  });
+
+  // Replaces the full membership set in one transaction (not incremental
+  // add/remove) - matches the checkbox-multiselect popup that's this
+  // route's only caller, which always submits the complete new set.
+  app.put<{ Params: { id: string }; Body: { tabGroupIds: number[] } }>(
+    "/processes/:id/tab-groups",
+    async (request, reply) => {
+      const process = await findProcess(request.params.id);
+      if (!process) {
+        return reply.code(404).send({ error: "process not found" });
+      }
+
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("DELETE FROM process_tab_groups WHERE process_id = $1", [process.id]);
+        for (const tabGroupId of request.body.tabGroupIds) {
+          await client.query(
+            "INSERT INTO process_tab_groups (process_id, tab_group_id) VALUES ($1, $2)",
+            [process.id, tabGroupId],
+          );
+        }
+        await client.query("COMMIT");
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
+      }
+
+      return { status: "ok" };
+    },
+  );
+
+  // UI-driven - which Message Groups (routes/messageGroups.ts) this
+  // process currently sends its WEM into (AGENTS.md section 22) - separate
+  // notion from Tab Groups above, same shape. Fetched on-demand only when
+  // the per-process Settings popup opens.
+  app.get<{ Params: { id: string } }>("/processes/:id/message-groups", async (request, reply) => {
+    const process = await findProcess(request.params.id);
+    if (!process) {
+      return reply.code(404).send({ error: "process not found" });
+    }
+
+    const result = await pool.query<{ message_group_id: number }>(
+      "SELECT message_group_id FROM process_message_groups WHERE process_id = $1",
+      [process.id],
+    );
+    return result.rows.map((row) => row.message_group_id);
+  });
+
+  // Replaces the full membership set in one transaction - same "complete
+  // new set" contract as /tab-groups above.
+  app.put<{ Params: { id: string }; Body: { messageGroupIds: number[] } }>(
+    "/processes/:id/message-groups",
+    async (request, reply) => {
+      const process = await findProcess(request.params.id);
+      if (!process) {
+        return reply.code(404).send({ error: "process not found" });
+      }
+
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("DELETE FROM process_message_groups WHERE process_id = $1", [process.id]);
+        for (const messageGroupId of request.body.messageGroupIds) {
+          await client.query(
+            "INSERT INTO process_message_groups (process_id, message_group_id) VALUES ($1, $2)",
+            [process.id, messageGroupId],
+          );
+        }
+        await client.query("COMMIT");
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
+      }
+
+      return { status: "ok" };
+    },
+  );
+
+  // UI-driven - clears the Dashboard flag (AGENTS.md section 22), but only
+  // once this process is actually back to zero active WEM entries; a
+  // process still genuinely wrong can't be swept off the Dashboard.
+  app.delete<{ Params: { id: string } }>("/processes/:id/dashboard-flag", async (request, reply) => {
+    const process = await findProcess(request.params.id);
+    if (!process) {
+      return reply.code(404).send({ error: "process not found" });
+    }
+
+    if (await processMessages.hasActiveEntries(process.id)) {
+      return reply.code(400).send({ error: "process still has active WEM entries" });
+    }
+
+    await pool.query("UPDATE processes SET dashboard_flagged_at = NULL, updated_at = now() WHERE id = $1", [
+      process.id,
+    ]);
+    return { status: "ok" };
+  });
 }
 
 async function findProcess(id: string): Promise<ProcessRow | undefined> {
@@ -211,12 +334,18 @@ async function findProcess(id: string): Promise<ProcessRow | undefined> {
 }
 
 async function withLiveState(process: ProcessRow) {
-  const [status, critical, warning, metrics, messages] = await Promise.all([
+  const [status, critical, warning, metrics, messages, hasActiveWem] = await Promise.all([
     process.type === "controllable" ? processRegistry.getStatus(process.id) : Promise.resolve(undefined),
     processRegistry.getCritical(process.id),
     processRegistry.getWarning(process.id),
     processRegistry.getMetrics(process.id),
     processMessages.listActiveMessages(process.id),
+    // Deliberately not derived from `messages` above - listActiveMessages
+    // excludes hidden entries, but the Dashboard flag/unflag rule
+    // (AGENTS.md section 22) is symmetric on resolved_at regardless of
+    // hidden, so the UI's "can this be removed from Dashboard" check needs
+    // this separate, unfiltered signal.
+    processMessages.hasActiveEntries(process.id),
   ]);
-  return { ...process, status, critical, warning, metrics, messages };
+  return { ...process, status, critical, warning, metrics, messages, hasActiveWem };
 }

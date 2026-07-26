@@ -1,180 +1,94 @@
 import React, { useEffect, useState } from 'react'
 import {
   CAlert,
-  CBadge,
-  CButton,
   CCard,
   CCardBody,
   CCardHeader,
-  CCol,
-  CFormSelect,
-  CRow,
   CSpinner,
-  CTable,
-  CTableBody,
-  CTableDataCell,
-  CTableHead,
-  CTableHeaderCell,
-  CTableRow,
+  CTab,
+  CTabList,
+  CTabs,
   CToast,
   CToastBody,
   CToastClose,
   CToaster,
 } from '@coreui/react'
-import { cilFilterX, cilGroup } from '@coreui/icons'
 import { api } from '../../api/client'
-import { useProcessLiveState } from '../../api/useLiveProcess'
-import IconButton from '../../components/IconButton'
-import ManageNamedListModal from '../../components/ManageNamedListModal'
-import ExpandAllToggleButton from '../../components/table/ExpandAllToggleButton'
-import ExpandToggleButton from '../../components/table/ExpandToggleButton'
-import TablePagination from '../../components/table/TablePagination'
-import TableSearchInput from '../../components/table/TableSearchInput'
-import { useExpandableRows } from '../../hooks/useExpandableRows'
-import { usePagination } from '../../hooks/usePagination'
 import { usePersistedState } from '../../hooks/usePersistedState'
 import LiveBadge from '../devices/LiveBadge'
-import ResourceMonitorPanel from './ResourceMonitorPanel'
-import TemperatureProcessPanel from './TemperatureProcessPanel'
-import WemRow from './WemRow'
+import DashboardTab from './DashboardTab'
+import ProcessesTable from './ProcessesTable'
+import SettingsTab from './SettingsTab'
 
-// Registration for usePersistedState (AGENTS.md section 17) - these five
-// fields, and only these, survive a refresh; every key's value here is
-// also its default for a first-ever visit.
+// Registration for usePersistedState (AGENTS.md section 22) - a separate,
+// independent registration from the older 'nexusedge.processes' key
+// (still used nowhere now, but deliberately left alone/generic rather than
+// repurposed, so a future page can register its own the same way).
+// `perTab` is keyed by tab key ('all', 'controllable', 'permanent', or
+// `tg:${tabGroupId}` for a dynamic Tab Group tab) -> { search, pageSize,
+// groupFilter, typeFilter, statusFilter } - every listing tab has its own independent
+// slice (no more single top-level `groupFilter`, since every tab can now
+// filter by Process Group, not just "All"). `expandedIds` is deliberately
+// NOT per-tab - the same process/detail-panel either way, regardless of
+// which tab it's viewed from.
 const PERSISTED_DEFAULTS = {
-  groupFilter: '',
-  typeFilter: '',
+  activeTab: 'all',
+  expandedIds: [],
+  perTab: {},
+}
+
+const DEFAULT_TAB_STATE = {
   search: '',
   pageSize: 10,
-  expandedIds: [],
+  groupFilter: '',
+  typeFilter: '',
+  statusFilter: '',
 }
 
-// process.kind -> its expandable detail component (AGENTS.md section 10).
-// Same plain-map approach as DEVICE_TYPE_SIMULATORS/DEVICE_TYPE_CONTROLS in
-// the Devices pages - temperature-control/-monitor share one panel,
-// resource-monitor (section 21) has its own.
-const KIND_PANELS = {
-  'temperature-control': TemperatureProcessPanel,
-  'temperature-monitor': TemperatureProcessPanel,
-  'resource-monitor': ResourceMonitorPanel,
+// Which filter controls a given tab shows (AGENTS.md section 22) - the
+// single place that decides this, so changing a tab's filter bar later is
+// a one-line edit here, nowhere else. Dashboard is search-only (see
+// DashboardTab.jsx's own FILTERS); Settings has no listing at all. Any tab
+// key not listed here - i.e. every dynamic `tg:*` Tab Group tab - falls
+// back to the same combination as 'all'.
+const TAB_FILTERS = {
+  all: { search: true, group: true, type: true, status: true },
+  controllable: { search: true, group: true, type: true, status: true },
+  permanent: { search: true, group: true, type: true, status: true },
 }
-
-const statusColor = (status) => (status === 'on' ? 'success' : 'secondary')
-
-// Fixed width so a button's content swapping between its label and a busy
-// spinner never changes the button's own box size - letting it changed
-// the "Actions" column's width for every row the instant one row's button
-// went busy, which looked like the whole table jumping.
-const ACTION_BUTTON_STYLE = { width: '4rem' }
-
-const ProcessRow = ({ process, expanded, onToggleExpand, onReload, onError }) => {
-  const live = useProcessLiveState(process.id)
-  const status = live.status ?? process.status
-  const critical = live.critical ?? process.critical
-  const warning = live.warning ?? process.warning
-  // Error always wins over warning (AGENTS.md section 21) - a row is never
-  // both, so this is a simple precedence pick, not two independent styles.
-  const rowColor = critical ? 'danger' : warning ? 'warning' : undefined
-  // Only actually rendered once the row is expanded (AGENTS.md section
-  // 22) - see WemRow below, nested at the end of the detail panel.
-  const messages = live.messages ?? process.messages ?? []
-  // Which specific action is in flight, not a single shared boolean - only
-  // the button the user actually clicked shows a spinner; the other one
-  // (already disabled, since it matches the pre-click status) never did.
-  const [busyAction, setBusyAction] = useState(null)
-
-  const handleAction = async (action) => {
-    setBusyAction(action)
-    try {
-      await api.doProcessAction(process.id, action)
-      onReload()
-    } catch (err) {
-      onError(err.message)
-    } finally {
-      setBusyAction(null)
-    }
-  }
-
-  const Panel = KIND_PANELS[process.kind]
-  // Messages now render *inside* the expanded detail panel itself (its
-  // last piece, after Panel's own content - see WemRow.jsx), not as their
-  // own always-visible row - so they can no longer make the collapsed
-  // table jump when they appear/disappear, and the only row that can ever
-  // follow the plain row is the panel row.
-  const noBorderWhenExpanded = expanded && Panel ? 'border-bottom-0' : undefined
-
-  return (
-    <>
-      <CTableRow color={rowColor}>
-        <CTableDataCell className={noBorderWhenExpanded}>{process.name}</CTableDataCell>
-        <CTableDataCell className={noBorderWhenExpanded}>{process.group_name}</CTableDataCell>
-        <CTableDataCell className={noBorderWhenExpanded}>
-          {status ? (
-            <CBadge color={statusColor(status)}>{status.toUpperCase()}</CBadge>
-          ) : (
-            <CBadge color="info">Running</CBadge>
-          )}
-        </CTableDataCell>
-        <CTableDataCell className={`text-end ${noBorderWhenExpanded ?? ''}`}>
-          {process.actions.map((action) => {
-            const isCurrent = action.toLowerCase() === status
-            return (
-              <CButton
-                key={action}
-                size="sm"
-                style={ACTION_BUTTON_STYLE}
-                color={isCurrent ? statusColor(status) : 'secondary'}
-                variant={isCurrent ? undefined : 'outline'}
-                disabled={busyAction !== null || isCurrent}
-                className="ms-1"
-                onClick={() => handleAction(action)}
-              >
-                {busyAction === action ? <CSpinner size="sm" /> : action}
-              </CButton>
-            )
-          })}
-        </CTableDataCell>
-        <CTableDataCell
-          className={`text-end ${noBorderWhenExpanded ?? ''}`}
-          style={{ width: '2rem' }}
-        >
-          {Panel && <ExpandToggleButton expanded={expanded} onClick={onToggleExpand} />}
-        </CTableDataCell>
-      </CTableRow>
-      {expanded && Panel && (
-        <CTableRow color={rowColor}>
-          <CTableDataCell colSpan={5} className="p-0">
-            <Panel process={process} onConfigChange={onReload} />
-            <WemRow messages={messages} />
-          </CTableDataCell>
-        </CTableRow>
-      )}
-    </>
-  )
-}
+const filtersFor = (tabKey) => TAB_FILTERS[tabKey] ?? TAB_FILTERS.all
 
 /**
- * Processes page (AGENTS.md section 10 - first orchestration step): every
- * process, filterable by group/type, expandable per-row detail component.
- * A process's config (min/max) reload just re-fetches the whole list -
- * same "load()" pattern as apps/ui/src/views/devices/DevSimulator.jsx -
- * rather than patching local state, since the list is small and this
- * keeps the row and its expanded panel from ever disagreeing.
+ * Processes page (AGENTS.md section 10/22) - a tabbed workspace: Dashboard
+ * (processes that have ever had active WEM), All (filterable table), one
+ * dynamic tab per admin-defined Tab Group, Controllable, Permanent, and
+ * Settings (Process Groups + Tab Groups + Message Groups + Message Levels
+ * config). The actual table/filter/pagination/expand rendering lives in
+ * ProcessesTable.jsx, reused by every tab here rather than duplicated.
  */
 const ProcessesList = () => {
   const [processes, setProcesses] = useState(null)
   const [groups, setGroups] = useState([])
-  const [groupsModalVisible, setGroupsModalVisible] = useState(false)
-  // Bumped on "reset filters" to force TableSearchInput to remount with a
-  // blank value - it deliberately owns its own typing state after mount
-  // (AGENTS.md section 11), so an external setPageState({search: ''}) alone
-  // wouldn't clear what's actually showing in the box.
+  const [tabGroups, setTabGroups] = useState([])
+  const [messageGroups, setMessageGroups] = useState([])
+  // Bumped on "reset filters" to force the active tab's TableSearchInput
+  // to remount with a blank value - it deliberately owns its own typing
+  // state after mount (AGENTS.md section 11), so an external state clear
+  // alone wouldn't clear what's actually showing in the box.
   const [searchResetToken, setSearchResetToken] = useState(0)
   const [error, setError] = useState(null)
-  const [pageState, setPageState] = usePersistedState('nexusedge.processes', PERSISTED_DEFAULTS)
-  const { groupFilter, typeFilter, search, expandedIds } = pageState
+  const [pageState, setPageState] = usePersistedState('nexusedge.processesPage', PERSISTED_DEFAULTS)
+  const { activeTab, expandedIds } = pageState
   const setExpandedIds = (ids) => setPageState({ expandedIds: ids })
-  const { isExpanded, toggleOne } = useExpandableRows(expandedIds, setExpandedIds)
+  const setActiveTab = (key) => setPageState({ activeTab: key })
+
+  // usePersistedState only merges top-level cookie keys (see its own doc
+  // comment) - a `perTab` entry for a tab that didn't exist yet when the
+  // cookie was last written needs its own fallback here, not just the
+  // hook's own defaulting.
+  const tabState = (key) => pageState.perTab[key] ?? DEFAULT_TAB_STATE
+  const setTabState = (key, partial) =>
+    setPageState({ perTab: { ...pageState.perTab, [key]: { ...tabState(key), ...partial } } })
 
   const reload = () => {
     api
@@ -193,37 +107,121 @@ const ProcessesList = () => {
       .catch((err) => setError(err.message))
   }
 
-  useEffect(reload, [])
-  useEffect(reloadGroups, [])
-
-  const hasActiveFilters = Boolean(groupFilter || typeFilter || search)
-  const handleResetFilters = () => {
-    setPageState({ groupFilter: '', typeFilter: '', search: '' })
-    setSearchResetToken((t) => t + 1)
+  const reloadTabGroups = () => {
+    api
+      .listTabGroups()
+      .then(setTabGroups)
+      .catch((err) => setError(err.message))
   }
 
-  // Hooks must run unconditionally on every render, so pagination is
-  // computed here (against a safe `[]` fallback before data loads) rather
-  // than after the early error/loading returns below.
-  const filtered = (processes ?? []).filter(
-    (p) =>
-      (!groupFilter || p.group_name === groupFilter) &&
-      (!typeFilter || p.type === typeFilter) &&
-      (!search || p.name.toLowerCase().includes(search.toLowerCase())),
-  )
-  const { page, pageSize, pageItems, totalItems, setPage, setPageSize } = usePagination(filtered, {
-    pageSize: pageState.pageSize,
-    onPageSizeChange: (size) => setPageState({ pageSize: size }),
-  })
+  const reloadMessageGroups = () => {
+    api
+      .listMessageGroups()
+      .then(setMessageGroups)
+      .catch((err) => setError(err.message))
+  }
+
+  // Per-process Settings popup edits both Tab Groups and Message Groups
+  // membership at once (ProcessSettingsModal.jsx) - one combined reload
+  // covers both rather than wiring two separate callbacks through every
+  // layer down to that popup.
+  const reloadGroupMemberships = () => {
+    reloadTabGroups()
+    reloadMessageGroups()
+  }
+
+  useEffect(reload, [])
+  useEffect(reloadGroups, [])
+  useEffect(reloadTabGroups, [])
+  useEffect(reloadMessageGroups, [])
 
   if (error && !processes) return <CAlert color="danger">{error}</CAlert>
   if (!processes) return <CSpinner color="primary" />
 
-  // "Expand/collapse all" (ExpandAllToggleButton, in the header) only ever
-  // considers the current page's rows that actually have a panel
-  // (KIND_PANELS) - toggling doesn't touch rows on other pages, matching
-  // what's actually visible.
-  const expandableIds = pageItems.filter((p) => KIND_PANELS[p.kind]).map((p) => p.id)
+  // Reset lives in ProcessesTable's own filter row now (right-aligned,
+  // next to the controls it actually clears), not up here next to the tab
+  // strip - this just supplies the per-tab-key reset action.
+  const handleResetFilters = (tabKey) => {
+    setTabState(tabKey, { search: '', groupFilter: '', typeFilter: '', statusFilter: '' })
+    setSearchResetToken((t) => t + 1)
+  }
+
+  const tabDefs = [
+    { key: 'dashboard', label: 'Dashboard' },
+    { key: 'all', label: 'All' },
+    ...tabGroups.map((group) => ({ key: `tg:${group.id}`, label: group.name })),
+    { key: 'controllable', label: 'Controllable' },
+    { key: 'permanent', label: 'Permanent' },
+    { key: 'settings', label: 'Settings' },
+  ]
+
+  const commonTableProps = (tabKey) => ({
+    filters: filtersFor(tabKey),
+    search: tabState(tabKey).search,
+    onSearchChange: (value) => setTabState(tabKey, { search: value }),
+    groupFilter: tabState(tabKey).groupFilter,
+    onGroupFilterChange: (value) => setTabState(tabKey, { groupFilter: value }),
+    typeFilter: tabState(tabKey).typeFilter,
+    onTypeFilterChange: (value) => setTabState(tabKey, { typeFilter: value }),
+    statusFilter: tabState(tabKey).statusFilter,
+    onStatusFilterChange: (value) => setTabState(tabKey, { statusFilter: value }),
+    groups,
+    searchResetToken,
+    pageSize: tabState(tabKey).pageSize,
+    onPageSizeChange: (size) => setTabState(tabKey, { pageSize: size }),
+    expandedIds,
+    setExpandedIds,
+    onReload: reload,
+    onError: setError,
+    tabGroups,
+    messageGroups,
+    onGroupsChange: reloadGroupMemberships,
+    onResetFilters: () => handleResetFilters(tabKey),
+  })
+
+  // A tab's own base scope (which processes it means in the first place) -
+  // the *filters* above narrow that further, same client-side style this
+  // page has always used.
+  const scopedProcesses = () => {
+    if (activeTab === 'controllable') return processes.filter((p) => p.type === 'controllable')
+    if (activeTab === 'permanent') return processes.filter((p) => p.type === 'permanent')
+    if (activeTab.startsWith('tg:')) {
+      const groupId = Number(activeTab.slice(3))
+      const group = tabGroups.find((g) => g.id === groupId)
+      return group ? processes.filter((p) => group.processIds.includes(p.id)) : []
+    }
+    return processes
+  }
+
+  const renderActiveTab = () => {
+    if (activeTab === 'dashboard') {
+      return <DashboardTab processes={processes} {...commonTableProps('dashboard')} />
+    }
+    if (activeTab === 'settings') {
+      return (
+        <SettingsTab
+          groups={groups}
+          reloadGroups={reloadGroups}
+          reloadProcesses={reload}
+          tabGroups={tabGroups}
+          reloadTabGroups={reloadTabGroups}
+          messageGroups={messageGroups}
+          reloadMessageGroups={reloadMessageGroups}
+          onError={setError}
+        />
+      )
+    }
+    const emptyMessage = activeTab.startsWith('tg:')
+      ? 'No processes are in this tab group yet.'
+      : undefined
+    return (
+      <ProcessesTable
+        processes={scopedProcesses()}
+        emptyMessage={emptyMessage}
+        {...commonTableProps(activeTab)}
+      />
+    )
+  }
 
   return (
     <CCard className="mb-4">
@@ -247,126 +245,17 @@ const ProcessesList = () => {
         <strong>Processes</strong> <LiveBadge />
       </CCardHeader>
       <CCardBody>
-        <CRow className="mb-3 g-2 align-items-center">
-          <CCol xs="auto">
-            <CFormSelect
-              size="sm"
-              value={groupFilter}
-              onChange={(e) => setPageState({ groupFilter: e.target.value })}
-            >
-              <option value="">All groups</option>
-              {groups.map((g) => (
-                <option key={g.id} value={g.name}>
-                  {g.name}
-                </option>
-              ))}
-            </CFormSelect>
-          </CCol>
-          <CCol xs="auto">
-            <CFormSelect
-              size="sm"
-              value={typeFilter}
-              onChange={(e) => setPageState({ typeFilter: e.target.value })}
-            >
-              <option value="">All types</option>
-              <option value="controllable">Controllable</option>
-              <option value="permanent">Permanent</option>
-            </CFormSelect>
-          </CCol>
-          <CCol xs="auto">
-            <TableSearchInput
-              key={searchResetToken}
-              value={search}
-              onSearch={(value) => setPageState({ search: value })}
-              placeholder="Search by name..."
-            />
-          </CCol>
-          {/* Right-aligned action-button block (AGENTS.md section 17) - the
-              filter row's own convention: filters flow left to right,
-              per-page actions sit in this last, flex-end column. */}
-          <CCol className="d-flex justify-content-end gap-2">
-            <IconButton
-              icon={cilGroup}
-              onClick={() => setGroupsModalVisible(true)}
-              ariaLabel="Manage groups"
-            />
-            {hasActiveFilters && (
-              <IconButton
-                icon={cilFilterX}
-                color="warning"
-                variant={undefined}
-                onClick={handleResetFilters}
-                ariaLabel="Reset filters"
-              />
-            )}
-          </CCol>
-        </CRow>
-        {filtered.length === 0 ? (
-          <CAlert color="info">No processes match this filter.</CAlert>
-        ) : (
-          <>
-            <CTable responsive>
-              <CTableHead>
-                <CTableRow>
-                  <CTableHeaderCell scope="col">Name</CTableHeaderCell>
-                  <CTableHeaderCell scope="col">Group</CTableHeaderCell>
-                  <CTableHeaderCell scope="col">Status</CTableHeaderCell>
-                  <CTableHeaderCell scope="col" className="text-end">
-                    Actions
-                  </CTableHeaderCell>
-                  <CTableHeaderCell scope="col" className="text-end">
-                    <ExpandAllToggleButton
-                      ids={expandableIds}
-                      expandedIds={expandedIds}
-                      setExpandedIds={setExpandedIds}
-                    />
-                  </CTableHeaderCell>
-                </CTableRow>
-              </CTableHead>
-              <CTableBody>
-                {pageItems.map((process) => (
-                  <ProcessRow
-                    key={process.id}
-                    process={process}
-                    expanded={isExpanded(process.id)}
-                    onToggleExpand={() => toggleOne(process.id)}
-                    onReload={reload}
-                    onError={setError}
-                  />
-                ))}
-              </CTableBody>
-            </CTable>
-            <TablePagination
-              page={page}
-              pageSize={pageSize}
-              totalItems={totalItems}
-              onPageChange={setPage}
-              onPageSizeChange={setPageSize}
-            />
-          </>
-        )}
+        <CTabs activeItemKey={activeTab} onChange={setActiveTab}>
+          <CTabList variant="tabs" className="mb-3">
+            {tabDefs.map((tab) => (
+              <CTab key={tab.key} itemKey={tab.key}>
+                {tab.label}
+              </CTab>
+            ))}
+          </CTabList>
+        </CTabs>
+        {renderActiveTab()}
       </CCardBody>
-      <ManageNamedListModal
-        visible={groupsModalVisible}
-        onClose={() => setGroupsModalVisible(false)}
-        title="Groups"
-        addLabel="Add Group"
-        namePlaceholder="Group name"
-        items={groups}
-        onAdd={async (name) => {
-          await api.createProcessGroup(name)
-          reloadGroups()
-        }}
-        onRename={async (id, name) => {
-          await api.renameProcessGroup(id, name)
-          reloadGroups()
-          reload()
-        }}
-        onDelete={async (id) => {
-          await api.deleteProcessGroup(id)
-          reloadGroups()
-        }}
-      />
     </CCard>
   )
 }
