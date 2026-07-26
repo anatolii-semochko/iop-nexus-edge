@@ -363,6 +363,12 @@ export async function processRoutes(app: FastifyInstance): Promise<void> {
     await pool.query("UPDATE processes SET dashboard_flagged_at = NULL, updated_at = now() WHERE id = $1", [
       process.id,
     ]);
+    // Forced, not left to the next periodic/urgent tick (AGENTS.md section
+    // 24/26) - the Dashboard tab's eligibility filter prefers the live
+    // broadcast's `dashboardFlaggedAt` over this same REST response's own
+    // fresher value, so without this the row would linger for up to a
+    // full broadcast interval after a successful removal (reported live).
+    await broadcastForced("dashboard-flag-cleared");
     return { status: "ok" };
   });
 }

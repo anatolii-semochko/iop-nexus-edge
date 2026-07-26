@@ -26,6 +26,14 @@ import ProcessesTable from './ProcessesTable'
  * `dashboardFlaggedAt` is authoritative even when that value is legitimately
  * `null` (not flagged), which `??` would incorrectly treat as "missing,
  * fall back to REST".
+ *
+ * The remove-X's `disabled` state (`hasActiveWem`) reads live the exact
+ * same way, for the exact same reason - it used to be REST-only, and a
+ * process whose active WEM genuinely resolved while the page stayed open
+ * kept a stale `true` forever, silently disabling the button (no click
+ * ever reached the handler - reported live as "the button doesn't react
+ * to clicks at all", easy to miss since a disabled icon button doesn't
+ * look dramatically different from an enabled one).
  */
 const FILTERS = { search: true }
 
@@ -85,17 +93,21 @@ const DashboardTab = ({
       messageGroups={messageGroups}
       onGroupsChange={onGroupsChange}
       onResetFilters={onResetFilters}
-      renderExtraRowAction={(process) => (
-        <IconButton
-          icon={cilX}
-          size="sm"
-          color="danger"
-          center
-          disabled={process.hasActiveWem}
-          onClick={() => handleRemove(process)}
-          ariaLabel="Remove from Dashboard"
-        />
-      )}
+      renderExtraRowAction={(process) => {
+        const liveEntry = live[process.id]
+        const hasActiveWem = liveEntry ? liveEntry.hasActiveWem : process.hasActiveWem
+        return (
+          <IconButton
+            icon={cilX}
+            size="sm"
+            color="danger"
+            center
+            disabled={hasActiveWem}
+            onClick={() => handleRemove(process)}
+            ariaLabel="Remove from Dashboard"
+          />
+        )
+      }}
     />
   )
 }

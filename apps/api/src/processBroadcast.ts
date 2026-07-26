@@ -44,6 +44,15 @@ export interface ProcessFleetEntry extends Omit<ProcessPublicState, "status"> {
   // open never appeared without a manual reload. Live now, same as
   // everything else in this snapshot.
   dashboardFlaggedAt: string | null;
+  // Gates the Dashboard tab's remove-X (disabled until this is false,
+  // enforced server-side too - DELETE .../dashboard-flag 400s otherwise).
+  // Same staleness bug `dashboardFlaggedAt` above already had: read once
+  // from REST at mount, a process whose active WEM genuinely resolved
+  // while the page stayed open kept a stale `true` forever, silently
+  // disabling the button at the DOM level (no click ever reached the
+  // handler - reported live as "the button doesn't react to clicks at
+  // all"). Live now for the same reason.
+  hasActiveWem: boolean;
 }
 
 export interface ProcessFleetSnapshot {
@@ -81,7 +90,10 @@ async function assembleSnapshot(source: string): Promise<ProcessFleetSnapshot> {
   const processes: ProcessFleetEntry[] = [];
   for (const { id, type, dashboard_flagged_at } of rows) {
     try {
-      const state = await processRegistry.getPublicState(id);
+      const [state, hasActiveWem] = await Promise.all([
+        processRegistry.getPublicState(id),
+        processMessages.hasActiveEntries(id),
+      ]);
       processes.push({
         id,
         // Same suppression GET /processes' withLiveState applies - a
@@ -94,6 +106,7 @@ async function assembleSnapshot(source: string): Promise<ProcessFleetSnapshot> {
         messages: state.messages,
         updatedAt: state.updatedAt,
         dashboardFlaggedAt: dashboard_flagged_at,
+        hasActiveWem,
       });
     } catch (err) {
       // One process's malformed/unreachable cache entry must not take the

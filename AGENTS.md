@@ -1663,18 +1663,34 @@ once the process is genuinely back to zero active entries
 client-side disabled state). Empty Dashboard renders a plain green "OK"
 `CAlert`, nothing to page through.
 
-`hasActiveWem` (in `GET /processes`' `withLiveState`) is **not** derived
-from the same response's `messages` array - `listActiveMessages` (used
-for `messages`) excludes `hidden` entries for *display* purposes, but
-the Dashboard flag/unflag rule cares about the underlying condition
-regardless of whether a user has hidden its notification, so it's a
-separate, unfiltered `hasActiveEntries` check. This value isn't
-live-pushed over the WebSocket (only `status`/`critical`/`warning`/
-`metrics`/`messages` are) - it can go briefly stale between a full
-`reload()` and the next one, which only ever makes the X *more*
-conservative (stays disabled a little longer than strictly necessary),
-never incorrectly enabled, since the server re-checks unconditionally
-regardless of what the client's disabled state implied.
+`hasActiveWem` (in `GET /processes`' `withLiveState`, and now also in
+`ProcessFleetEntry` - see section 24) is **not** derived from the same
+response's `messages` array - `listActiveMessages` (used for `messages`)
+excludes `hidden` entries for *display* purposes, but the Dashboard
+flag/unflag rule cares about the underlying condition regardless of
+whether a user has hidden its notification, so it's a separate,
+unfiltered `hasActiveEntries` check.
+
+**Bug, found live (2026-07):** this used to be REST-only (read once at
+`DashboardTab.jsx` mount, never refreshed), on the theory that staleness
+could only ever make the X *more* conservative and never incorrectly
+enabled. That reasoning missed the actual failure mode: a process whose
+active WEM genuinely resolved *while the page stayed open* kept a stale
+`true` forever, permanently disabling the button at the DOM level - no
+click ever reached the handler, reported live as "the button doesn't
+react to clicks at all" (easy to miss, since a disabled icon button
+doesn't look dramatically different from an enabled one at a glance).
+Fixed by pushing `hasActiveWem` through the same live broadcast as
+`dashboardFlaggedAt` (section 24's `ProcessFleetEntry`) and reading it in
+`DashboardTab.jsx` the identical way: `liveEntry ? liveEntry.hasActiveWem
+: process.hasActiveWem` - not `??`, same reasoning as `dashboardFlaggedAt`
+above. Compounding this, clearing the flag (`DELETE
+.../dashboard-flag`) previously relied on the next periodic/urgent
+broadcast tick to inform the UI at all, so a successful removal could
+still visibly linger on Dashboard for up to a full broadcast interval -
+the route now calls `broadcastForced("dashboard-flag-cleared")` right
+after the flag-clearing `UPDATE`, so the row disappears the instant the
+click succeeds.
 
 ### Settings tab
 
@@ -1916,6 +1932,30 @@ backed by the Redis hash `processBroadcast.ts` otherwise reads for free),
 and the failure mode of it going briefly stale is self-correcting (a 400 from
 the server, not a silent inconsistency) - not worth that added DB load for
 what wasn't the reported problem.
+
+**Reversed (2026-07)**: that "self-correcting" call was wrong about the
+actual failure mode. Staleness doesn't just delay the X becoming enabled -
+if the underlying condition resolves while the page stays open, the REST
+snapshot is never re-read at all, so the disabled state never clears,
+ever (reported live as "the button doesn't react to clicks at all," easy
+to miss since a disabled icon button looks nearly identical to an enabled
+one). Fixed by giving `hasActiveWem` the exact same live treatment as
+`dashboardFlaggedAt` above - added to `ProcessFleetEntry`, computed in
+`assembleSnapshot()` via `Promise.all([processRegistry.getPublicState(id),
+processMessages.hasActiveEntries(id)])` (parallel, not sequential; the one
+extra Postgres query per process this reintroduces was accepted as the
+cost of a correct disabled state), and read in `DashboardTab.jsx` with the
+identical `liveEntry ? liveEntry.hasActiveWem : process.hasActiveWem`
+pattern. Separately, clearing the flag (`DELETE .../dashboard-flag`) used
+to leave the UI to notice via the next periodic/urgent tick, so a
+successful removal could still visibly linger for up to a full broadcast
+interval - the route now ends with `await broadcastForced("dashboard-flag-
+cleared")` right after the flag-clearing `UPDATE`, so the row disappears
+the instant the click succeeds, not on the next tick. Verified live: an
+out-of-range Temperature Safety Monitor entry showed its remove-X
+correctly disabled; resolving the condition (no reload) flipped it to
+enabled within one broadcast interval; clicking it removed the row
+immediately, console clean throughout.
 
 ## 25. Notification center (header WEM icons + popup)
 
