@@ -2,6 +2,8 @@ import type { FastifyInstance } from "fastify";
 
 import { requireAuth } from "../auth.js";
 import { pool } from "../db.js";
+import * as heartbeatControl from "../heartbeatControl.js";
+import type { HeartbeatControlConfig } from "../heartbeatControl.js";
 import { broadcastForced } from "../processBroadcast.js";
 import * as processMessages from "../processMessages.js";
 import * as processRegistry from "../processRegistry.js";
@@ -39,6 +41,10 @@ interface ProcessRow {
   // maybeFlagForDashboard), cleared only via the dashboard-flag DELETE
   // route below.
   dashboard_flagged_at: string | null;
+  // Heartbeating Control (AGENTS.md) - design-time config (stoppable +
+  // warning/error skipped-tick thresholds); live last-seen/stopped state
+  // is Redis-backed, added below in withLiveState.
+  heartbeat_control: HeartbeatControlConfig;
   created_at: string;
   updated_at: string;
 }
@@ -117,6 +123,26 @@ export async function processRoutes(app: FastifyInstance): Promise<void> {
     await processRegistry.setStatus(process.id, action === "ON" ? "on" : "off", "api");
     return { status: "ok" };
   });
+
+  // UI-driven, "heartbeat-control-test" kind only (AGENTS.md's
+  // Heartbeating Control section) - a bespoke internal flag, deliberately
+  // NOT the generic ON/OFF action above: `status` is a timer-only,
+  // non-urgent broadcast field (visibly laggy for exactly this kind of
+  // "flip it and watch the effect immediately" use case), so this process
+  // stays `permanent` (no actions at all) and gets its own dedicated,
+  // instantly-effective toggle instead.
+  app.put<{ Params: { id: string }; Body: { simulate: boolean } }>(
+    "/processes/:id/heartbeat-test-failure",
+    async (request, reply) => {
+      const process = await findProcess(request.params.id);
+      if (!process) {
+        return reply.code(404).send({ error: "process not found" });
+      }
+
+      await heartbeatControl.setTestSimulateFailure(process.id, request.body.simulate);
+      return { status: "ok" };
+    },
+  );
 
   // Orchestrator-driven only - there is no "make critical" button in the
   // UI, this is how a permanent monitor process (e.g. Temperature Safety
@@ -200,6 +226,20 @@ export async function processRoutes(app: FastifyInstance): Promise<void> {
   // section 24), so there is nothing to scope by id.
   app.post<{ Body: { reason?: string } }>("/processes/state/broadcast", async (request) => {
     await broadcastForced(request.body?.reason ?? "forced");
+    return { status: "ok" };
+  });
+
+  // Orchestrator-driven only (AGENTS.md's Heartbeating Control section) -
+  // one batched call per tick, not one per process: `index.ts`'s tick()
+  // collects every process id whose runner completed *without throwing*
+  // this tick and sends the whole list here at once, rather than one HTTP
+  // round trip per process per second. A process that isn't in this list
+  // (its runner threw, or it has no runner at all - unlikely but not
+  // rejected) simply doesn't get its last-seen timestamp refreshed; the
+  // "Heartbeating Control" process kind is what actually compares that
+  // against each process's configured thresholds.
+  app.post<{ Body: { processIds: number[] } }>("/processes/heartbeat", async (request) => {
+    await heartbeatControl.touchHeartbeats(request.body.processIds);
     return { status: "ok" };
   });
 
@@ -379,7 +419,17 @@ async function findProcess(id: string): Promise<ProcessRow | undefined> {
 }
 
 async function withLiveState(process: ProcessRow) {
-  const [status, critical, warning, metrics, messages, hasActiveWem] = await Promise.all([
+  const [
+    status,
+    critical,
+    warning,
+    metrics,
+    messages,
+    hasActiveWem,
+    heartbeatStopped,
+    heartbeatLastSeenAt,
+    heartbeatTestSimulateFailure,
+  ] = await Promise.all([
     process.type === "controllable" ? processRegistry.getStatus(process.id) : Promise.resolve(undefined),
     processRegistry.getCritical(process.id),
     processRegistry.getWarning(process.id),
@@ -391,6 +441,28 @@ async function withLiveState(process: ProcessRow) {
     // hidden, so the UI's "can this be removed from Dashboard" check needs
     // this separate, unfiltered signal.
     processMessages.hasActiveEntries(process.id),
+    // Heartbeating Control (AGENTS.md) - live Redis state alongside the
+    // Postgres `heartbeat_control` config already on `process` itself.
+    // Read here so apps/orchestrator's heartbeat-control process kind
+    // gets everything it needs from the one `GET /processes` call it
+    // already makes every tick, no separate endpoint required.
+    heartbeatControl.getProcessHeartbeatStopped(process.id),
+    heartbeatControl.getProcessLastSeenAt(process.id),
+    // "heartbeat-control-test" kind only - fetched unconditionally for
+    // every process anyway (same as hasActiveWem above), simpler than
+    // branching on kind here.
+    heartbeatControl.isTestSimulateFailure(process.id),
   ]);
-  return { ...process, status, critical, warning, metrics, messages, hasActiveWem };
+  return {
+    ...process,
+    status,
+    critical,
+    warning,
+    metrics,
+    messages,
+    hasActiveWem,
+    heartbeatStopped,
+    heartbeatTestSimulateFailure,
+    heartbeatLastSeenAt,
+  };
 }

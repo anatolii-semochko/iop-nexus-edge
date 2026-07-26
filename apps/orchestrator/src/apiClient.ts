@@ -43,6 +43,35 @@ export interface ProcessRecord {
   // still-active physical alarm).
   critical: boolean;
   warning: boolean;
+  // Heartbeating Control (AGENTS.md) - `heartbeat_control` is this
+  // process's own design-time config (Postgres); `heartbeatStopped`/
+  // `heartbeatLastSeenAt` are its live Redis counterparts, both already
+  // folded into this same GET /processes response so the heartbeat-control
+  // process kind needs no separate call.
+  heartbeat_control: HeartbeatControlConfig;
+  heartbeatStopped: boolean;
+  heartbeatLastSeenAt: string | null;
+  // "heartbeat-control-test" kind only - its own internal simulate-
+  // failure flag (Redis, set from its detail panel's switch, never the
+  // generic ON/OFF status mechanism - AGENTS.md's Heartbeating Control
+  // section explains why). Present on every process record regardless of
+  // kind, same as heartbeatStopped above.
+  heartbeatTestSimulateFailure: boolean;
+}
+
+// Mirrors apps/api's heartbeatControl.ts shape exactly (AGENTS.md's
+// Heartbeating Control section) - no shared types package exists yet
+// (to-do.txt's refactoring notes, Etap 1/Phase 2) so this is hand-kept in
+// sync, same known risk as every other cross-service DTO in this app.
+export interface HeartbeatThreshold {
+  numberSkippedTicks: number;
+  level: number;
+}
+
+export interface HeartbeatControlConfig {
+  stoppable: boolean;
+  warning: HeartbeatThreshold | null;
+  error: HeartbeatThreshold | null;
 }
 
 export interface ProcessMetrics {
@@ -141,5 +170,14 @@ export const apiClient = {
     request("/processes/state/broadcast", {
       method: "POST",
       body: JSON.stringify({ reason }),
+    }),
+  // Heartbeating Control (AGENTS.md) - one batched call per tick from
+  // index.ts's tick(), not one per process; see
+  // apps/api/src/heartbeatControl.ts's touchHeartbeats for what this
+  // actually writes.
+  touchHeartbeats: (processIds: number[]) =>
+    request("/processes/heartbeat", {
+      method: "POST",
+      body: JSON.stringify({ processIds }),
     }),
 };

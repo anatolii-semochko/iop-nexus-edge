@@ -140,6 +140,29 @@ export const api = {
   // Dashboard tab (AGENTS.md section 22) - clears the flag; the API 400s
   // if the process still has active WEM entries.
   clearDashboardFlag: (id) => request(`/processes/${id}/dashboard-flag`, { method: 'DELETE' }),
+  // Heartbeating Control (AGENTS.md) - one mixed list across processes/
+  // devices/nodes, one update path parameterized by `type` regardless of
+  // which table it actually writes to.
+  listHeartbeatControls: () => request('/heartbeat-controls'),
+  updateHeartbeatControl: (type, id, { warning, error }) =>
+    request(`/heartbeat-controls/${type}/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ warning, error }),
+    }),
+  setHeartbeatStopped: (type, id, stopped) =>
+    request(`/heartbeat-controls/${type}/${id}/stopped`, {
+      method: 'PUT',
+      body: JSON.stringify({ stopped }),
+    }),
+  // "heartbeat-control-test" kind only - its own bespoke internal flag,
+  // deliberately not the generic doProcessAction ON/OFF (AGENTS.md's
+  // Heartbeating Control section - that field is timer-only/non-urgent
+  // and visibly lagged for this exact use case).
+  setHeartbeatTestFailure: (id, simulate) =>
+    request(`/processes/${id}/heartbeat-test-failure`, {
+      method: 'PUT',
+      body: JSON.stringify({ simulate }),
+    }),
   // Auth (AGENTS.md section 13 - UI login only, not per-endpoint API
   // authorization).
   login: (username, password) =>

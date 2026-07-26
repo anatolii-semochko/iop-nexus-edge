@@ -27,6 +27,8 @@ import TableSearchInput from '../../components/table/TableSearchInput'
 import { useExpandableRows } from '../../hooks/useExpandableRows'
 import { usePagination } from '../../hooks/usePagination'
 import ActiveBuzzerPanel from './ActiveBuzzerPanel'
+import HeartbeatControlPanel from './HeartbeatControlPanel'
+import HeartbeatControlTestPanel from './HeartbeatControlTestPanel'
 import ProcessSettingsModal from './ProcessSettingsModal'
 import ResourceMonitorPanel from './ResourceMonitorPanel'
 import TemperatureProcessPanel from './TemperatureProcessPanel'
@@ -40,6 +42,8 @@ import WemRow from './WemRow'
 export const KIND_PANELS = {
   'temperature-control': TemperatureProcessPanel,
   'temperature-monitor': TemperatureProcessPanel,
+  'heartbeat-control': HeartbeatControlPanel,
+  'heartbeat-control-test': HeartbeatControlTestPanel,
   'resource-monitor': ResourceMonitorPanel,
   'active-buzzer': ActiveBuzzerPanel,
 }

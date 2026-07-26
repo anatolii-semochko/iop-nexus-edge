@@ -2345,3 +2345,201 @@ device state across ~2s). Turning the process `OFF` mid-error correctly
 forced and held the buzzer silent despite the fleet-wide error staying
 active, then resumed reacting to it immediately on `ON`. Console clean
 throughout; test thresholds/periods reset to their prior values afterward.
+
+## 28. Heartbeating Control
+
+The platform's own watchdog - detects a process whose orchestrator runner
+has stopped ticking (not just a domain-level failure like Active Zummer's
+alarm conditions, but the process itself going silent) and escalates
+through the same WEM/`message_levels` pipeline every other alarm already
+uses. Built after an explicit discussion with the user distinguishing
+"not yet built" (this, and its planned siblings - command-path auth,
+Redis/EdgeX reconciliation) from "wrong at the root" (nothing found -
+see to-do.txt's refactoring notes) - heartbeating was already on the
+user's own roadmap, pulled forward as a real design/build pass.
+
+### Config vs runtime split
+
+Each entity (`processes`, `devices`, `nodes` - all three tables) has its
+own `heartbeat_control` jsonb column:
+```ts
+{ stoppable: boolean,
+  warning: { numberSkippedTicks: number, level: number } | null,
+  error:   { numberSkippedTicks: number, level: number } | null }
+```
+Deliberately **not** a separate cross-entity table - confirmed directly
+with the user ("вони належать їм і будуть розширювати для іншого
+функціоналу"): this column belongs to each entity and is expected to grow
+with more heartbeat-related fields later, same loose-jsonb convention
+already used for `processes.config`/`devices.capabilities`. `stoppable`
+is system-set at seed time only - never accepted by the PATCH endpoint
+below, regardless of what a client sends. `level` refers to the existing
+`message_levels` warning/error rows (1-4, section 22) - a stale entity is
+just another WEM producer into the pipeline Active Zummer already
+consumes, no new alerting mechanism.
+
+Live/runtime state is Redis, not Postgres (confirmed with the user:
+"поточний параметр в пам'яті") - `apps/api/src/heartbeatControl.ts`:
+- `heartbeat:{type}:{id}:lastSeen` - a plain last-write-wins timestamp,
+  **not** a TTL-expiring key. An earlier draft of this design (chat
+  discussion before the user's own detailed written spec) proposed
+  passive TTL-expiry detection ("free" staleness via Redis expiration,
+  no watchdog needed) - dropped once the actual spec defined thresholds
+  in *number of skipped ticks*: a single fixed TTL can't represent both a
+  short warning window and a much longer error window for the same key at
+  once, so detection has to actively compare "now minus last-seen" against
+  each entity's own configured thresholds instead (see below).
+- `heartbeat:{type}:{id}:stopped` - whether monitoring is currently
+  paused. Only ever settable `true` for a `stoppable` entity - enforced
+  server-side (`NotStoppableError` -> 400), not just a disabled UI switch.
+
+### API (`apps/api/src/routes/heartbeatControls.ts`)
+
+One mixed list and one update path spanning all three entity types,
+per the user's own explicit direction ("Екшин збереження приймає
+параметри type і зберігає зміни у відповідну таблицю однаково незалежно
+від ентіті"):
+- `GET /heartbeat-controls` - every process+device+node merged into one
+  array (`{type, id, name, heartbeatControl, stopped, lastSeenAt}`),
+  sorted by name.
+- `PATCH /heartbeat-controls/:type/:id` - body `{warning, error}` only
+  (never `stoppable`).
+- `PUT /heartbeat-controls/:type/:id/stopped` - body `{stopped}`, the
+  runtime pause/resume above.
+
+`GET /processes` also carries `heartbeat_control` (config) plus
+`heartbeatStopped`/`heartbeatLastSeenAt` (live) directly on each process
+row - `apps/orchestrator`'s watchdog runner gets everything it needs from
+the one `GET /processes` call it already makes every tick, no second
+endpoint required. `POST /processes/heartbeat` (body `{processIds}`) is
+the batched touch - see below for why batched.
+
+### Scope: processes now, devices/nodes structure-only
+
+Confirmed with the user: real staleness *detection* is wired up for
+processes only in this first pass - they already have a natural 1s tick
+driver (the orchestrator's own loop); devices/nodes have no heartbeat
+producer of any kind yet (a pre-existing gap, confirmed while designing
+this - `nodes.last_heartbeat_at`/`health` are stub columns with no writer
+anywhere). Devices/nodes still get the full config column and appear in
+the combined UI list/edit form (so the shape is exercised and stable),
+just never actually evaluated for staleness - `apps/orchestrator`'s
+watchdog only ever reads `GET /processes`, which never returns devices or
+nodes at all, so this scope boundary falls out naturally rather than
+needing an explicit filter.
+
+### Orchestrator (`apps/orchestrator/src/processes/heartbeatControl.ts`)
+
+The "Heartbeating Control" process kind, on the shared 1s tick like every
+other kind - no second timer loop. Each tick: reads the same
+`GET /processes` fleet snapshot, and for every process with a non-null
+`warning`/`error` config (and not currently `stopped`), computes
+`skippedTicks = floor((now - lastSeenAt) / TICK_INTERVAL_MS)` and
+compares against that process's own configured thresholds - error takes
+precedence over warning (same mutual-exclusivity convention as
+`resourceMonitor.ts`'s critical/warning split). `TICK_INTERVAL_MS` lives
+in its own dependency-free module (`tickInterval.ts`), not `index.ts`
+itself, to avoid a circular import (same reasoning as `apps/api`'s
+`processStateEvents.ts`).
+
+**WEM entries are raised under "Heartbeating Control"'s own `process_id`,
+not the stale entity's** - confirmed with the user before building this,
+for two concrete reasons: `process_messages` has no FK for devices/nodes
+at all, and a process whose own runner is genuinely broken can't reliably
+report its own staleness (detecting that is the entire point of an
+independent watchdog). Practical consequence worth remembering: a stale
+Resource Monitor shows its red/yellow highlight on **Heartbeating
+Control's** row, not Resource Monitor's own row.
+
+Also sets `critical`/`warning` booleans on itself (row highlight),
+alongside the WEM entries (list/Dashboard) - missed on the first pass,
+caught immediately when live-tested against `resourceMonitor.ts`'s own
+established pattern of setting both, not just one.
+
+Batched heartbeat touch, not one HTTP call per process per second:
+`index.ts`'s `tick()` collects every process id whose runner completed
+*without throwing* this tick into one array, and calls
+`apiClient.touchHeartbeats(ids)` once at the end - a single
+`POST /processes/heartbeat`, pipelined into Redis server-side
+(`heartbeatControl.touchHeartbeats`), not N round trips.
+
+### "Heartbeating control test" process
+
+A dummy **permanent** process (deliberately **not** controllable) with its
+own bespoke internal flag, `heartbeatTestSimulateFailure` - Redis-backed
+(`heartbeat:test:{id}:simulateFailure` in `heartbeatControl.ts`), toggled
+from a switch *inside* its own expandable detail panel, per the user's
+own spec ("В розгортці процесу є тільки один свічер"). An earlier draft
+of this got both of those wrong: it made the process `controllable` and
+reused the generic `ON`/`OFF` status/action mechanism (reasoning: reuse
+proven infrastructure instead of a bespoke one) - the user caught this
+live on two counts: (1) the switch belongs inside the detail panel, not
+promoted to the row as a side effect of being controllable, and (2)
+`status` is a deliberately non-urgent, timer-only broadcast field
+(section 24), which visibly lagged for exactly this "flip it and watch
+the effect immediately" use case. Fixed by staying `permanent` (no
+actions at all) and giving the process its own dedicated, instantly-
+effective toggle - a `PUT /processes/:id/heartbeat-test-failure` endpoint
+writing straight to Redis, read back via `GET /processes`'
+`heartbeatTestSimulateFailure` field (present on every process record,
+same as `heartbeatStopped`), with `HeartbeatControlTestPanel.jsx` managing
+the switch's visual state **optimistically** in local component state -
+it flips the instant the user clicks, never waiting on any broadcast or
+reload to catch up, which is what actually fixes the lag (not merely
+moving the switch's location).
+
+Its runner (`heartbeatControlTest.ts`) throws while the flag is `true`.
+This is a *second*, independent test lever alongside the general
+`stopped` mechanism above - confirmed the two don't conflict:
+- Toggling the internal flag simulates a genuinely dead heartbeat (the
+  runner throws, `tick()` excludes it from the touch batch, "Heartbeating
+  Control" naturally notices and escalates warning -> error) - tests the
+  *detection/escalation* path end-to-end, through the real failure
+  mechanism, not a synthetic bypass.
+- Toggling its separate `stopped` flag (from the combined list, since
+  it's the one entity seeded `stoppable: true`) pauses monitoring of it
+  regardless of whether it's actually ticking - tests that *that*
+  mechanism correctly suppresses alerts.
+
+### UI (`apps/ui/src/views/processes/`)
+
+`HeartbeatControlPanel.jsx` - the "Heartbeating Control" process's own
+expandable detail panel (per the user's own spec: "в розгорнутій
+компоненті процесу", not a separate page), reusing the existing
+pagination/search toolkit (section 11) even though the underlying data
+spans three REST resources merged server-side into one list. Type filter
+(All/Processes/Devices/Nodes) + name search + `ResetFiltersButton`, a
+table with an Edit (gear icon, matching the existing per-process
+Settings-popup convention) opening `HeartbeatEditModal.jsx` (two threshold
+rows, warning/error, each a ticks-count input + a level select that
+includes "Off (not monitored)" as `null`), and a `Switch` per row wired to
+the runtime `stopped` toggle - disabled entirely for a non-`stoppable`
+entity (enforced both here and server-side).
+
+`HeartbeatControlTestPanel.jsx` - its own switch (see above), plus the
+explanation of what it does.
+
+Two real bugs caught before shipping, both from live-testing rather than
+lint/type errors:
+1. The test process was originally seeded `permanent` with no runner
+   registered in `RUNNERS` at all, meaning its heartbeat would *never* be
+   touched by anything - it would show as maximally stale from boot
+   instead of behaving normally until deliberately toggled off. First fix
+   (superseded by the correction above) made it `controllable`; the
+   final shape keeps it `permanent` with a runner that reads the bespoke
+   flag instead.
+2. That first fix's reuse of the generic ON/OFF mechanism both misplaced
+   the switch (row-level, not inside the panel) and visibly lagged
+   (non-urgent broadcast field) - caught directly by the user, fixed as
+   described above.
+
+Verified live end-to-end, after the correction: the panel's switch
+flips instantly on click (no lag), and toggling it produced a
+warning-level WEM under "Heartbeating Control" after 3 skipped ticks,
+escalated to error-level (with `critical` row highlight) after 10, then
+auto-resolved the instant it was switched back - all through the real
+orchestrator tick loop, not simulated. The independent `stopped` toggle
+was verified to correctly suppress alerts even while the test process's
+own heartbeat stayed genuinely dead, confirming the two mechanisms don't
+interfere with each other. Console clean throughout; state reset to
+defaults afterward.
