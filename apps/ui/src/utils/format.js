@@ -37,3 +37,34 @@ export function isStale(iso, thresholdMs) {
   if (!iso) return true
   return Date.now() - new Date(iso).getTime() > thresholdMs
 }
+
+const sameDay = (a, b) =>
+  a.getFullYear() === b.getFullYear() &&
+  a.getMonth() === b.getMonth() &&
+  a.getDate() === b.getDate()
+
+// Today/Yesterday/date + time-to-the-minute (notification center, AGENTS.md
+// section 25) - a plain `toLocaleString()` (formatDateTime above) is too
+// wide and includes seconds, which don't matter for a feed sorted newest-
+// first; a relative "N minutes ago" (formatRelativeTime above) is right for
+// a single "last updated" field but reads badly on a long list where every
+// row needs its own reference point, not "ago" repeated down the column.
+export function formatSmartDateTime(iso) {
+  if (!iso) return '-'
+  const date = new Date(iso)
+  const now = new Date()
+  const time = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+
+  if (sameDay(date, now)) return `Today, ${time}`
+
+  const yesterday = new Date(now)
+  yesterday.setDate(yesterday.getDate() - 1)
+  if (sameDay(date, yesterday)) return `Yesterday, ${time}`
+
+  const datePart = date.toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
+  return `${datePart}, ${time}`
+}

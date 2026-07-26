@@ -73,3 +73,25 @@ body {
     --cui-footer-bg: var(--cui-body-bg);
   }
 }
+
+// Notification center header icons (AGENTS.md section 25) - warnings/
+// errors blink while *any* process has that icon's own active state,
+// independent of the icon's own unread-driven color - fast and dramatic
+// on purpose ("дико блимають"), this is meant to be impossible to miss.
+// A solid colored disc (the `bg-{color}` utility class NotificationCenter.
+// jsx pairs this with) pulsing behind a light icon, not the icon's own
+// silhouette fading - the latter (this class's original treatment) turned
+// out too subtle to actually notice at a glance (reported live).
+@keyframes wem-blink-ring {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.15;
+  }
+}
+
+.wem-blink-ring {
+  animation: wem-blink-ring 0.6s ease-in-out infinite;
+}

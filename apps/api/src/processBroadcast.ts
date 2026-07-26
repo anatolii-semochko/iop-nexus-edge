@@ -19,6 +19,7 @@
 import { config } from "./config.js";
 import { pool } from "./db.js";
 import { logger } from "./logger.js";
+import * as processMessages from "./processMessages.js";
 import * as processRegistry from "./processRegistry.js";
 import type { ProcessPublicState } from "./processRegistry.js";
 import { processStateEvents } from "./processStateEvents.js";
@@ -47,10 +48,16 @@ export interface ProcessFleetEntry extends Omit<ProcessPublicState, "status"> {
 
 export interface ProcessFleetSnapshot {
   processes: ProcessFleetEntry[];
+  // Notification center (AGENTS.md section 25) - unread counts per WEM
+  // type, Redis-backed (processMessages.ts's own counters, not recomputed
+  // here) and riding this same broadcast rather than a separate channel,
+  // per the user's own direction: one systematic feed, not a second
+  // parallel one just for this.
+  unreadCounts: Record<processMessages.MessageType, number>;
   timestamp: string;
   // Why this particular broadcast fired - "timer" for the periodic
   // cadence, or what triggered an urgent one ("critical", "warning",
-  // "messages", "forced").
+  // "messages", "read", "forced").
   source: string;
 }
 
@@ -96,7 +103,9 @@ async function assembleSnapshot(source: string): Promise<ProcessFleetSnapshot> {
     }
   }
 
-  return { processes, timestamp: new Date().toISOString(), source };
+  const unreadCounts = await processMessages.getUnreadCounts();
+
+  return { processes, unreadCounts, timestamp: new Date().toISOString(), source };
 }
 
 async function broadcastNow(source: string): Promise<void> {

@@ -1916,3 +1916,164 @@ backed by the Redis hash `processBroadcast.ts` otherwise reads for free),
 and the failure mode of it going briefly stale is self-correcting (a 400 from
 the server, not a silent inconsistency) - not worth that added DB load for
 what wasn't the reported problem.
+
+## 25. Notification center (header WEM icons + popup)
+
+Global, cross-process view of WEM (Warnings/Errors/Messages, section 22) -
+distinct from a process's own WemRow (which only ever shows that one
+process's *currently active* entries). Three header icons (`apps/ui/src/
+components/header/NotificationCenter.jsx`, wired into `AppHeader.jsx`),
+each opening the same `NotificationCenterModal.jsx` preset to its type.
+
+**Read/unread model**: reuses `process_messages.hidden` as the read marker
+for *every* type, not just `message` - dismissing an entry in this popup
+is the same act as dismissing it anywhere else, global (not per-user),
+same reasoning `hidden` already had (section 22). `setHidden`'s old type
+restriction (only `message` could be dismissed) is gone from
+`processMessages.ts` - `apps/ui`'s WemRow.jsx still only ever *renders*
+its own dismiss button for `message` (that surface's intent, "stop
+showing this on my process card", is unchanged), but the backend no
+longer enforces it structurally, since this popup needs to dismiss
+warning/error rows too and there is now only one dismiss action in the
+system. Two new columns record who/when (`hidden_by` FK users ON DELETE
+SET NULL, `hidden_at` - migration `1690000000022`) - `PATCH /process-
+messages/:messageId` is the one route in this whole surface that requires
+auth (`requireAuth`, section 13), specifically so `request.user.sub` is
+trustworthy instead of a spoofable client-supplied id; this never
+actually blocks a real user since AuthGate already covers the whole UI.
+
+**Consequence worth knowing**: marking an *active* warning/error as read
+via this popup also removes it from `listActiveMessages`, which is what
+the process's own WemRow and the fleet broadcast's `messages` field both
+read from (section 24) - so acknowledging a still-active warning here
+makes it disappear from the process's own detail panel too, even though
+the row may still be highlighted red/yellow (that highlight is the
+independent `critical`/`warning` boolean, not derived from `messages`).
+Deliberate, per explicit direction, not an oversight.
+
+**Unread counters**: Redis-backed (`wem:unread:{message,warning,error}`,
+`processMessages.ts`), not a live `COUNT(*)` per header render. Recomputed
+from Postgres once at boot (`initUnreadCounts()`, `index.ts`, ahead of the
+first broadcast tick - Redis is ephemeral, Postgres is the source of
+truth); incremented by 1 per genuinely new row `syncActiveMessages`
+inserts (not a text/level update, not a resolve); decremented/incremented
+by `setHidden` on an actual hidden-flag flip. Folded into the *same*
+fleet-wide broadcast envelope as process state (`ProcessFleetSnapshot.
+unreadCounts`, `processBroadcast.ts`) rather than a second parallel
+channel - per the user's own explicit direction ("Додай лічильники до
+Redis... Додавай ці дані до потоку WebSocket"). `apps/messaging-gateway`
+relays whatever's in the cached snapshot verbatim - its `toProcessStateEntry`
+helper has to be kept in sync by hand with every field `processBroadcast.ts`
+adds to the envelope (found live: forgot `unreadCounts` there on the first
+pass, header badges silently stayed at zero even though Postgres/Redis had
+the right numbers and the WS payload reached the browser - the gateway was
+just dropping the field on the floor while reconstructing the envelope
+field-by-field instead of spreading the cached object).
+
+**Two independent live signals per header icon**, both riding that same
+broadcast, not one styled two ways: color (neutral vs tinted) is driven by
+`useUnreadCounts()` (`useLiveProcess.js`), `> 0` unread; the `.wem-blink`
+animation (`style.scss`, warning/error only, deliberately fast/dramatic
+per "дико блимають") is driven by whether *any* process currently has
+`critical`/`warning` true (`useProcessesLiveState()`), regardless of
+unread count - an already-read but still-active condition still blinks,
+an unread-but-resolved one does not.
+
+**Server-side pagination** (`GET /process-messages?type=&scope=&
+processId=&search=&page=&pageSize=`, `processMessages.listProcessMessages`)
+- the first list in this app that isn't client-side (section 11's "tens
+of rows" doesn't hold for an append-only log that only grows; this
+session's own test data alone reached 2800+ warning rows). Historical
+only - `scope` is `"new" | "all"`, no `"active"` (see below, that tab
+doesn't call this route at all). `type` accepts `"all"` too (no `pm.type`
+condition at all) alongside the three real `MessageType`s. `processId`/
+`search` (`ILIKE` on `text`) are additional optional filters, built as a
+dynamic parameterized `WHERE` (conditions/values arrays, not string
+interpolation) since which filters are present varies per request.
+`NotificationCenterModal.jsx` reuses `TablePagination.jsx` as-is (a purely
+controlled/presentational component, already agnostic to client- vs
+server-driven paging) rather than building a new pagination widget - only
+the state feeding it (fetched `total`/`page`, not a sliced in-memory
+array) is new. Every filter setter (type/tab/process/search/page size)
+resets `page` to 1 in the same event handler that changes the filter, not
+a separate effect watching for the change - avoids the `react-hooks/
+set-state-in-effect` anti-pattern for what is genuinely a direct
+consequence of the user's own click, not derived state to reconcile
+after the fact.
+
+**Date display** (`apps/ui/src/utils/format.js`'s `formatSmartDateTime`) -
+Today/Yesterday/date + time-to-the-minute, new alongside the existing
+`formatDateTime` (full locale string, too wide for a dense feed) and
+`formatRelativeTime` ("N minutes ago", right for one last-updated field,
+reads badly repeated down a whole column where every row needs its own
+reference point).
+
+### Cosmetic revision pass (after first ship)
+
+A round of fixes to the shipped feature above, from watching it live:
+
+- **Fixed modal height.** `NotificationCenterModal.jsx`'s `CModalBody` is
+  a flex column with an explicit `height: '70vh'` and an inner `flex-
+  grow-1 overflow-auto` region around the table/empty-state/spinner -
+  previously the modal's own height tracked whatever the current tab
+  happened to return, visibly jumping on every tab switch.
+- **"All" in the type selector.** A fourth option (`cilBell`, secondary)
+  alongside the three real types, kept in `NotificationCenterModal.jsx`'s
+  own `TYPE_OPTIONS`, not in `WEM_TYPE_META` - "All" has no unread count
+  or blink state of its own, so it doesn't belong in the map the header
+  icons iterate.
+- **Active tab moved off REST, onto live process state.** Every process's
+  own `messages` array in the fleet broadcast (section 24) is already
+  exactly "currently active, unhidden" for that process - the Active tab
+  now flattens `useProcessesLiveState()` across every process
+  (`message`-type entries excluded, no active concept for those),
+  filters/sorts client-side, and needs no pagination (inherently a small,
+  transient set). Process *names* aren't in the live payload (only
+  `process_id` implicitly, via which key in the map an entry came from) -
+  `NotificationCenterModal.jsx` fetches `GET /processes` once on mount
+  (cheap, a few dozen rows) to build an id->name lookup, reused for both
+  this and the process filter dropdown below. Every Active-tab row is
+  inherently unread (an entry with `hidden: true` is excluded from
+  `listActiveMessages`/the live `messages` array by construction, section
+  22) - dismissing it needs no explicit refetch either, the broadcast
+  that follows the dismiss already drops it from the live list on its
+  own.
+- **Process + search filter row**, between the tab strip and the list,
+  applying to all three tabs alike (client-side for Active, query params
+  for New/All).
+- **Columns reordered to Time/Process/Message/Status** (was Process/
+  Message/When/Status), and the message `text` cell is colored
+  (`text-{success,warning,danger}` off `WEM_TYPE_META`) in every tab now,
+  not just when "All" is selected - needed once mixed-type rows became
+  possible at all (previously every visible row already shared the
+  header icon's own type, so per-row color would have been redundant).
+  Status column simplified: no more "New" badge (unread = bare dismiss
+  `X`, nothing else) and no more the read entry's name spelled out next
+  to its avatar (still available on hover via the avatar's `title`).
+- **Header icon blink bug + visual contrast**, both reported live:
+  1. Warning and error icons were blinking *together* off one shared
+     `critical || warning` boolean - a process is never both at once
+     (critical always wins, section 21), so this made the warning icon
+     blink for an error-only condition and vice versa. Split into two
+     independent flags (`hasActiveWarning`/`hasActiveError`,
+     `NotificationCenter.jsx`), each driving only its own icon.
+  2. The original blink (`.wem-blink`, plain opacity fade on the icon's
+     own outline) was too subtle to notice at a glance. Replaced with
+     `.wem-blink-ring` (`style.scss`) - a solid `bg-{color}` disc behind
+     the icon that pulses opacity, paired with a white icon on top while
+     blinking - reads as "inverse" (colored fill, light silhouette)
+     without needing filled/inverse icon variants CoreUI's `cil` set
+     doesn't have.
+- **Circular-import bug, found live.** `NotificationCenter.jsx` renders
+  `NotificationCenterModal`, which reused `WEM_TYPE_META` from
+  `NotificationCenter.jsx` - a real cycle that only "worked" as long as
+  both sides only touched the constant inside render (JSX/callbacks), not
+  at module-evaluation time. Adding `TYPE_OPTIONS` (`Object.entries(
+  WEM_TYPE_META)`) at `NotificationCenterModal.jsx`'s own module top level
+  exposed it - `WEM_TYPE_META` could still be `undefined` at that point
+  depending on which side of the cycle the bundler evaluated first,
+  throwing `Cannot convert undefined or null to object` and blanking the
+  whole page. Fixed by extracting the shared constant into its own
+  dependency-free module, `wemTypeMeta.js`, that both sides import
+  independently - not a workaround, the actual fix, since the cycle
+  itself (not just its current trigger) is what was fragile.

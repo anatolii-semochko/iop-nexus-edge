@@ -1,10 +1,12 @@
-// WEM (Warnings/Errors/Messages) service (AGENTS.md section 22) - a
+// WEM (Warnings/Errors/Messages) service (AGENTS.md section 22/25) - a
 // process's notifications, layered alongside its existing `critical`/
 // `warning` Redis flags (processRegistry.ts), not a replacement for them.
 
 import { pool } from "./db.js";
 import * as processRegistry from "./processRegistry.js";
 import type { ProcessPublicMessage } from "./processRegistry.js";
+import { processStateEvents } from "./processStateEvents.js";
+import { redis } from "./redis.js";
 
 export type MessageType = "warning" | "error" | "message";
 
@@ -16,6 +18,8 @@ export interface ProcessMessage {
   code: string;
   text: string;
   hidden: boolean;
+  hidden_by: number | null;
+  hidden_at: string | null;
   resolved_at: string | null;
   created_at: string;
   updated_at: string;
@@ -100,8 +104,11 @@ export async function syncActiveMessages(
   // UPDATE to an existing row's text/level (a live reading changing) or a
   // resolve is still `changed` for the cache-refresh below, but neither is
   // "new" information the bus needs to push out-of-band ahead of the next
-  // periodic broadcast.
-  let hasNewEntry = false;
+  // periodic broadcast. Counted, not just a boolean - one call can insert
+  // more than one new code at once (e.g. two metrics crossing threshold
+  // the same tick), and the unread counter (section 25) needs the exact
+  // count, not just "at least one".
+  let newEntryCount = 0;
   try {
     await client.query("BEGIN");
 
@@ -136,7 +143,7 @@ export async function syncActiveMessages(
           [processId, type, entry.level, entry.code, entry.text],
         );
         changed = true;
-        hasNewEntry = true;
+        newEntryCount += 1;
       }
     }
 
@@ -157,9 +164,13 @@ export async function syncActiveMessages(
     client.release();
   }
 
+  if (newEntryCount > 0) {
+    await bumpUnreadCount(type, newEntryCount);
+  }
+
   if (changed) {
     const activeMessages = await listActiveMessages(processId);
-    await processRegistry.setActiveMessages(processId, toPublicMessages(activeMessages), hasNewEntry, source);
+    await processRegistry.setActiveMessages(processId, toPublicMessages(activeMessages), newEntryCount > 0, source);
   }
 
   // Dashboard tab (AGENTS.md section 22) - unconditional, not gated behind
@@ -221,10 +232,6 @@ export async function listActiveMessages(processId: number): Promise<ProcessMess
   );
 }
 
-// Thrown by setHidden when asked to dismiss a message whose type doesn't
-// support it - see the "hidden" rule below.
-export class MessageNotDismissableError extends Error {}
-
 // Trimmed to what the bus's public-state broadcast actually needs
 // (AGENTS.md section 24) - `process_id` is redundant (it's already the key
 // this list is nested under) and `resolved_at` is always null for an
@@ -243,37 +250,179 @@ function toPublicMessages(messages: ProcessMessage[]): ProcessPublicMessage[] {
 }
 
 // UI-driven, unlike syncActiveMessages above - still refreshes the same
-// public-state cache afterward (not urgent - AGENTS.md section 24, a
-// dismiss is a cosmetic user action, not new information other consumers
-// need ahead of the next periodic broadcast) so every viewer's WEM row
-// updates once that broadcast fires (a dismiss changes what
-// listActiveMessages returns, same as a resolve).
+// public-state cache afterward (not urgent for the process-row overlay -
+// AGENTS.md section 24, a dismiss there is a cosmetic user action - but IS
+// urgent for the notification center's unread badge, section 25, since a
+// user just acted on it and expects every viewer's badge to reflect that
+// immediately, not on the next periodic tick).
 //
-// Only `type: "message"` may be dismissed - an error/warning is tied to a
-// live condition and stays visible for as long as that condition holds
-// (it leaves the active list on its own once resolved, via
-// syncActiveMessages), with no user-facing way to hide it early. Checked
-// here, not just left to the UI omitting the dismiss button, so a stray
-// API call can't hide an active error/warning either.
-export async function setHidden(messageId: number, hidden: boolean): Promise<void> {
-  if (hidden) {
-    const { rows: typeRows } = await pool.query<{ type: MessageType }>(
-      `SELECT type FROM process_messages WHERE id = $1`,
-      [messageId],
-    );
-    const type = typeRows[0]?.type;
-    if (type !== undefined && type !== "message") {
-      throw new MessageNotDismissableError(`type "${type}" entries cannot be dismissed`);
-    }
-  }
-
-  const { rows } = await pool.query<{ process_id: number }>(
-    `UPDATE process_messages SET hidden = $1, updated_at = now() WHERE id = $2 RETURNING process_id`,
-    [hidden, messageId],
+// The notification center (section 25) reuses this same "hidden" flag as
+// its read/unread marker for every type, not just `message` - dismissing
+// an entry there is the same act as dismissing it anywhere else, so the
+// type restriction that used to live here (only `message` could be
+// dismissed) is gone. `apps/ui`'s WemRow.jsx (the process's own detail
+// panel) still only ever renders its own dismiss button for `message` -
+// that UI surface's intent ("stop showing this on my process card") is
+// unchanged; this function no longer enforces it structurally, since
+// section 25's notification center needs to dismiss warning/error rows
+// too and there is now only one dismiss action in the whole system, not
+// two different ones with different rules. `userId` - who did it, `null`
+// if the caller has no authenticated identity (kept optional rather than
+// required so this function still works from any future non-UI caller).
+export async function setHidden(messageId: number, hidden: boolean, userId: number | null): Promise<void> {
+  const { rows } = await pool.query<{ process_id: number; type: MessageType }>(
+    `UPDATE process_messages
+     SET hidden = $1, hidden_by = $2, hidden_at = $3, updated_at = now()
+     WHERE id = $4 AND hidden != $1
+     RETURNING process_id, type`,
+    [hidden, hidden ? userId : null, hidden ? new Date().toISOString() : null, messageId],
   );
-  const processId = rows[0]?.process_id;
-  if (processId === undefined) return;
+  const row = rows[0];
+  if (!row) return; // already at this state - no-op, same principle as setCritical/setWarning
 
-  const activeMessages = await listActiveMessages(processId);
-  await processRegistry.setActiveMessages(processId, toPublicMessages(activeMessages), false, "api");
+  await bumpUnreadCount(row.type, hidden ? -1 : 1);
+  processStateEvents.emit("urgent", { reason: "read", messageId, source: "api" });
+
+  const activeMessages = await listActiveMessages(row.process_id);
+  await processRegistry.setActiveMessages(row.process_id, toPublicMessages(activeMessages), false, "api");
+}
+
+// --- Notification center (AGENTS.md section 25) ---
+
+// Unread counters, one per type - Redis, not a live COUNT(*) on every
+// header render (this is read on every fleet broadcast tick, section 24,
+// and the whole point of that broadcast is to avoid per-client polling
+// hitting Postgres). "Unread" = not yet dismissed, regardless of
+// resolved_at - a warning that already cleared before anyone looked still
+// counts until someone acknowledges it, same as one still active.
+const UNREAD_COUNT_TYPES: MessageType[] = ["message", "warning", "error"];
+
+function unreadCountKey(type: MessageType): string {
+  return `wem:unread:${type}`;
+}
+
+/** Recomputes every counter from Postgres - call once at boot. Redis is
+ * ephemeral (a restart, a flushed cache) while Postgres is the source of
+ * truth, so this is what keeps the two from silently drifting apart. */
+export async function initUnreadCounts(): Promise<void> {
+  const { rows } = await pool.query<{ type: MessageType; count: string }>(
+    `SELECT type, COUNT(*) FROM process_messages WHERE hidden = false GROUP BY type`,
+  );
+  const counts = new Map(rows.map((row) => [row.type, row.count]));
+  await Promise.all(
+    UNREAD_COUNT_TYPES.map((type) => redis.set(unreadCountKey(type), counts.get(type) ?? "0")),
+  );
+}
+
+export async function getUnreadCounts(): Promise<Record<MessageType, number>> {
+  const values = await Promise.all(UNREAD_COUNT_TYPES.map((type) => redis.get(unreadCountKey(type))));
+  const counts = {} as Record<MessageType, number>;
+  UNREAD_COUNT_TYPES.forEach((type, index) => {
+    counts[type] = Number(values[index]) || 0;
+  });
+  return counts;
+}
+
+async function bumpUnreadCount(type: MessageType, delta: number): Promise<void> {
+  await redis.incrby(unreadCountKey(type), delta);
+}
+
+export interface ProcessMessageListItem extends ProcessMessage {
+  process_name: string;
+  hidden_by_user: {
+    id: number;
+    display_name: string | null;
+    username: string;
+    avatar_path: string | null;
+  } | null;
+}
+
+// "active" is deliberately not a scope here - the notification center's
+// Active tab (AGENTS.md section 25) reads live process state (the fleet
+// broadcast's own `messages` field, section 24) instead of this endpoint,
+// since that's already exactly "currently active, unhidden" per process
+// with no extra query needed. Only what still genuinely requires a
+// Postgres round trip (the historical log) goes through here.
+export type MessageScope = "new" | "all";
+
+export interface ListProcessMessagesParams {
+  type: MessageType | "all";
+  scope: MessageScope;
+  processId?: number;
+  search?: string;
+  page: number;
+  pageSize: number;
+}
+
+/**
+ * Server-side paginated feed for the notification center popup (AGENTS.md
+ * section 25) - the first server-paginated list in this codebase (every
+ * other table, section 11, is client-side, "tens of rows, not thousands";
+ * this is an append-only log that only grows).
+ */
+export async function listProcessMessages(
+  params: ListProcessMessagesParams,
+): Promise<{ items: ProcessMessageListItem[]; total: number }> {
+  const { type, scope, processId, search, page, pageSize } = params;
+  const conditions: string[] = [];
+  const values: unknown[] = [];
+
+  if (type !== "all") {
+    values.push(type);
+    conditions.push(`pm.type = $${values.length}`);
+  }
+  if (scope === "new") conditions.push("pm.hidden = false");
+  if (processId !== undefined) {
+    values.push(processId);
+    conditions.push(`pm.process_id = $${values.length}`);
+  }
+  if (search) {
+    values.push(`%${search}%`);
+    conditions.push(`pm.text ILIKE $${values.length}`);
+  }
+  const where = conditions.length > 0 ? conditions.join(" AND ") : "TRUE";
+
+  const offset = (page - 1) * pageSize;
+  const limitParam = values.length + 1;
+  const offsetParam = values.length + 2;
+
+  const [{ rows: items }, { rows: countRows }] = await Promise.all([
+    pool.query<
+      ProcessMessage & {
+        process_name: string;
+        hidden_by_display_name: string | null;
+        hidden_by_username: string | null;
+        hidden_by_avatar_path: string | null;
+      }
+    >(
+      `SELECT pm.*, p.name AS process_name,
+              u.display_name AS hidden_by_display_name,
+              u.username AS hidden_by_username,
+              u.avatar_path AS hidden_by_avatar_path
+       FROM process_messages pm
+       JOIN processes p ON p.id = pm.process_id
+       LEFT JOIN users u ON u.id = pm.hidden_by
+       WHERE ${where}
+       ORDER BY pm.created_at DESC
+       LIMIT $${limitParam} OFFSET $${offsetParam}`,
+      [...values, pageSize, offset],
+    ),
+    pool.query<{ count: string }>(`SELECT COUNT(*) FROM process_messages pm WHERE ${where}`, values),
+  ]);
+
+  return {
+    items: items.map(({ hidden_by_display_name, hidden_by_username, hidden_by_avatar_path, ...row }) => ({
+      ...row,
+      hidden_by_user:
+        row.hidden_by !== null
+          ? {
+              id: row.hidden_by,
+              display_name: hidden_by_display_name,
+              username: hidden_by_username as string,
+              avatar_path: hidden_by_avatar_path,
+            }
+          : null,
+    })),
+    total: Number(countRows[0].count),
+  };
 }

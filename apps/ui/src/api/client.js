@@ -71,12 +71,23 @@ export const api = {
     request(`/processes/${id}/config`, { method: 'PATCH', body: JSON.stringify(config) }),
   doProcessAction: (id, action) =>
     request(`/processes/${id}/action`, { method: 'POST', body: JSON.stringify({ action }) }),
-  // WEM (AGENTS.md section 22) - global dismiss, not per-user.
+  // WEM (AGENTS.md section 22/25) - global dismiss (who/when is recorded
+  // server-side from the session cookie, not sent here).
   hideMessage: (messageId) =>
     request(`/process-messages/${messageId}`, {
       method: 'PATCH',
       body: JSON.stringify({ hidden: true }),
     }),
+  // Notification center (AGENTS.md section 25) - server-side paginated,
+  // unlike every other list in this app (section 11). Historical (New/All
+  // tabs) only - the Active tab reads live process state instead, never
+  // this endpoint.
+  listProcessMessages: ({ type, scope, processId, search, page, pageSize }) => {
+    const params = new URLSearchParams({ type, scope, page, pageSize })
+    if (processId) params.set('processId', processId)
+    if (search) params.set('search', search)
+    return request(`/process-messages?${params}`)
+  },
   // Process groups (AGENTS.md section 10/17 - a real, admin-managed entity).
   listProcessGroups: () => request('/process-groups'),
   createProcessGroup: (name) =>

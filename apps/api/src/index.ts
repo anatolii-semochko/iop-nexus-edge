@@ -8,6 +8,7 @@ import Fastify from "fastify";
 
 import { config } from "./config.js";
 import { startProcessStateBroadcastLoop } from "./processBroadcast.js";
+import { initUnreadCounts } from "./processMessages.js";
 import { authRoutes } from "./routes/auth.js";
 import { deviceRoutes } from "./routes/devices.js";
 import { messageGroupRoutes } from "./routes/messageGroups.js";
@@ -47,6 +48,11 @@ await app.register(tabGroupRoutes);
 await app.register(messageGroupRoutes);
 await app.register(messageLevelRoutes);
 
+// Recomputes the notification center's unread counters from Postgres
+// (AGENTS.md section 25) before the broadcast loop's own first tick reads
+// them - Redis is ephemeral, this is what keeps it from starting stale
+// (or at zero) after a restart.
+await initUnreadCounts();
 startProcessStateBroadcastLoop();
 
 app.listen({ port: config.port, host: config.host }).catch((err) => {

@@ -129,13 +129,19 @@ export function buildServer() {
   return { app, broadcast };
 }
 
-function toProcessStateEntry(snapshot: { processes: unknown[]; timestamp: string; source: string }) {
+function toProcessStateEntry(snapshot: {
+  processes: unknown[];
+  unreadCounts: Record<string, number>;
+  timestamp: string;
+  source: string;
+}) {
   return {
     routingKey: PROCESS_STATE_ROUTING_KEY,
     event: {
       domain: "process",
       eventType: "snapshot",
       processes: snapshot.processes,
+      unreadCounts: snapshot.unreadCounts,
       timestamp: snapshot.timestamp,
       source: snapshot.source,
     },

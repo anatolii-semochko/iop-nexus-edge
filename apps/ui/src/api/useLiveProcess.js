@@ -47,3 +47,26 @@ export function useProcessesLiveState() {
 export function useProcessLiveState(processId) {
   return useProcessesLiveState()[processId] ?? {}
 }
+
+/**
+ * Notification center unread counters (AGENTS.md section 25) -
+ * {message, warning, error} - riding the same fleet snapshot event as
+ * useProcessesLiveState above, not a separate WebSocket message; apps/api's
+ * processBroadcast.ts folds them into the same envelope specifically so
+ * this is one subscription, not two.
+ */
+export function useUnreadCounts() {
+  const [counts, setCounts] = useState({ message: 0, warning: 0, error: 0 })
+
+  useEffect(
+    () =>
+      subscribeToLiveEvents(({ event }) => {
+        if (event.domain !== 'process' || event.eventType !== 'snapshot' || !event.unreadCounts)
+          return
+        setCounts(event.unreadCounts)
+      }),
+    [],
+  )
+
+  return counts
+}

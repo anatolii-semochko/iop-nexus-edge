@@ -63,6 +63,10 @@ export async function readStateSnapshot(): Promise<CachedState[]> {
 
 export interface ProcessFleetSnapshot {
   processes: unknown[];
+  // Notification center (AGENTS.md section 25) - Redis-backed unread
+  // counters, assembled by apps/api's processBroadcast.ts and relayed
+  // as-is here, same as `processes`.
+  unreadCounts: Record<string, number>;
   timestamp: string;
   source: string;
 }

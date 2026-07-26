@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 
+import { requireAuth } from "../auth.js";
 import { pool } from "../db.js";
 import { broadcastForced } from "../processBroadcast.js";
 import * as processMessages from "../processMessages.js";
@@ -207,20 +208,45 @@ export async function processRoutes(app: FastifyInstance): Promise<void> {
   // just whoever clicked it. No :id/messages nesting check against
   // `messageId` here - a message's own id is already globally unique,
   // same reasoning as e.g. avatar routes not re-validating the user id.
+  //
+  // The one route in this whole processes/messages surface that requires
+  // auth (AGENTS.md section 13/25) - not because the data is sensitive
+  // (nothing else here is gated), but because the notification center
+  // needs to know *who* dismissed an entry to show it. Safe to require
+  // here specifically: every UI caller already has a valid session
+  // (AuthGate covers the whole app, no anonymous UI access), so this
+  // never actually blocks a real user - it just gives us `request.user.sub`
+  // instead of trusting a client-supplied id, which would be spoofable.
   app.patch<{ Params: { messageId: string }; Body: { hidden: boolean } }>(
     "/process-messages/:messageId",
-    async (request, reply) => {
-      try {
-        await processMessages.setHidden(Number(request.params.messageId), request.body.hidden);
-      } catch (err) {
-        if (err instanceof processMessages.MessageNotDismissableError) {
-          return reply.code(400).send({ error: err.message });
-        }
-        throw err;
-      }
+    { preHandler: requireAuth },
+    async (request) => {
+      await processMessages.setHidden(Number(request.params.messageId), request.body.hidden, request.user.sub);
       return { status: "ok" };
     },
   );
+
+  // Notification center feed (AGENTS.md section 25) - server-side
+  // paginated, unlike every other list in this app (section 11 - those
+  // are client-side, "tens of rows"; this is an append-only log that only
+  // grows). Historical (New/All tabs) only - the Active tab reads live
+  // process state instead (section 24/25), never this route.
+  app.get<{
+    Querystring: {
+      type: processMessages.MessageType | "all";
+      scope: processMessages.MessageScope;
+      processId?: string;
+      search?: string;
+      page?: string;
+      pageSize?: string;
+    };
+  }>("/process-messages", async (request) => {
+    const { type, scope, search } = request.query;
+    const processId = request.query.processId ? Number(request.query.processId) : undefined;
+    const page = Math.max(1, Number(request.query.page ?? 1));
+    const pageSize = Math.min(100, Math.max(1, Number(request.query.pageSize ?? 20)));
+    return processMessages.listProcessMessages({ type, scope, processId, search, page, pageSize });
+  });
 
   // UI-driven - which Tab Groups (routes/tabGroups.ts) this process is
   // currently curated into (AGENTS.md section 22). Fetched on-demand only
