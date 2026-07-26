@@ -7,6 +7,7 @@ import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
 
 import { config } from "./config.js";
+import { startProcessStateBroadcastLoop } from "./processBroadcast.js";
 import { authRoutes } from "./routes/auth.js";
 import { deviceRoutes } from "./routes/devices.js";
 import { messageGroupRoutes } from "./routes/messageGroups.js";
@@ -45,6 +46,8 @@ await app.register(processRoutes);
 await app.register(tabGroupRoutes);
 await app.register(messageGroupRoutes);
 await app.register(messageLevelRoutes);
+
+startProcessStateBroadcastLoop();
 
 app.listen({ port: config.port, host: config.host }).catch((err) => {
   app.log.error(err);

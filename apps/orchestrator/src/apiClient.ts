@@ -104,4 +104,19 @@ export const apiClient = {
       method: "POST",
       body: JSON.stringify({ type, entries, autoResolve }),
     }),
+  // Forces an immediate fleet-wide public-state broadcast (AGENTS.md
+  // section 24), outside the automatic critical/warning/new-message
+  // triggers and the periodic timer - available for a process kind that
+  // knows a change is time-sensitive in a way none of those cover. Not
+  // called by any process kind today (nothing has needed it yet) - the
+  // capability exists so a future one can reach for it without a new
+  // endpoint. Always sends a body (even though `reason` is optional) -
+  // `request()` above only sets Content-Type when a body is present, and a
+  // bodyless POST with that header set is rejected by Fastify's JSON
+  // parser (a real bug hit and fixed elsewhere in this codebase).
+  forceStateBroadcast: (reason?: string) =>
+    request("/processes/state/broadcast", {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    }),
 };

@@ -633,15 +633,17 @@ registry, Redis is live state that changes every tick):
   `config` is loose jsonb like `devices.capabilities` — shape depends on
   `kind`; today just `{min, max}` for the temperature-\* kinds.
 - Live state — **Redis**, in `apps/api/src/processRegistry.ts` (mirrors
-  `dualDevicesModel.ts`): `process:{id}:status` (`on`/`off`, controllable
-  only — a `permanent` process has no status key at all, meaningless for
-  it), `process:{id}:critical` (bool). Both publish to `nexus.events` on
-  change (domain `process`, routing key
-  `process.<id>.<status|critical>.changed`) — **and only on an actual
-  change**: the orchestrator calls `setCritical`/`setStatus` every tick
-  regardless of whether anything changed, and both are no-ops (no Redis
-  write, no publish) when the value already matches, specifically so a
-  1-second tick loop doesn't flood the bus with identical events forever.
+  `dualDevicesModel.ts` in spirit, though its own storage shape changed in
+  section 24): one hash per process, `process:{id}:public`, fields
+  `status`/`critical`/`warning`/`metrics`/`messages` (`status` meaningless
+  and never set for a `permanent` process). `setStatus`/`setCritical` are
+  no-ops (no Redis write, no broadcast trigger) when the value already
+  matches — the orchestrator calls both every tick regardless of whether
+  anything changed, and a 1-second tick loop must not flood the fleet-wide
+  broadcast (section 24) with identical triggers forever. This state no
+  longer publishes onto `nexus.events` at all (section 24 pulled the whole
+  `process` domain off that exchange) — see section 24 for where it goes
+  instead and why.
 - `apps/orchestrator` never touches Postgres/Redis/EdgeX directly — only
   the Devices API (`apps/orchestrator/src/apiClient.ts`), same principle as
   "does not talk to hardware protocols directly" (section 4), extended to
@@ -1084,16 +1086,22 @@ domain-specific (title, labels, the three async callbacks) passed as
 props. Groups is its first and only consumer today - the next similar
 "manage a small named list" popup reuses this instead of a copy-paste.
 
-**Filter-row convention**: every list page's filter row now reserves its
+**Filter-row convention**: every list page's filter row reserves its
 last, non-`xs="auto"` `CCol` (`className="d-flex justify-content-end"`) as
 a right-aligned block for page-level action buttons - filters flow left
-to right, actions live in that one flex-end column. `ProcessesList.jsx` is
-the first to use it: a `cilReload` **reset-filters** button, `color=
-"warning"`, rendered only while `groupFilter || typeFilter || search` is
-truthy, clearing all three. This is a layout convention (plain
-`CRow`/`CCol`), not a component - there's nothing to abstract beyond "put
-your buttons in this column," so nothing was built beyond documenting it
-here.
+to right, actions live in that one flex-end column. This is a layout
+convention (plain `CRow`/`CCol`), not a component - there's nothing to
+abstract beyond "put your buttons in this column," so nothing was built
+beyond documenting it here.
+
+(Superseded specifics, section 23: the reset-filters button on the
+Processes page moved from `ProcessesList.jsx`'s own single top-level
+filter row into each tab's own `ProcessesTable`-owned filter row - since
+the tabs rework gave every tab its own filter combination and its own
+`groupFilter`/`typeFilter`/`statusFilter`/`search` state, "one reset next
+to one shared filter row" no longer applied - and its icon is `cilFilterX`,
+not `cilReload`. The convention above (right-aligned trailing `CCol`)
+still holds, just per-tab now instead of page-level.)
 
 One wrinkle worth remembering: `TableSearchInput` (section 11)
 deliberately owns its typing state after mount and never resyncs from a
@@ -1171,15 +1179,17 @@ omitted) disables that specific check** — per metric, independently, not
 an all-or-nothing gate on the whole tick the way temperature-monitor's
 `min`/`max` are.
 
-Live readings **are** pushed through `publishProcessEvent`/the WebSocket
-feed, same as `status`/`critical`/`warning` — but `processRegistry.
-setMetrics` is the one publisher in this codebase that does it
-*unconditionally*, not just on an actual change (`getStatus`/`setCritical`/
-`setWarning` all skip the publish when the value already matches, exactly
-to avoid a 1-second tick loop flooding the bus with identical events - see
-their own doc comments). Metrics don't have that luxury: the whole point
-is a live-updating reading, and re-publishing an unchanged disk% every tick
-is *correct* here, not a bug to guard against. This wasn't the original
+Live readings **are** pushed through the WebSocket feed, same as `status`/
+`critical`/`warning` — though the mechanism underneath changed in section
+24 (Redis-cached fleet snapshot + Pub/Sub notify to apps/messaging-gateway,
+not a `nexus.events` publish per field). `metrics` is still the one field
+in that snapshot refreshed *unconditionally* every tick rather than only on
+an actual change (`status`/`critical`/`warning` all stay no-ops when the
+value already matches - see their own doc comments). Metrics don't have
+that luxury: the whole point is a live-updating reading, and an unchanged
+disk% still being current every tick is *correct* here, not a bug to guard
+against - though per section 24, a metrics update on its own is still only
+timer-cadence, not an urgent out-of-band trigger. This wasn't the original
 design - the first version had the UI poll `GET /processes/:id` once a
 second instead, deliberately avoiding the bus for exactly the "flood it"
 reason above. That reasoning didn't hold up: the orchestrator already
@@ -1197,8 +1207,8 @@ anymore.
 
 **Warning tier**: `processRegistry.getWarning`/`setWarning` and `POST
 /processes/:id/warning` mirror `getCritical`/`setCritical`/`POST
-/processes/:id/critical` exactly (same no-op-unless-changed, same
-`publishProcessEvent` on an actual flip). The orchestrator computes both
+/processes/:id/critical` exactly (same no-op-unless-changed, same urgent
+fleet-broadcast trigger on an actual flip - section 24). The orchestrator computes both
 every tick and error always wins: `warning` is only ever raised when
 `critical` is false, so a metric already past its error max never leaves
 the row flickering between red and yellow — it's one or the other.
@@ -1588,19 +1598,41 @@ original single-tab `ProcessesList.jsx` so Dashboard/All/each Tab
 Group/Controllable/Permanent share one implementation rather than
 duplicating table+pagination+expand-row logic six-plus times). Which
 filter controls a tab shows is **not** a single on/off switch - a
-`filters` prop (`{ search?, group?, type? }`) lets a tab declare any
-combination, and `ProcessesList.jsx`'s `TAB_FILTERS` map is the single
-place that decides the combination per tab key (any key not listed,
-i.e. every dynamic `tg:*` Tab Group tab, falls back to `TAB_FILTERS.all`)
-- changing a tab's filter bar later is a one-line edit there, no other
-file involved. Today: All/Controllable/Permanent/every Tab Group tab get
-Process Group + Type + Search; Dashboard gets Search only (its own
-`FILTERS` constant in `DashboardTab.jsx`); Settings has no listing at
-all. Type is intentionally left interactive (not disabled/locked) on
-Controllable/Permanent even though it's redundant there with the tab's
-own base scope - picking the "wrong" type just surfaces the existing
-empty-state message, which is simpler than special-casing those two tabs
-out of an otherwise uniform component.
+`filters` prop (`{ search?, group?, type?, status? }`) lets a tab declare
+any combination, and `ProcessesList.jsx`'s `TAB_FILTERS` map is the
+single place that decides the combination per tab key (any key not
+listed, i.e. every dynamic `tg:*` Tab Group tab, falls back to
+`TAB_FILTERS.all`) - changing a tab's filter bar later is a one-line edit
+there, no other file involved. Today: All/Controllable/Permanent/every
+Tab Group tab get Process Group + Type + Status + Search; Dashboard gets
+Search only (its own `FILTERS` constant in `DashboardTab.jsx`); Settings
+has no listing at all. Type is intentionally left interactive (not
+disabled/locked) on Controllable/Permanent even though it's redundant
+there with the tab's own base scope - picking the "wrong" type just
+surfaces the existing empty-state message, which is simpler than
+special-casing those two tabs out of an otherwise uniform component.
+Status (`active`/`inactive`) filters on `p.status`, the same field the
+Status column badges off - a process with no `status` at all (permanent/
+system kinds, which show the plain "Running" badge instead of ON/OFF) is
+always `active` here, since it has no off state to be `inactive` in; only
+an explicit `status === 'off'` counts as inactive.
+
+The filter row itself always renders, even when the current combination
+matches zero processes - `filtered.length === 0` only swaps out the
+table+pagination for the `emptyMessage` `CAlert` below the row, not the
+row itself. An earlier version returned the alert *instead of* the whole
+component body, which took the filter controls down with it the moment a
+filter produced an empty result (e.g. a Tab Group tab's own "no processes
+in this tab group yet" state, or any filter combination with no matches),
+leaving no visible way to change or clear whatever filter just caused
+that. The reset-filters `IconButton` (`cilFilterX`) lives inside this
+same filter `CRow`, in a trailing right-aligned `CCol` - not next to the
+`CTabList` above it - so it always sits next to the controls it actually
+clears; `hasActiveFilters` (whether to show it at all) is computed
+locally in `ProcessesTable` from whichever of `search`/`groupFilter`/
+`typeFilter`/`statusFilter` that tab's own `filters` flags make relevant,
+and `onResetFilters` is supplied per tab key by `ProcessesList.jsx`'s
+`handleResetFilters(tabKey)`.
 
 Persisted per-tab (`usePersistedState('nexusedge.processesPage', ...)` -
 a *new*, independent registration, not a repurposing of the older
@@ -1695,3 +1727,192 @@ reset plumbing needed. `CModal` itself stays unconditionally rendered
 (only `visible` toggles) so CoreUI's own open/close transition still
 works - conditionally unmounting the whole modal component would skip
 that.
+
+### Row action buttons
+
+`ProcessRow`'s trailing cell renders every per-row control - the per-kind
+action buttons (ON/OFF etc.), the Settings gear, an optional caller-
+supplied `extraAction` (Dashboard's remove-X), and the expand toggle - as
+one `d-flex justify-content-end align-items-center gap-1 flex-nowrap`
+row, left to right in that order (i.e. right to left: expand toggle,
+extra action, settings, on/off - the order a reader actually scans it
+in). Previously each control was a separate, independently-wrapping
+inline element split across two table cells (actions cell + a second
+cell just for the expand toggle); at narrower widths they'd wrap onto
+separate lines vertically instead of staying one row. Both cells were
+merged into one (the header row merges the same way - "Actions" label +
+`ExpandAllToggleButton` share one `text-end` header cell now, `colSpan`
+on the expanded-detail-panel row dropped from 5 to 4 to match).
+
+`components/IconButton.jsx`'s `center` prop (opt-in, added by the user)
+centers a bare `CIcon`'s baseline, which otherwise sits visibly above
+middle inside a button. It does this via `align-middle`
+(`vertical-align: middle`) on the icon itself, **not** by making the
+button a flex container (`d-flex align-items-center justify-content-
+center`, the original approach) - flexing the button changes its
+auto-height calculation from the font-size/line-height math every
+text-labelled button and form control uses to the icon's own ~16px
+content box, making icon-only buttons visibly shorter than their
+text-labelled siblings in the same row. `align-middle` on the icon fixes
+the same baseline offset without touching the button's box model.
+
+## 24. Process public-state broadcast (Redis + Pub/Sub, not `nexus.events`)
+
+An analysis of everything actually flowing over `nexus.events` (section 9)
+turned up real scatter on the `process` domain: five independent
+`process.<id>.<field>.changed` routing keys (status/critical/warning/
+metrics/messages), each its own payload shape, `metrics` publishing
+unconditionally despite the `.changed` name, and - the concrete gap - no
+Redis-backed snapshot for `process.*` the way `device.*` has (`state:*`,
+section 9), so a freshly-connected WebSocket client got every device's
+current value immediately but nothing for processes until the next live
+change. The UI worked around this with a second mechanism entirely (a
+plain REST `GET /processes` for the initial value, WS only for deltas) -
+itself part of the scatter this section replaces.
+
+**The bigger call, from the user**: `nexus.events`/RabbitMQ's actual job is
+device/node data and commands - potentially many independent consumers,
+worth a durable topic exchange. Process public state has exactly two
+consumers, ever: this same service (its own REST layer) and
+apps/messaging-gateway (WS fan-out to the UI). Neither needs a message
+broker's guarantees for this. So process state was pulled off
+`nexus.events` entirely, not just reorganized on it - `messaging.ts` is
+device-domain only again, and process state flows through Redis alone:
+
+- **`processRegistry.ts`** owns one Redis **hash** per process,
+  `process:{id}:public` (fields `status`/`critical`/`warning`/`metrics`/
+  `messages`/`updatedAt`) - replacing the previous five independent keys.
+  One `HGETALL` (`getPublicState`) reads a process's complete public state;
+  each field write (`setStatus`/`setCritical`/`setWarning`/`setMetrics`/
+  `setActiveMessages` - the last called from `processMessages.ts` after
+  every WEM reconciliation, not owned there) is an `HSET`, so concurrent
+  writers touching different fields of the same process's hash can never
+  clobber each other the way a read-modify-write JSON blob could.
+  `getStatus`/`getCritical`/etc. and their signatures are unchanged from
+  before this section - `routes/processes.ts`'s `withLiveState` needed no
+  changes at all.
+- **`processStateEvents.ts`** - a bare `node:events` `EventEmitter`,
+  nothing process-specific about it. `processRegistry.ts`/
+  `processMessages.ts` `emit("urgent", ...)` on a transition that matters
+  (see below); `processBroadcast.ts` listens. Exists only to avoid a
+  circular import - `processBroadcast.ts` already imports
+  `processRegistry.ts` to assemble the fleet snapshot, so the reverse
+  import (registry -> broadcaster) would cycle; a third, dependency-free
+  module both sides import instead breaks that.
+- **`processBroadcast.ts`** - the assembler and the only place that decides
+  *when* to refresh. `assembleSnapshot()` reads `SELECT id, type FROM
+  processes` (Postgres, for the controllable-only status suppression
+  `withLiveState` already applied - a permanent/system process reports no
+  `status` field at all, not a fabricated `"on"`) plus one
+  `getPublicState()` per id, one process's failure logged and skipped
+  rather than failing the whole broadcast. `broadcastNow()` writes the
+  assembled snapshot to the Redis key `process:state:latest` (JSON blob -
+  this one *is* a plain cache key, not a hash, since it's written wholesale
+  by one place, not field-by-field by several) and `PUBLISH`es a one-word
+  notify on the `process:state:updated` Pub/Sub channel. Two triggers:
+  - **Timer** - `startProcessStateBroadcastLoop()`, interval from
+    `PROCESS_STATE_BROADCAST_INTERVAL_MS` (`.env`, default 5000) -
+    deliberately decoupled from the orchestrator's own 1s compute tick,
+    since "live enough for a dashboard" doesn't need to match "how often a
+    process re-evaluates its own condition".
+  - **Urgent** - `critical`/`warning` transitions and a brand-new active
+    WEM entry (`processMessages.syncActiveMessages` inserting a row, not
+    updating an existing one's text/level and not a resolve/dismiss) each
+    `emit("urgent", ...)`; `scheduleUrgentBroadcast()` debounces/coalesces
+    a burst of these into one broadcast (250ms - long enough to cover one
+    process's full sequence of sequential HTTP calls from a single
+    orchestrator tick, so the coalesced broadcast reads settled state, not
+    a write half-applied). `status`/`metrics` changes are deliberately
+    **not** urgent (confirmed with the user) - a status flip is already
+    reflected in the REST response the UI action that caused it is driven
+    from, and a metrics reading a few seconds stale on the bus isn't
+    "urgent" the way a fresh critical/warning transition is.
+  - **Forced** - `POST /processes/state/broadcast` (`{reason?: string}`,
+    fleet-wide, not scoped to one process id - the broadcast itself is
+    always the whole fleet) bypasses the debounce and fires immediately.
+    Exposed on the orchestrator's `apiClient.ts` as `forceStateBroadcast()`
+    per the user's explicit ask ("передбачити можливість пушнути весь стан
+    процесів насильно командою з процесу") - not called by any process
+    kind today, the capability exists for a future one that needs it.
+- **`apps/messaging-gateway`** never touches Postgres and never assembles
+  anything - it only relays what `processBroadcast.ts` already put
+  together. A **second, dedicated** ioredis connection
+  (`subscriberRedis = redis.duplicate()` in `redis.ts` - a connection in
+  Pub/Sub subscribe mode can't run regular commands, ioredis's own
+  constraint) subscribes to `process:state:updated`; on every message it
+  re-reads `process:state:latest` and calls the same `broadcast()` fan-out
+  device events already use, under a synthetic routing key
+  `process.state.snapshot` (never an actual AMQP key - this data never
+  touches RabbitMQ - but reusing the `{routingKey, event}` shape live
+  device events carry means a WS client handles both with one code path,
+  and a client's own `topics=` pattern can filter this out exactly like it
+  would filter out `device.*`). The initial WS-connect snapshot
+  (`readStateSnapshot()` for devices, section 9) now also calls
+  `readProcessStateSnapshot()` and merges in one more `events` entry if the
+  cache key exists - closing the original gap this section started from.
+
+**Public state shape** (`processRegistry.ts`'s `ProcessPublicState`/
+`ProcessPublicMessage`, restrained per the user's own framing - "стримано,
+без перевантажень, саме необхідне"): `status` (omitted for non-
+controllable), `critical`, `warning`, `metrics` (present only for kinds
+that report it), and `messages` - the **complete** active/undismissed WEM
+list, not a count/severity summary (confirmed with the user) - deliberately
+the same shape `GET /processes` already returns, so this is exactly the
+"necessary public data" the UI's WEM row renders, not a partial view that
+would just push a REST round trip back onto whichever consumer needs the
+full list.
+
+**UI adaptation** (`apps/ui/src/api/useLiveProcess.js`): `useProcessLiveState`
+rewritten for the new shape - a single incoming `event.domain === 'process'
+&& event.eventType === 'snapshot'` message now carries the *whole fleet*
+(`event.processes`, one entry per process), so one event replaces every
+process's cached entry in `byProcess` in one pass, rather than patching one
+field on one process at a time the way the retired per-field scheme did.
+Every consumer (`ProcessesTable.jsx`'s `ProcessRow`, `ResourceMonitorPanel.
+jsx`) kept working unchanged - the hook's own return shape per process id
+(`{status, critical, warning, metrics, messages}`) didn't change, only what
+feeds it internally. One real, deliberate cadence regression worth knowing
+about: `ResourceMonitorPanel`'s live chart used to sample every second (the
+orchestrator's own tick); it now samples at the broadcast's timer cadence
+(`PROCESS_STATE_BROADCAST_INTERVAL_MS`, default 5s) unless a critical/
+warning/new-message change on some process happens to piggyback an urgent
+broadcast sooner - a metrics-only change is not itself an urgent trigger
+(confirmed with the user). Verified live: fleet-wide critical/WEM changes
+(a real out-of-range Temperature reading) reflected in the row's color and
+WEM text with no page reload, `ResourceMonitorPanel`'s chart accumulating
+samples, console clean throughout.
+
+**Dashboard tab bug found and fixed after this went live**: `DashboardTab.
+jsx`'s eligibility filter (`processes.filter((p) => p.dashboard_flagged_at)`)
+read `dashboard_flagged_at` only from the one-time REST load `ProcessesList.
+jsx`'s `reload()` produces at mount - never refreshed after that. A process
+getting (re-)flagged while the page stayed open (`processMessages.
+maybeFlagForDashboard`, unconditional at the end of every `syncActiveMessages`
+- section 22) never appeared on Dashboard until something happened to trigger
+a full REST reload at the right moment. Reproduced live by the user: clear a
+process off the Dashboard, reload the page (REST snapshot correctly shows
+"not flagged" at that instant), then the condition recurs server-side and
+re-flags it in Postgres - but the already-loaded page never notices. Fixed
+by adding `dashboardFlaggedAt` to `ProcessFleetEntry` (`processBroadcast.ts`
+- one extra Postgres column on the query `assembleSnapshot()` already runs,
+no new round trip) and reading it live in `DashboardTab.jsx` via a new
+`useProcessesLiveState()` hook (`apps/ui/src/api/useLiveProcess.js` -
+`useProcessLiveState(id)` is now a thin per-id wrapper over it) that returns
+every process's live entry at once, not just one row's. The merge is
+deliberately `liveEntry ? liveEntry.dashboardFlaggedAt : p.dashboard_
+flagged_at`, not `live.dashboardFlaggedAt ?? p.dashboard_flagged_at` - the
+field is a nullable timestamp, and `??` would incorrectly fall through to
+the stale REST value whenever the live value is legitimately `null` (not
+flagged), since `null` is nullish too; checking `liveEntry` itself (present
+once any snapshot has been seen for that process, absent only in the brief
+window before the first one arrives) avoids that. No new urgent-broadcast
+trigger needed - the existing "new active message" trigger (section 24)
+already fires at the exact moment `maybeFlagForDashboard` sets the flag, so
+the very same broadcast that makes a WEM entry appear live also carries the
+now-current flag. `hasActiveWem` (gates the remove-X's disabled state) was
+deliberately left REST-only - live-tracking it would mean one extra Postgres
+query per process per broadcast (`processMessages.hasActiveEntries`, not
+backed by the Redis hash `processBroadcast.ts` otherwise reads for free),
+and the failure mode of it going briefly stale is self-correcting (a 400 from
+the server, not a silent inconsistency) - not worth that added DB load for
+what wasn't the reported problem.

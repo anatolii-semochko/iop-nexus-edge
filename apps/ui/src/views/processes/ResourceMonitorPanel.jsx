@@ -35,10 +35,13 @@ const zoneFor = (value, warnMax, errorMax) => {
  * for both.
  *
  * Live % values arrive over the shared WebSocket feed (useProcessLiveState,
- * same as status/critical/warning elsewhere - AGENTS.md section 9/10/21),
- * not a per-panel HTTP poll - the orchestrator already pushes a "metrics"
- * event once a second unconditionally, so there's nothing left for this
- * panel to fetch on its own. Each incoming event also feeds a rolling
+ * same as status/critical/warning elsewhere - AGENTS.md section 24), not a
+ * per-panel HTTP poll. Samples at the fleet-wide broadcast's own cadence
+ * (`PROCESS_STATE_BROADCAST_INTERVAL_MS`, default 5s) rather than the
+ * orchestrator's 1s compute tick - a metrics-only change isn't one of the
+ * urgent triggers (AGENTS.md section 24), so this chart's resolution is
+ * coarser than it was before that section's rework. Each incoming event
+ * also feeds a rolling
  * MAX_SAMPLES-long history buffer for ResourceLevelsChart - there's no
  * server-side history endpoint, this is purely "what we've personally
  * observed since opening this panel", which resets to empty every time

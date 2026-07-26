@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 
 import { pool } from "../db.js";
+import { broadcastForced } from "../processBroadcast.js";
 import * as processMessages from "../processMessages.js";
 import * as processRegistry from "../processRegistry.js";
 
@@ -186,6 +187,18 @@ export async function processRoutes(app: FastifyInstance): Promise<void> {
       "orchestrator",
       request.body.autoResolve,
     );
+    return { status: "ok" };
+  });
+
+  // Orchestrator-driven only (AGENTS.md section 24) - lets a process force
+  // an immediate fleet-wide public-state broadcast outside the normal
+  // critical/warning/new-message urgent triggers and the periodic timer,
+  // for a producer that knows a change is time-sensitive in a way none of
+  // those automatic triggers cover. Fleet-wide, not scoped to one process
+  // id - the broadcast itself is always the whole fleet's state (AGENTS.md
+  // section 24), so there is nothing to scope by id.
+  app.post<{ Body: { reason?: string } }>("/processes/state/broadcast", async (request) => {
+    await broadcastForced(request.body?.reason ?? "forced");
     return { status: "ok" };
   });
 

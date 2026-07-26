@@ -50,4 +50,11 @@ export const config = {
     avatarsDir: process.env.AVATAR_UPLOAD_DIR ?? "/workspace/apps/api/uploads/avatars",
     avatarMaxSizeBytes: Number(process.env.AVATAR_MAX_SIZE_BYTES ?? 2 * 1024 * 1024),
   },
+  // Fleet-wide process public-state broadcast (AGENTS.md section 24) -
+  // independent of the orchestrator's own 1s compute tick. Urgent changes
+  // (critical/warning transitions, a new active WEM entry, or an explicit
+  // forced broadcast) push immediately regardless of this interval.
+  processState: {
+    broadcastIntervalMs: Number(process.env.PROCESS_STATE_BROADCAST_INTERVAL_MS ?? 5000),
+  },
 };

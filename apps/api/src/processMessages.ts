@@ -2,8 +2,9 @@
 // process's notifications, layered alongside its existing `critical`/
 // `warning` Redis flags (processRegistry.ts), not a replacement for them.
 
-import { publishProcessEvent } from "./messaging.js";
 import { pool } from "./db.js";
+import * as processRegistry from "./processRegistry.js";
+import type { ProcessPublicMessage } from "./processRegistry.js";
 
 export type MessageType = "warning" | "error" | "message";
 
@@ -95,6 +96,12 @@ export async function syncActiveMessages(
 ): Promise<void> {
   const client = await pool.connect();
   let changed = false;
+  // Urgent (AGENTS.md section 24) only for a brand-new active entry - an
+  // UPDATE to an existing row's text/level (a live reading changing) or a
+  // resolve is still `changed` for the cache-refresh below, but neither is
+  // "new" information the bus needs to push out-of-band ahead of the next
+  // periodic broadcast.
+  let hasNewEntry = false;
   try {
     await client.query("BEGIN");
 
@@ -129,6 +136,7 @@ export async function syncActiveMessages(
           [processId, type, entry.level, entry.code, entry.text],
         );
         changed = true;
+        hasNewEntry = true;
       }
     }
 
@@ -151,14 +159,7 @@ export async function syncActiveMessages(
 
   if (changed) {
     const activeMessages = await listActiveMessages(processId);
-    await publishProcessEvent({
-      domain: "process",
-      entityId: processId,
-      field: "messages",
-      value: activeMessages,
-      timestamp: new Date().toISOString(),
-      source,
-    });
+    await processRegistry.setActiveMessages(processId, toPublicMessages(activeMessages), hasNewEntry, source);
   }
 
   // Dashboard tab (AGENTS.md section 22) - unconditional, not gated behind
@@ -224,9 +225,29 @@ export async function listActiveMessages(processId: number): Promise<ProcessMess
 // support it - see the "hidden" rule below.
 export class MessageNotDismissableError extends Error {}
 
-// UI-driven, unlike syncActiveMessages above - still publishes the same
-// "messages" event afterward so every viewer's WEM row updates immediately
-// (a dismiss changes what listActiveMessages returns, same as a resolve).
+// Trimmed to what the bus's public-state broadcast actually needs
+// (AGENTS.md section 24) - `process_id` is redundant (it's already the key
+// this list is nested under) and `resolved_at` is always null for an
+// active list by construction, so neither belongs on the wire.
+function toPublicMessages(messages: ProcessMessage[]): ProcessPublicMessage[] {
+  return messages.map(({ id, type, level, code, text, hidden, created_at, updated_at }) => ({
+    id,
+    type,
+    level,
+    code,
+    text,
+    hidden,
+    created_at,
+    updated_at,
+  }));
+}
+
+// UI-driven, unlike syncActiveMessages above - still refreshes the same
+// public-state cache afterward (not urgent - AGENTS.md section 24, a
+// dismiss is a cosmetic user action, not new information other consumers
+// need ahead of the next periodic broadcast) so every viewer's WEM row
+// updates once that broadcast fires (a dismiss changes what
+// listActiveMessages returns, same as a resolve).
 //
 // Only `type: "message"` may be dismissed - an error/warning is tied to a
 // live condition and stays visible for as long as that condition holds
@@ -254,12 +275,5 @@ export async function setHidden(messageId: number, hidden: boolean): Promise<voi
   if (processId === undefined) return;
 
   const activeMessages = await listActiveMessages(processId);
-  await publishProcessEvent({
-    domain: "process",
-    entityId: processId,
-    field: "messages",
-    value: activeMessages,
-    timestamp: new Date().toISOString(),
-    source: "api",
-  });
+  await processRegistry.setActiveMessages(processId, toPublicMessages(activeMessages), false, "api");
 }
