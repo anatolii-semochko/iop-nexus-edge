@@ -6,6 +6,16 @@
 
 ---
 
+> **Note:** this is the original vision document, written before implementation
+> started, and it is not kept in sync section-by-section as the platform
+> evolved. `AGENTS.md` (repo root) is the living, up-to-date source of truth
+> for the actual architecture - where the two disagree, trust `AGENTS.md`.
+> One known, specific divergence: section 8 ("Digital Twin") was superseded
+> early on by the Virtual Node Runtime (see `AGENTS.md` sections 6-7) - the
+> model described below was never built as written.
+
+---
+
 # 1. Project Vision
 
 Edge Automation Platform is an open-source, modular automation platform designed for building reliable automation systems across different domains.
@@ -282,6 +292,12 @@ Device API model:
 ---
 
 # 8. Digital Twin
+
+> **Superseded** - this section describes the original plan, not what was
+> built. It was replaced early in implementation by the Virtual Node
+> Runtime (a physical/virtual backend switch inside `apps/device-service`,
+> not a separate twin concept) - see `AGENTS.md` sections 6-7 for the
+> model actually in place. Left below for historical context only.
 
 Digital Twin is the software representation of a device.
 

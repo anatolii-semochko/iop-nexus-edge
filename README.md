@@ -134,13 +134,19 @@ details.
 
 ## Project status & docs
 
-This is an actively developed platform, not a finished product. The
-project is steered and logged step-by-step in `to-do.txt` (every
-implementation decision, live-tested and dated); `AGENTS.md` is the living
-technical reference (rules, architecture, per-feature design notes); and
-`docs/PROJECT_MASTER-1.1.md` is the original architecture/vision document.
-Read in that order for, respectively: *what happened and why*, *how it
-works*, and *where it's going*.
+This is an actively developed platform, not a finished product.
+`docs/DEVELOPMENT_LOG.md` is the distilled, dated history of what was
+decided and why; `AGENTS.md` is the living technical reference (rules,
+architecture, per-feature design notes) - trust it over the log if the
+two ever disagree; `docs/PROJECT_MASTER-1.1.md` is the original
+architecture/vision document, kept for historical context and flagged
+where it's since diverged. Read in that order for, respectively: *what
+happened and why*, *how it works*, and *where it started from*.
+
+(The project is also steered day-to-day in `to-do.txt`, a local,
+gitignored working journal in Ukrainian - not part of this repository's
+git history, mentioned here only so its absence from a clone isn't a
+surprise.)
 
 ## License
 

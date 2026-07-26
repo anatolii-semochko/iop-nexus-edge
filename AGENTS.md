@@ -5,7 +5,18 @@ Read this file before making changes. Keep it updated: whenever you add an
 important service, module, component, or make an architectural change, update
 this file and `README.md` accordingly.
 
-See `docs/PROJECT_MASTER-1.1.md` for the full architecture vision.
+See `docs/PROJECT_MASTER-1.1.md` for the full architecture vision, and
+`docs/DEVELOPMENT_LOG.md` for the dated history of how this platform got
+to its current state and why.
+
+Section numbers below have a few historical gaps (§8, §12, §14, §16, §18
+don't exist) - some early sections were merged/reworked before this file
+settled into its current shape, and the numbers were never backfilled.
+Deliberately left as-is, not a sign anything is missing: "AGENTS.md
+section N" is referenced ~190 times in code comments across this repo, so
+renumbering (or splitting this file by domain, otherwise a reasonable
+idea at its current size) would mean rewriting every one of those for a
+purely cosmetic fix - not worth it.
 
 ---
 
