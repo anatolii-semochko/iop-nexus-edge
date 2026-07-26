@@ -14,10 +14,12 @@ import {
   CTableHeaderCell,
   CTableRow,
 } from '@coreui/react'
-import { cilFilterX, cilSettings } from '@coreui/icons'
+import { cilSettings } from '@coreui/icons'
 import { api } from '../../api/client'
 import { useProcessLiveState } from '../../api/useLiveProcess'
 import IconButton from '../../components/IconButton'
+import ResetFiltersButton from '../../components/ResetFiltersButton'
+import Switch from '../../components/Switch'
 import ExpandAllToggleButton from '../../components/table/ExpandAllToggleButton'
 import ExpandToggleButton from '../../components/table/ExpandToggleButton'
 import TablePagination from '../../components/table/TablePagination'
@@ -40,6 +42,14 @@ export const KIND_PANELS = {
 }
 
 const statusColor = (status) => (status === 'on' ? 'success' : 'secondary')
+
+// Exactly the ON/OFF pair (order-independent) - the one action set this
+// row renders as a Switch instead of a button-per-action (AGENTS.md
+// section 26). Any other action set (the still-unimplemented START/PAUSE/
+// STOP - AGENTS.md section 10) keeps the original button rendering below,
+// unchanged and still there for exactly that future case, not deleted.
+const isOnOffActions = (actions) =>
+  actions.length === 2 && actions.includes('ON') && actions.includes('OFF')
 
 // Fixed width so a button's content swapping between its label and a busy
 // spinner never changes the button's own box size - letting it changed
@@ -114,22 +124,31 @@ const ProcessRow = ({
               every control on one line instead of wrapping under a narrow
               column. */}
           <div className="d-flex justify-content-end align-items-center gap-1 flex-nowrap">
-            {process.actions.map((action) => {
-              const isCurrent = action.toLowerCase() === status
-              return (
-                <CButton
-                  key={action}
-                  size="sm"
-                  style={ACTION_BUTTON_STYLE}
-                  color={isCurrent ? statusColor(status) : 'secondary'}
-                  variant={isCurrent ? undefined : 'outline'}
-                  disabled={busyAction !== null || isCurrent}
-                  onClick={() => handleAction(action)}
-                >
-                  {busyAction === action ? <CSpinner size="sm" /> : action}
-                </CButton>
-              )
-            })}
+            {isOnOffActions(process.actions) ? (
+              <Switch
+                checked={status === 'on'}
+                onChange={(next) => handleAction(next ? 'ON' : 'OFF')}
+                disabled={busyAction !== null}
+                ariaLabel={`${process.name} power`}
+              />
+            ) : (
+              process.actions.map((action) => {
+                const isCurrent = action.toLowerCase() === status
+                return (
+                  <CButton
+                    key={action}
+                    size="sm"
+                    style={ACTION_BUTTON_STYLE}
+                    color={isCurrent ? statusColor(status) : 'secondary'}
+                    variant={isCurrent ? undefined : 'outline'}
+                    disabled={busyAction !== null || isCurrent}
+                    onClick={() => handleAction(action)}
+                  >
+                    {busyAction === action ? <CSpinner size="sm" /> : action}
+                  </CButton>
+                )
+              })
+            )}
             <IconButton
               icon={cilSettings}
               size="sm"
@@ -318,18 +337,9 @@ const ProcessesTable = ({
         {/* Pushed to the far right of this same row, not the tab strip
             above it - a plain (non-`xs="auto"`) CCol takes the remaining
             row width, and this inner flex box right-aligns within it. */}
-        {hasActiveFilters && (
-          <CCol className="d-flex justify-content-end">
-            <IconButton
-              icon={cilFilterX}
-              color="warning"
-              variant={undefined}
-              center
-              onClick={onResetFilters}
-              ariaLabel="Reset filters"
-            />
-          </CCol>
-        )}
+        <CCol className="d-flex justify-content-end">
+          <ResetFiltersButton active={hasActiveFilters} onClick={onResetFilters} />
+        </CCol>
       </CRow>
       {filtered.length === 0 ? (
         <CAlert color="info">{emptyMessage}</CAlert>

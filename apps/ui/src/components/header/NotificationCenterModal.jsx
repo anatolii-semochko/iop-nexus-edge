@@ -4,6 +4,7 @@ import {
   CAvatar,
   CButton,
   CCol,
+  CFormCheck,
   CFormSelect,
   CModal,
   CModalBody,
@@ -22,11 +23,12 @@ import {
   CTableRow,
 } from '@coreui/react'
 import CIcon from '@coreui/icons-react'
-import { cilBell, cilReload, cilX } from '@coreui/icons'
+import { cilBell, cilCheckCircle, cilReload, cilX } from '@coreui/icons'
 import { api } from '../../api/client'
 import { useProcessesLiveState } from '../../api/useLiveProcess'
 import { formatSmartDateTime } from '../../utils/format'
 import IconButton from '../IconButton'
+import ResetFiltersButton from '../ResetFiltersButton'
 import TablePagination from '../table/TablePagination'
 import TableSearchInput from '../table/TableSearchInput'
 import { WEM_TYPE_META } from './wemTypeMeta'
@@ -89,6 +91,19 @@ const NotificationCenterModal = ({ type, onTypeChange, onClose }) => {
   const [error, setError] = useState(null)
   const [reloadToken, setReloadToken] = useState(0)
   const [processes, setProcesses] = useState([])
+  // Bumped on reset to force TableSearchInput to remount with a blank
+  // value - it deliberately owns its own typing state after mount and
+  // never resyncs from a changed `value` prop (same pattern already
+  // established in ProcessesTable.jsx/ProcessesList.jsx).
+  const [searchResetToken, setSearchResetToken] = useState(0)
+  // Checkbox selection for the bulk "Mark as read" action - ids only, not
+  // whole rows, since a row can leave `rows` (a filter change, a page
+  // turn, the live Active list updating) without that meaning the user's
+  // selection should silently vanish. Cleared on every navigation change
+  // below regardless - a selection made on one page/tab/filter applying
+  // to a completely different result set the user hasn't seen would be
+  // surprising, not a feature worth preserving across those.
+  const [selectedIds, setSelectedIds] = useState(new Set())
 
   // Fetched once, not per-open - cheap (a few dozen rows) and needed both
   // for the process filter dropdown and for naming the live Active tab's
@@ -128,30 +143,48 @@ const NotificationCenterModal = ({ type, onTypeChange, onClose }) => {
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
   }, [live, processNameById, type, processFilter, search])
 
-  // Every filter setter resets `page` to 1 in the same event handler that
-  // changes the filter, not a separate effect watching for the change - a
-  // stale page number from a larger previous result set could point past
-  // the end of a new one, but that's a direct consequence of the user's
-  // own click, not derived state to reconcile after the fact.
+  // Every filter setter resets `page` to 1 (and the checkbox selection,
+  // which belongs to whatever result set was on screen when it was made)
+  // in the same event handler that changes the filter, not a separate
+  // effect watching for the change - a stale page number from a larger
+  // previous result set could point past the end of a new one, but that's
+  // a direct consequence of the user's own click, not derived state to
+  // reconcile after the fact.
   const changeType = (nextType) => {
     setPage(1)
+    setSelectedIds(new Set())
     onTypeChange(nextType)
   }
   const changeTab = (nextTab) => {
     setPage(1)
+    setSelectedIds(new Set())
     setTab(nextTab)
   }
   const changeProcessFilter = (nextProcessFilter) => {
     setPage(1)
+    setSelectedIds(new Set())
     setProcessFilter(nextProcessFilter)
   }
   const changeSearch = (nextSearch) => {
     setPage(1)
+    setSelectedIds(new Set())
     setSearch(nextSearch)
+  }
+  const resetFilters = () => {
+    setPage(1)
+    setSelectedIds(new Set())
+    setProcessFilter('')
+    setSearch('')
+    setSearchResetToken((t) => t + 1)
   }
   const changePageSize = (nextPageSize) => {
     setPage(1)
+    setSelectedIds(new Set())
     setPageSize(nextPageSize)
+  }
+  const changePage = (nextPage) => {
+    setSelectedIds(new Set())
+    setPage(nextPage)
   }
 
   useEffect(() => {
@@ -203,14 +236,46 @@ const NotificationCenterModal = ({ type, onTypeChange, onClose }) => {
     }
   }
 
+  const toggleSelected = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
+  }
+
+  const handleMarkSelectedRead = async () => {
+    const ids = [...selectedIds]
+    try {
+      await Promise.all(ids.map((id) => api.hideMessage(id)))
+      setSelectedIds(new Set())
+      setReloadToken((t) => t + 1)
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
   const rows = effectiveTab === 'active' ? activeItems : items
+  // Only unread rows are selectable at all - a read row has nothing left
+  // for "Mark as read" to do to it, same reason its own row never shows a
+  // checkbox either (AGENTS.md section 26).
+  const unreadRowIds = rows.filter((item) => !item.hidden).map((item) => item.id)
+  const allUnreadSelected =
+    unreadRowIds.length > 0 && unreadRowIds.every((id) => selectedIds.has(id))
+  const toggleSelectAll = () => {
+    setSelectedIds(allUnreadSelected ? new Set() : new Set(unreadRowIds))
+  }
 
   return (
     <CModal visible={Boolean(type)} onClose={onClose} size="xl" alignment="center">
       <CModalHeader>
         <CModalTitle>Notifications</CModalTitle>
       </CModalHeader>
-      <CModalBody className="d-flex flex-column" style={{ height: '70vh' }}>
+      <CModalBody className="d-flex flex-column" style={{ height: '88vh' }}>
         {type && (
           <>
             <div className="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
@@ -228,13 +293,21 @@ const NotificationCenterModal = ({ type, onTypeChange, onClose }) => {
                   </CButton>
                 ))}
               </div>
-              <IconButton
-                icon={cilReload}
-                size="sm"
-                center
-                onClick={() => setReloadToken((t) => t + 1)}
-                ariaLabel="Reload"
-              />
+              <div className="d-flex align-items-center gap-2">
+                {selectedIds.size > 0 && (
+                  <CButton size="sm" color="success" onClick={handleMarkSelectedRead}>
+                    <CIcon icon={cilCheckCircle} className="me-1 align-middle" />
+                    Mark as read ({selectedIds.size})
+                  </CButton>
+                )}
+                <IconButton
+                  icon={cilReload}
+                  size="sm"
+                  center
+                  onClick={() => setReloadToken((t) => t + 1)}
+                  ariaLabel="Reload"
+                />
+              </div>
             </div>
 
             <CNav variant="tabs" role="tablist" className="mb-3">
@@ -268,9 +341,16 @@ const NotificationCenterModal = ({ type, onTypeChange, onClose }) => {
               </CCol>
               <CCol xs="auto">
                 <TableSearchInput
+                  key={searchResetToken}
                   value={search}
                   onSearch={changeSearch}
                   placeholder="Search by text..."
+                />
+              </CCol>
+              <CCol className="d-flex justify-content-end">
+                <ResetFiltersButton
+                  active={Boolean(processFilter) || Boolean(search)}
+                  onClick={resetFilters}
                 />
               </CCol>
             </CRow>
@@ -288,6 +368,11 @@ const NotificationCenterModal = ({ type, onTypeChange, onClose }) => {
                 <CTable responsive hover>
                   <CTableHead>
                     <CTableRow>
+                      <CTableHeaderCell style={{ width: '2.5rem' }}>
+                        {unreadRowIds.length > 0 && (
+                          <CFormCheck checked={allUnreadSelected} onChange={toggleSelectAll} />
+                        )}
+                      </CTableHeaderCell>
                       <CTableHeaderCell>Time</CTableHeaderCell>
                       <CTableHeaderCell>Process</CTableHeaderCell>
                       <CTableHeaderCell>Message</CTableHeaderCell>
@@ -297,6 +382,14 @@ const NotificationCenterModal = ({ type, onTypeChange, onClose }) => {
                   <CTableBody>
                     {rows.map((item) => (
                       <CTableRow key={item.id}>
+                        <CTableDataCell>
+                          {!item.hidden && (
+                            <CFormCheck
+                              checked={selectedIds.has(item.id)}
+                              onChange={() => toggleSelected(item.id)}
+                            />
+                          )}
+                        </CTableDataCell>
                         <CTableDataCell className="text-body-secondary small text-nowrap">
                           {formatSmartDateTime(item.created_at)}
                         </CTableDataCell>
@@ -344,7 +437,7 @@ const NotificationCenterModal = ({ type, onTypeChange, onClose }) => {
                 page={page}
                 pageSize={pageSize}
                 totalItems={total}
-                onPageChange={setPage}
+                onPageChange={changePage}
                 onPageSizeChange={changePageSize}
                 pageSizeOptions={PAGE_SIZE_OPTIONS}
               />

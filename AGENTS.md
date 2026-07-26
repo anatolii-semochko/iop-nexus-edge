@@ -2077,3 +2077,84 @@ A round of fixes to the shipped feature above, from watching it live:
   dependency-free module, `wemTypeMeta.js`, that both sides import
   independently - not a workaround, the actual fix, since the cycle
   itself (not just its current trigger) is what was fragile.
+
+### Second cosmetic pass
+
+- **Even taller modal** - `88vh` now (was `70vh`), per direct request once
+  the first fixed-height fix landed. Same mechanism, just a bigger number.
+- **Bulk "mark as read"** - a checkbox per unread row (none on already-
+  read rows - nothing for the action to do to them) plus one header
+  checkbox that selects/deselects every currently-unread row *in `rows`*
+  (the current page for New/All, the whole live list for Active - not
+  "every matching row across all pages", which would need a very
+  different, server-side bulk primitive). Selection is ids only, in its
+  own `selectedIds` state, cleared by every navigation-changing handler
+  (type/tab/process/search/page-size/page) - a selection made against one
+  filtered result set silently carrying over onto a completely different
+  one the user hasn't looked at would be surprising. The "Mark as read
+  (N)" button (`CButton`, appears only once something's selected) fires
+  `Promise.all` over `api.hideMessage` for every selected id - no new bulk
+  endpoint, N individual `PATCH`s is fine at this scale (a page's worth of
+  rows, not thousands).
+
+## 26. Shared visual atoms (indicators, Switch, ResetFiltersButton)
+
+A small, explicitly named "elementary visual components" layer, requested
+alongside a specific Temperature Control cosmetic pass - things that used
+to be redrawn ad hoc per call site now live once, each with a single
+visual job.
+
+**`apps/ui/src/components/indicators/`** (`constants.js`'s `INDICATOR_SIZE
+= 48`, matching the size the very first ad hoc version - TemperatureProcessPanel's
+old inline `Indicator` - already had):
+- **`StatusIndicator.jsx`** - a bold black circular bezel (`border`, not a
+  second nested element) around a fill that reads the boolean state:
+  light gray inactive, `color` (a prop, no fixed palette) active. Replaces
+  the local `Indicator` that used to live inline in TemperatureProcessPanel.
+  jsx (now `LabeledIndicator`, a thin label wrapper around this - the
+  label itself isn't this component's concern, purely elementary).
+  Cooler/Heater keep their existing colors (blue/red) - only the visual
+  *treatment* changed, not what each one represents.
+- **`BuzzerIndicator.jsx`** - a different physical metaphor, not just a
+  StatusIndicator recolored: the *whole body* is black idle / red active
+  (not an inner fill against a fixed bezel), with a small fixed light-gray
+  "grille" dot in the center that never changes color, purely decorative
+  - reads as a microcontroller-board piezo buzzer, not an LED. Built
+  ahead of any call site that uses it - not wired into any process view
+  yet, a deliberately unused primitive waiting on the component that will
+  need it.
+
+**`apps/ui/src/components/Switch.jsx`** - a large left-right toggle, not
+CoreUI's `CFormSwitch` (Bootstrap's own switch styling is thin/small and
+not straightforward to recolor per instance - this needs to be both
+bigger and take its own colors). `activeColor`/`inactiveColor` are props
+(default green/light-gray), not a fixed palette - this component makes no
+assumption about what "on" should look like beyond its own default.
+Wired into `ProcessesTable.jsx`'s `ProcessRow` for exactly the ON/OFF
+action pair (`isOnOffActions()`, order-independent check on `process.
+actions`) - the original per-action `CButton` rendering is still there,
+completely intact, as the `else` branch for any other action set (the
+still-unimplemented START/PAUSE/STOP, section 10) - explicitly kept, not
+deleted, since ON/OFF happening to be the only action set that exists
+today doesn't mean it always will be.
+
+**`apps/ui/src/components/ResetFiltersButton.jsx`** - the reset-filters
+control every filter row in this app now shares (previously duplicated
+inline, `ProcessesTable.jsx` and now `NotificationCenterModal.jsx`'s new
+process/search filter row too). Fixes a real bug in the original inline
+version: it passed `variant={undefined}` to `IconButton` trying to get a
+solid look, but `IconButton`'s own `variant = 'outline'` default parameter
+kicks in for an explicitly-`undefined` value exactly the same as an
+omitted prop - so the button was actually rendering `variant="outline"`
+the whole time (white/yellow-bordered, solid yellow only on `:hover`,
+matching the reported symptom precisely). `ResetFiltersButton` is its own
+small component built directly on `CButton` instead, `variant` simply
+never passed at all (CoreUI's own default there is solid) - solid warning-
+yellow always, not just on hover. Height-matched to sibling `size="sm"`
+`CFormSelect`/search inputs the same way `IconButton`'s own `center` prop
+already does it (`align-middle` on the icon, not a flex-centered button -
+flexing shrinks the button's auto-height below the line-height-driven
+size every other `size="sm"` control in the row uses, section 23's
+original finding). `active` prop controls its own visibility (`null` when
+false) - one prop covers both "should this render" and "onClick", not two
+things every caller has to gate separately.
