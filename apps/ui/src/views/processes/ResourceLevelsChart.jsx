@@ -17,6 +17,33 @@ const SERIES = [
 const clamp = (n) => Math.min(100, Math.max(0, n))
 
 /**
+ * The color/label key for the chart below - a separate component, not
+ * folded into ResourceLevelsChart itself, so ResourceMonitorPanel can
+ * place it *outside* the chart's own bordered box (above it) instead of
+ * overlaid on top of the plotted lines, which is where it used to sit.
+ * Renders in normal flow (no positioning of its own) - the caller decides
+ * where it goes.
+ */
+export const ResourceLevelsChartLegend = () => (
+  <div className="d-flex gap-3 small text-body-secondary mb-1">
+    {SERIES.map(({ key, color, label }) => (
+      <span key={key} className="d-flex align-items-center gap-1">
+        <span
+          style={{
+            width: 8,
+            height: 8,
+            borderRadius: '50%',
+            backgroundColor: color,
+            display: 'inline-block',
+          }}
+        />
+        {label}
+      </span>
+    ))}
+  </div>
+)
+
+/**
  * Rolling 1-minute CPU/RAM/Disk line chart for ResourceMonitorPanel - a
  * plain hand-rolled SVG polyline, not a charting dependency (same "Node
  * built-ins over a library" call already made for the metrics themselves,
@@ -44,14 +71,33 @@ const clamp = (n) => Math.min(100, Math.max(0, n))
  * applied to the (correctly resolved) width, that rendered as a huge
  * square blowing out well past the panel. Absolute positioning resolves
  * against the flex item's already-stretched box in a later layout pass,
- * sidestepping that circularity.
+ * sidestepping that circularity. The legend above it (ResourceLevelsChartLegend)
+ * sits outside this box entirely now, in an ordinary flex-column sibling -
+ * that's a separate concern from this sizing trick, not a threat to it.
+ *
+ * `backgroundColor` is a neutral fill (`--cui-tertiary-bg`, the same
+ * variable this app's own `body` background already uses - AGENTS.md
+ * section 12) rather than the transparent default, which otherwise let
+ * whatever's behind the expanded row (the card's own white/dark surface)
+ * show through with no visual separation from the bordered box around it.
  */
 const ResourceLevelsChart = ({ history }) => {
   const n = history.length
 
   return (
-    <div style={{ position: 'absolute', inset: 0, border: '2px solid var(--cui-border-color)' }}>
-      <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ width: '100%', height: '100%', display: 'block' }}>
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        border: '2px solid var(--cui-border-color)',
+        backgroundColor: '#e7f1e5',
+      }}
+    >
+      <svg
+        viewBox="0 0 100 100"
+        preserveAspectRatio="none"
+        style={{ width: '100%', height: '100%', display: 'block' }}
+      >
         {SERIES.map(({ key, color }) => {
           if (n === 0) return null
           const points = history
@@ -75,25 +121,6 @@ const ResourceLevelsChart = ({ history }) => {
           )
         })}
       </svg>
-      <div
-        className="d-flex gap-3 position-absolute top-0 start-0 small text-body-secondary"
-        style={{ pointerEvents: 'none' }}
-      >
-        {SERIES.map(({ key, color, label }) => (
-          <span key={key} className="d-flex align-items-center gap-1">
-            <span
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: '50%',
-                backgroundColor: color,
-                display: 'inline-block',
-              }}
-            />
-            {label}
-          </span>
-        ))}
-      </div>
     </div>
   )
 }

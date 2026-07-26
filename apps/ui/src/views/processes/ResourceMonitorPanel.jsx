@@ -4,7 +4,7 @@ import { api } from '../../api/client'
 import { useProcessLiveState } from '../../api/useLiveProcess'
 import { wemBadgeClass } from '../../utils/wem'
 import NumericStepper from '../devices/NumericStepper'
-import ResourceLevelsChart, { MAX_SAMPLES } from './ResourceLevelsChart'
+import ResourceLevelsChart, { MAX_SAMPLES, ResourceLevelsChartLegend } from './ResourceLevelsChart'
 
 const METRIC_ROWS = [
   { key: 'cpu', warnKey: 'cpuWarnMax', maxKey: 'cpuMax', label: 'CPU' },
@@ -121,8 +121,11 @@ const ResourceMonitorPanel = ({ process, onConfigChange }) => {
           )
         })}
       </div>
-      <div className="flex-grow-1 position-relative mb-2 mt-1">
-        <ResourceLevelsChart history={history} />
+      <div className="flex-grow-1 d-flex flex-column mb-2">
+        <ResourceLevelsChartLegend />
+        <div className="flex-grow-1 position-relative">
+          <ResourceLevelsChart history={history} />
+        </div>
       </div>
     </div>
   )
