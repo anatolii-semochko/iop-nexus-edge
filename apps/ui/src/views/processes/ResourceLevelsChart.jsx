@@ -25,7 +25,7 @@ const clamp = (n) => Math.min(100, Math.max(0, n))
  * where it goes.
  */
 export const ResourceLevelsChartLegend = () => (
-  <div className="d-flex gap-3 small text-body-secondary mb-1">
+  <div className="d-flex gap-3 small text-body-secondary">
     {SERIES.map(({ key, color, label }) => (
       <span key={key} className="d-flex align-items-center gap-1">
         <span
@@ -90,7 +90,8 @@ const ResourceLevelsChart = ({ history }) => {
         position: 'absolute',
         inset: 0,
         border: '2px solid var(--cui-border-color)',
-        backgroundColor: '#e7f1e5',
+        borderRadius: '6px',
+        backgroundColor: 'rgb(157 196 148 / 31%)',
       }}
     >
       <svg

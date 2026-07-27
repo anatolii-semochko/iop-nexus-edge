@@ -88,7 +88,7 @@ const ResourceMonitorPanel = ({ process, onConfigChange }) => {
               <CCol xs="auto" style={{ width: '6.5rem' }}>
                 <div className="text-body-secondary small">{label}</div>
                 <div
-                  className={`text-black d-inline-block ${zone === 'normal' ? '' : `${wemBadgeClass(zone)} px-2`}`}
+                  className={`d-inline-block ${zone === 'normal' ? '' : `${wemBadgeClass(zone)} px-2`}`}
                   style={{
                     fontSize: '1.9rem',
                     fontWeight: 600,
