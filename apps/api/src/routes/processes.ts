@@ -270,22 +270,26 @@ export async function processRoutes(app: FastifyInstance): Promise<void> {
   // paginated, unlike every other list in this app (section 11 - those
   // are client-side, "tens of rows"; this is an append-only log that only
   // grows). Historical (New/All tabs) only - the Active tab reads live
-  // process state instead (section 24/25), never this route.
+  // process state instead (section 24/25), never this route. `from`/`to`
+  // (AGENTS.md section 29) are the Logs page's processes tab's own
+  // addition - the notification center popup never sends them.
   app.get<{
     Querystring: {
       type: processMessages.MessageType | "all";
       scope: processMessages.MessageScope;
       processId?: string;
       search?: string;
+      from?: string;
+      to?: string;
       page?: string;
       pageSize?: string;
     };
   }>("/process-messages", async (request) => {
-    const { type, scope, search } = request.query;
+    const { type, scope, search, from, to } = request.query;
     const processId = request.query.processId ? Number(request.query.processId) : undefined;
     const page = Math.max(1, Number(request.query.page ?? 1));
     const pageSize = Math.min(100, Math.max(1, Number(request.query.pageSize ?? 20)));
-    return processMessages.listProcessMessages({ type, scope, processId, search, page, pageSize });
+    return processMessages.listProcessMessages({ type, scope, processId, search, from, to, page, pageSize });
   });
 
   // UI-driven - which Tab Groups (routes/tabGroups.ts) this process is

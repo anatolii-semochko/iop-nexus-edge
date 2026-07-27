@@ -81,12 +81,36 @@ export const api = {
   // Notification center (AGENTS.md section 25) - server-side paginated,
   // unlike every other list in this app (section 11). Historical (New/All
   // tabs) only - the Active tab reads live process state instead, never
-  // this endpoint.
-  listProcessMessages: ({ type, scope, processId, search, page, pageSize }) => {
+  // this endpoint. Also reused by the Logs page's processes tab (section
+  // 29, `from`/`to` date-range params), which the notification center
+  // itself never sets.
+  listProcessMessages: ({ type, scope, processId, search, from, to, page, pageSize }) => {
     const params = new URLSearchParams({ type, scope, page, pageSize })
     if (processId) params.set('processId', processId)
     if (search) params.set('search', search)
+    if (from) params.set('from', from)
+    if (to) params.set('to', to)
     return request(`/process-messages?${params}`)
+  },
+  // Logs page (AGENTS.md section 29) - deviceCommands/sensors tabs. The
+  // processes tab reuses listProcessMessages above instead of a third
+  // function here.
+  listDeviceCommandLogs: ({ deviceId, action, search, from, to, page, pageSize }) => {
+    const params = new URLSearchParams({ page, pageSize })
+    if (deviceId) params.set('deviceId', deviceId)
+    if (action) params.set('action', action)
+    if (search) params.set('search', search)
+    if (from) params.set('from', from)
+    if (to) params.set('to', to)
+    return request(`/logs/device-commands?${params}`)
+  },
+  listSensorReadingLogs: ({ deviceId, search, from, to, page, pageSize }) => {
+    const params = new URLSearchParams({ page, pageSize })
+    if (deviceId) params.set('deviceId', deviceId)
+    if (search) params.set('search', search)
+    if (from) params.set('from', from)
+    if (to) params.set('to', to)
+    return request(`/logs/sensor-readings?${params}`)
   },
   // Process groups (AGENTS.md section 10/17 - a real, admin-managed entity).
   listProcessGroups: () => request('/process-groups'),

@@ -12,6 +12,7 @@ import { initUnreadCounts } from "./processMessages.js";
 import { authRoutes } from "./routes/auth.js";
 import { deviceRoutes } from "./routes/devices.js";
 import { heartbeatControlRoutes } from "./routes/heartbeatControls.js";
+import { logRoutes } from "./routes/logs.js";
 import { messageGroupRoutes } from "./routes/messageGroups.js";
 import { messageLevelRoutes } from "./routes/messageLevels.js";
 import { nodeRoutes } from "./routes/nodes.js";
@@ -49,6 +50,7 @@ await app.register(processRoutes);
 await app.register(tabGroupRoutes);
 await app.register(messageGroupRoutes);
 await app.register(messageLevelRoutes);
+await app.register(logRoutes);
 
 // Recomputes the notification center's unread counters from Postgres
 // (AGENTS.md section 25) before the broadcast loop's own first tick reads

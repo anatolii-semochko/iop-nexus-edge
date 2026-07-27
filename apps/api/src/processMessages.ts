@@ -329,6 +329,10 @@ async function bumpUnreadCount(type: MessageType, delta: number): Promise<void> 
 
 export interface ProcessMessageListItem extends ProcessMessage {
   process_name: string;
+  // Process Group (AGENTS.md section 10/17) the owning process belongs to -
+  // added for the Logs page's processes tab (Group column), unused by the
+  // notification center popup but harmless there.
+  group_name: string;
   hidden_by_user: {
     id: number;
     display_name: string | null;
@@ -350,20 +354,27 @@ export interface ListProcessMessagesParams {
   scope: MessageScope;
   processId?: number;
   search?: string;
+  // Inclusive ISO timestamp bounds - added for the Logs page's processes
+  // tab (AGENTS.md section 29); the notification center popup never sets
+  // these, so `scope`/`type`/`processId`/`search` alone still describe its
+  // existing behavior unchanged.
+  from?: string;
+  to?: string;
   page: number;
   pageSize: number;
 }
 
 /**
- * Server-side paginated feed for the notification center popup (AGENTS.md
- * section 25) - the first server-paginated list in this codebase (every
- * other table, section 11, is client-side, "tens of rows, not thousands";
- * this is an append-only log that only grows).
+ * Server-side paginated feed, shared by the notification center popup
+ * (AGENTS.md section 25) and the Logs page's processes tab (section 29) -
+ * the first server-paginated list in this codebase (every other table,
+ * section 11, is client-side, "tens of rows, not thousands"; this is an
+ * append-only log that only grows).
  */
 export async function listProcessMessages(
   params: ListProcessMessagesParams,
 ): Promise<{ items: ProcessMessageListItem[]; total: number }> {
-  const { type, scope, processId, search, page, pageSize } = params;
+  const { type, scope, processId, search, from, to, page, pageSize } = params;
   const conditions: string[] = [];
   const values: unknown[] = [];
 
@@ -380,6 +391,14 @@ export async function listProcessMessages(
     values.push(`%${search}%`);
     conditions.push(`pm.text ILIKE $${values.length}`);
   }
+  if (from) {
+    values.push(from);
+    conditions.push(`pm.created_at >= $${values.length}`);
+  }
+  if (to) {
+    values.push(to);
+    conditions.push(`pm.created_at <= $${values.length}`);
+  }
   const where = conditions.length > 0 ? conditions.join(" AND ") : "TRUE";
 
   const offset = (page - 1) * pageSize;
@@ -390,17 +409,19 @@ export async function listProcessMessages(
     pool.query<
       ProcessMessage & {
         process_name: string;
+        group_name: string;
         hidden_by_display_name: string | null;
         hidden_by_username: string | null;
         hidden_by_avatar_path: string | null;
       }
     >(
-      `SELECT pm.*, p.name AS process_name,
+      `SELECT pm.*, p.name AS process_name, g.name AS group_name,
               u.display_name AS hidden_by_display_name,
               u.username AS hidden_by_username,
               u.avatar_path AS hidden_by_avatar_path
        FROM process_messages pm
        JOIN processes p ON p.id = pm.process_id
+       JOIN process_groups g ON g.id = p.group_id
        LEFT JOIN users u ON u.id = pm.hidden_by
        WHERE ${where}
        ORDER BY pm.created_at DESC

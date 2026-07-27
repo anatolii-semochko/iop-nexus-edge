@@ -13,7 +13,7 @@ import {
   CTableRow,
 } from '@coreui/react'
 import { subscribeToLiveEvents } from '../../api/liveSocket'
-import LiveBadge from './LiveBadge'
+import LiveBadge from '../devices/LiveBadge'
 
 // Fixed cap on how many recent messages are kept on screen - temporary
 // until a real filter/limit control is added (see to-do.txt).
@@ -27,7 +27,9 @@ let nextRowId = 0
  * Raw feed of every message the shared WebSocket receives (apps/messaging-
  * gateway, AGENTS.md section 9) - unfiltered, newest first. A debugging/
  * visibility tool for the bus itself, distinct from the per-device overlays
- * on Device Detail / Dev Simulator.
+ * on Device Detail / Dev Simulator. Lives in the Logs nav group (section
+ * 29) alongside the Logs page - it moved out of Devices, its component
+ * folder didn't (still imports LiveBadge from views/devices).
  */
 const LiveEvents = () => {
   const [rows, setRows] = useState([])

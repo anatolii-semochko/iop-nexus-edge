@@ -26,7 +26,7 @@ import CIcon from '@coreui/icons-react'
 import { cilBell, cilCheckCircle, cilReload, cilX } from '@coreui/icons'
 import { api } from '../../api/client'
 import { useProcessesLiveState } from '../../api/useLiveProcess'
-import { formatSmartDateTime } from '../../utils/format'
+import { formatSmartDateTime, userInitials } from '../../utils/format'
 import IconButton from '../IconButton'
 import ResetFiltersButton from '../ResetFiltersButton'
 import TablePagination from '../table/TablePagination'
@@ -49,14 +49,6 @@ const TABS = [
 
 const PAGE_SIZE_OPTIONS = [20, 50, 100]
 const DEFAULT_PAGE_SIZE = 20
-
-const initials = (user) =>
-  (user.display_name ?? user.username)
-    .split(/\s+/)
-    .map((part) => part[0])
-    .slice(0, 2)
-    .join('')
-    .toUpperCase()
 
 /**
  * Notification center popup (AGENTS.md section 25) - opened from the
@@ -410,7 +402,7 @@ const NotificationCenterModal = ({ type, onTypeChange, onClose }) => {
                                   />
                                 ) : (
                                   <CAvatar color="secondary" textColor="white" size="sm">
-                                    {initials(item.hidden_by_user)}
+                                    {userInitials(item.hidden_by_user)}
                                   </CAvatar>
                                 )}
                               </span>

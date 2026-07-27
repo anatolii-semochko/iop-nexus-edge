@@ -2543,3 +2543,91 @@ was verified to correctly suppress alerts even while the test process's
 own heartbeat stayed genuinely dead, confirming the two mechanisms don't
 interfere with each other. Console clean throughout; state reset to
 defaults afterward.
+
+## 29. Logs page (new nav group, historical browser over the three log tables)
+
+A read-only historical browser over the three append-only log tables that
+already existed but had no query surface (`device_command_logs`,
+`sensor_reading_logs` - section 22) plus `process_messages` (section 22/25,
+which already had one via the notification center). New top-level sidebar
+group **Logs**, containing `Live Events` (moved out of the Devices group -
+same component, relocated to `apps/ui/src/views/logs/`) and the new
+**Logs** page itself.
+
+### Backend
+
+- `apps/api/src/deviceCommandLog.ts` / `sensorReadingLog.ts` each gained a
+  `list*Logs` function (device/action/resource-search/date-range filters,
+  paginated, `LEFT JOIN devices` for a display name - `device_id` is
+  nullable, `ON DELETE SET NULL`, so a deleted device's history still
+  shows with `device_name: null`). Same shape as
+  `processMessages.listProcessMessages`.
+- `apps/api/src/routes/logs.ts` - `GET /logs/device-commands` and
+  `GET /logs/sensor-readings`. No third route for processes: the
+  **processes tab reuses the existing `GET /process-messages`**
+  (`scope: 'all'`) rather than duplicating a nearly-identical endpoint -
+  `processMessages.ts` gained optional `from`/`to` ISO-timestamp bounds and
+  `group_name` (joined from `process_groups`) for this purpose; the
+  notification center popup (section 25) never sets `from`/`to` and is
+  unaffected.
+- New migration adds a `created_at` index to `process_messages` (the other
+  two log tables already had one from their own creation migrations) -
+  this page is the first consumer to filter/sort that table by date range.
+
+### Frontend
+
+- `apps/ui/src/hooks/useServerPaginatedList.js` - the hand-rolled
+  page/pageSize/items/total/loading/error/reload state
+  `NotificationCenterModal.jsx` already used for its one server-paginated
+  list, factored out since this page needed the identical pattern three
+  more times. Takes `(fetcher, deps, {pageSize})`; resets to page 1
+  whenever `deps` (the caller's own filter values) changes, same as every
+  filter setter elsewhere in this app already does by hand. Distinct from
+  `usePagination.js` (client-side slicing of an already-fetched array,
+  section 12) - this one owns the actual network round trip.
+- `apps/ui/src/components/table/DateRangeFilter.jsx` - two native
+  `<input type="datetime-local">` fields (From/To). No date-range picker
+  library exists in this app and this project's low-footprint/Raspberry Pi
+  philosophy argues against adding one just for this - confirmed with the
+  user (`AskUserQuestion`) rather than assumed.
+  `utils/format.js`'s new `localDateTimeToIso()` converts the local-time
+  input value to a UTC ISO string for the API.
+- `apps/ui/src/views/logs/LogsList.jsx` - `CTabs`/`CTabList` (not
+  `CTabContent`/`CTabPanel`, same reasoning as the Processes page, section
+  23 - an inactive tab shouldn't keep its own fetch/pagination state
+  mounted), three tabs: `DeviceCommandLogsTab.jsx`, `SensorReadingLogsTab.
+  jsx`, `ProcessMessageLogsTab.jsx`. Devices/processes lists are fetched
+  once at the page level and passed down for each tab's own selector.
+- Each tab: its own relevant selectors (device/action for deviceCommands;
+  device for sensors; type/process for processes) + text search +
+  `DateRangeFilter` + reload + `ResetFiltersButton`, then a plain table +
+  `TablePagination` (page sizes `[20, 50, 100]`, matching the notification
+  center's own append-only-log convention rather than the client-side
+  toolkit's `[10, 25, 50]`, section 11).
+- Columns deliberately differ per tab rather than forcing a uniform set -
+  confirmed with the user that the "Group" column only makes sense for the
+  processes tab (its Process Group) and that a per-row `activeSwitcher`
+  toggle from the original request was a copy-paste mistake, not a real
+  requirement (skipped entirely). The processes tab's rightmost column
+  shows read/unread + who-dismissed-and-when (reusing the notification
+  center's own avatar rendering, `utils/format.js`'s `userInitials()` now
+  shared between both) purely as **information**, not an action - this tab
+  is an audit trail, not a second inbox; dismissing a message still only
+  happens from the header notification center (section 25).
+
+### Deferred - freshness ("OK"/"ERROR") status column
+
+The original request described a `status` column for the deviceCommands/
+sensors tabs meaning "was this value refreshed within its expected
+interval" (OK) vs "overdue" (ERROR) - conceptually a per-`(device,
+resource)` staleness check, similar in spirit to Heartbeating Control
+(section 28) but for individual sensor/command resources rather than
+whole processes/devices/nodes. **Not implemented** - there is no existing
+"expected update interval" concept per device resource to check against,
+and the user explicitly agreed to skip it for now rather than force a
+design under this task's scope, asking only that it be written down as
+future work. Whoever picks this up next should look at whether it
+belongs as a new per-resource config field (`devices.capabilities`?) or as
+its own table, and whether Heartbeating Control's ticks-based model is
+reusable here or genuinely a different shape (a sensor reading interval
+isn't tied to the orchestrator's own tick loop the way a process's is).
