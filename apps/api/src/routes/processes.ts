@@ -121,6 +121,12 @@ export async function processRoutes(app: FastifyInstance): Promise<void> {
     }
 
     await processRegistry.setStatus(process.id, action === "ON" ? "on" : "off", "api");
+    // `status` is a deliberately non-urgent, timer-only broadcast field
+    // (AGENTS.md section 24) - a UI-driven ON/OFF click is exactly the
+    // "flip it and watch the effect immediately" case that's laggy for,
+    // same reasoning as the dashboard-flag-cleared route below. Forced,
+    // not left to the next periodic tick or an unrelated urgent trigger.
+    await broadcastForced(`process-action:${action}`);
     return { status: "ok" };
   });
 
