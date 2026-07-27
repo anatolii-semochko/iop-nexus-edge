@@ -1,0 +1,23 @@
+# Source of truth for this device type's EdgeX-facing shape. The copy
+# actually loaded by apps/device-service lives at
+# apps/device-service/res/profiles/NexusEdge-Example-Heater.yaml - there
+# is no provisioning flow yet that reads this file directly (AGENTS.md
+# section 7), so the two must be kept in sync by hand. Identical content.
+apiVersion: "v2"
+name: "NexusEdge-Example-Heater"
+manufacturer: "NexusEdge"
+model: "example-virtual-01"
+labels:
+  - "example"
+description: "Example heater relay"
+
+deviceResources:
+  - name: "Heater"
+    isHidden: false
+    description: "Example actuator - must never be on at the same time as example-cooler-01"
+    properties:
+      valueType: "Bool"
+      readWrite: "RW"
+      defaultValue: "false"
+
+deviceCommands: []

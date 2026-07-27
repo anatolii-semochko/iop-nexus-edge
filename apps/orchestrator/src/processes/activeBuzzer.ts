@@ -51,8 +51,8 @@ function stopTimer(processId: number): void {
 }
 
 function writeBuzzer(deviceId: number, value: boolean): void {
-  apiClient.setResourceAuto(deviceId, "Buzzer", value).catch((err) => {
-    logger.warn({ err, deviceId, value }, "active-buzzer: failed to write Buzzer resource");
+  apiClient.setDeviceAuto(deviceId, value).catch((err) => {
+    logger.warn({ err, deviceId, value }, "active-buzzer: failed to write Buzzer device");
   });
 }
 

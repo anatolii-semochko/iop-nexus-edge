@@ -22,18 +22,23 @@ import TableSearchInput from '../../components/table/TableSearchInput'
 import { useServerPaginatedList } from '../../hooks/useServerPaginatedList'
 import { formatSmartDateTime, localDateTimeToIso } from '../../utils/format'
 
+const ACTIONS = ['write', 'auto', 'release', 'simulate']
 const PAGE_SIZE_OPTIONS = [20, 50, 100]
 
 const formatValue = (value) => (value === null || value === undefined ? '-' : String(value))
 
 /**
- * Logs page (AGENTS.md section 29) - sensors tab. Read side of
- * sensor_reading_logs (every readOnly resource publish, logged
- * unconditionally - AGENTS.md section 22), which had no query surface at
- * all before this. Historical/append-only, no per-row interaction.
+ * Logs page (AGENTS.md section 29) - commands tab. Read side of
+ * `log_command` (renamed from `device_command_logs`, to-do.txt's
+ * 2026-07-27 Device/Node refactor), which had no query surface at all
+ * before section 29 (write-only, commandLog.ts's own logCommand).
+ * Historical/append-only, no per-row interaction - a straight audit
+ * trail. No Resource column anymore - a Device is atomic, its name
+ * already says what was written.
  */
-const SensorReadingLogsTab = ({ devices }) => {
+const CommandLogsTab = ({ devices }) => {
   const [deviceId, setDeviceId] = useState('')
+  const [action, setAction] = useState('')
   const [search, setSearch] = useState('')
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
@@ -42,21 +47,23 @@ const SensorReadingLogsTab = ({ devices }) => {
   const { items, total, loading, error, page, pageSize, setPage, setPageSize, reload } =
     useServerPaginatedList(
       (pageArg, pageSizeArg) =>
-        api.listSensorReadingLogs({
+        api.listCommandLogs({
           deviceId: deviceId || undefined,
+          action: action || undefined,
           search: search || undefined,
           from: localDateTimeToIso(from),
           to: localDateTimeToIso(to),
           page: pageArg,
           pageSize: pageSizeArg,
         }),
-      [deviceId, search, from, to],
+      [deviceId, action, search, from, to],
       { pageSize: PAGE_SIZE_OPTIONS[0] },
     )
 
-  const hasActiveFilters = Boolean(deviceId || search || from || to)
+  const hasActiveFilters = Boolean(deviceId || action || search || from || to)
   const resetFilters = () => {
     setDeviceId('')
+    setAction('')
     setSearch('')
     setFrom('')
     setTo('')
@@ -77,11 +84,21 @@ const SensorReadingLogsTab = ({ devices }) => {
           </CFormSelect>
         </CCol>
         <CCol xs="auto">
+          <CFormSelect size="sm" value={action} onChange={(e) => setAction(e.target.value)}>
+            <option value="">All actions</option>
+            {ACTIONS.map((a) => (
+              <option key={a} value={a}>
+                {a}
+              </option>
+            ))}
+          </CFormSelect>
+        </CCol>
+        <CCol xs="auto">
           <TableSearchInput
             key={searchResetToken}
             value={search}
             onSearch={setSearch}
-            placeholder="Search by resource..."
+            placeholder="Search by device..."
           />
         </CCol>
         <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
@@ -98,7 +115,7 @@ const SensorReadingLogsTab = ({ devices }) => {
           <CSpinner color="primary" />
         </div>
       ) : items.length === 0 ? (
-        <CAlert color="info">No sensor reading logs match this filter.</CAlert>
+        <CAlert color="info">No command logs match this filter.</CAlert>
       ) : (
         <>
           <CTable responsive>
@@ -106,7 +123,7 @@ const SensorReadingLogsTab = ({ devices }) => {
               <CTableRow>
                 <CTableHeaderCell scope="col">Time</CTableHeaderCell>
                 <CTableHeaderCell scope="col">Device</CTableHeaderCell>
-                <CTableHeaderCell scope="col">Resource</CTableHeaderCell>
+                <CTableHeaderCell scope="col">Action</CTableHeaderCell>
                 <CTableHeaderCell scope="col">Value</CTableHeaderCell>
                 <CTableHeaderCell scope="col">Source</CTableHeaderCell>
               </CTableRow>
@@ -118,7 +135,7 @@ const SensorReadingLogsTab = ({ devices }) => {
                     {formatSmartDateTime(item.created_at)}
                   </CTableDataCell>
                   <CTableDataCell>{item.device_name ?? `#${item.device_id ?? '?'}`}</CTableDataCell>
-                  <CTableDataCell>{item.resource}</CTableDataCell>
+                  <CTableDataCell>{item.action}</CTableDataCell>
                   <CTableDataCell>{formatValue(item.value)}</CTableDataCell>
                   <CTableDataCell>{item.source}</CTableDataCell>
                 </CTableRow>
@@ -139,4 +156,4 @@ const SensorReadingLogsTab = ({ devices }) => {
   )
 }
 
-export default SensorReadingLogsTab
+export default CommandLogsTab

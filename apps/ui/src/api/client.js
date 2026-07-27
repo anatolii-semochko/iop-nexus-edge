@@ -17,7 +17,7 @@ async function request(path, options = {}) {
     // Only set Content-Type when there's actually a JSON body - Fastify's
     // default JSON parser rejects an empty body sent with this header
     // (FST_ERR_CTP_EMPTY_JSON_BODY), which bodyless requests like
-    // releaseResource below otherwise trigger. Cookies (the session - see
+    // releaseDevice below otherwise trigger. Cookies (the session - see
     // AGENTS.md section 13) ride along automatically since this is always a
     // same-origin request, no explicit `credentials` option needed.
     headers: options.body && !isFormData ? { 'Content-Type': 'application/json' } : {},
@@ -46,22 +46,22 @@ export const api = {
   listDevices: () => request('/devices'),
   getDevice: (id) => request(`/devices/${id}`),
   // A UI write is always a manual override (Dual Devices Model MANUAL mode
-  // - see AGENTS.md section 6).
-  writeResource: (id, resource, value) =>
-    request(`/devices/${id}/resources/${resource}`, {
+  // - see AGENTS.md section 6). No `resource` param anymore (to-do.txt's
+  // 2026-07-27 Device/Node refactor) - a Device is atomic, exactly one value.
+  writeDevice: (id, value) =>
+    request(`/devices/${id}`, {
       method: 'PUT',
       body: JSON.stringify({ value }),
     }),
-  // Releases a resource from MANUAL back to AUTO - the orchestrator's last
+  // Releases a device from MANUAL back to AUTO - the orchestrator's last
   // computed value takes over immediately.
-  releaseResource: (id, resource) =>
-    request(`/devices/${id}/resources/${resource}/release`, { method: 'POST' }),
+  releaseDevice: (id) => request(`/devices/${id}/release`, { method: 'POST' }),
   getSystemMode: () => request('/system/mode'),
-  // Dev-only: pushes a new reading for a read-only (sensor) resource,
+  // Dev-only: pushes a new reading for a read-only (sensor) device,
   // bypassing the Dual Devices Model entirely - simulates the physical
   // device producing a new value on its own (AGENTS.md section 7/9).
-  simulateResource: (id, resource, value) =>
-    request(`/devices/${id}/resources/${resource}/simulate`, {
+  simulateDevice: (id, value) =>
+    request(`/devices/${id}/simulate`, {
       method: 'PUT',
       body: JSON.stringify({ value }),
     }),
@@ -72,9 +72,12 @@ export const api = {
   doProcessAction: (id, action) =>
     request(`/processes/${id}/action`, { method: 'POST', body: JSON.stringify({ action }) }),
   // WEM (AGENTS.md section 22/25) - global dismiss (who/when is recorded
-  // server-side from the session cookie, not sent here).
+  // server-side from the session cookie, not sent here). `/log-messages`
+  // (renamed from `/process-messages`, to-do.txt's 2026-07-27 Device/Node
+  // refactor) backs the underlying `log_messages` table (was
+  // `process_messages`).
   hideMessage: (messageId) =>
-    request(`/process-messages/${messageId}`, {
+    request(`/log-messages/${messageId}`, {
       method: 'PATCH',
       body: JSON.stringify({ hidden: true }),
     }),
@@ -90,27 +93,28 @@ export const api = {
     if (search) params.set('search', search)
     if (from) params.set('from', from)
     if (to) params.set('to', to)
-    return request(`/process-messages?${params}`)
+    return request(`/log-messages?${params}`)
   },
-  // Logs page (AGENTS.md section 29) - deviceCommands/sensors tabs. The
-  // processes tab reuses listProcessMessages above instead of a third
-  // function here.
-  listDeviceCommandLogs: ({ deviceId, action, search, from, to, page, pageSize }) => {
+  // Logs page (AGENTS.md section 29) - commands/devices tabs (renamed from
+  // deviceCommands/sensors, to-do.txt's 2026-07-27 Device/Node refactor -
+  // matches the renamed log_command/log_device tables). The processes tab
+  // reuses listProcessMessages above instead of a third function here.
+  listCommandLogs: ({ deviceId, action, search, from, to, page, pageSize }) => {
     const params = new URLSearchParams({ page, pageSize })
     if (deviceId) params.set('deviceId', deviceId)
     if (action) params.set('action', action)
     if (search) params.set('search', search)
     if (from) params.set('from', from)
     if (to) params.set('to', to)
-    return request(`/logs/device-commands?${params}`)
+    return request(`/logs/commands?${params}`)
   },
-  listSensorReadingLogs: ({ deviceId, search, from, to, page, pageSize }) => {
+  listDeviceLogs: ({ deviceId, search, from, to, page, pageSize }) => {
     const params = new URLSearchParams({ page, pageSize })
     if (deviceId) params.set('deviceId', deviceId)
     if (search) params.set('search', search)
     if (from) params.set('from', from)
     if (to) params.set('to', to)
-    return request(`/logs/sensor-readings?${params}`)
+    return request(`/logs/devices?${params}`)
   },
   // Process groups (AGENTS.md section 10/17 - a real, admin-managed entity).
   listProcessGroups: () => request('/process-groups'),

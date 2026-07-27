@@ -66,11 +66,12 @@ const entityKey = (event) => `${event.domain}.${event.entityId}`
  * Devices, its component folder didn't (still imports LiveBadge from
  * views/devices).
  *
- * Filters (domain/entity/resource/mode/source selectors + free-text
- * search) are purely client-side over the in-memory buffer above, not a
- * server query - "Clear" still empties the whole buffer; "Reset filters"
- * (only shown once a filter is active) just narrows/widens what's shown
- * of what's already buffered.
+ * Filters (domain/entity/mode/source selectors + free-text search - no
+ * resource selector anymore, a Device is atomic now, to-do.txt's
+ * 2026-07-27 Device/Node refactor) are purely client-side over the
+ * in-memory buffer above, not a server query - "Clear" still empties the
+ * whole buffer; "Reset filters" (only shown once a filter is active) just
+ * narrows/widens what's shown of what's already buffered.
  */
 const LiveEvents = () => {
   const [rows, setRows] = useState([])
@@ -82,7 +83,6 @@ const LiveEvents = () => {
   const limitRef = useRef(DEFAULT_LIMIT)
   const [domainFilter, setDomainFilter] = useState('')
   const [entityFilter, setEntityFilter] = useState('')
-  const [resourceFilter, setResourceFilter] = useState('')
   const [modeFilter, setModeFilter] = useState('')
   const [sourceFilter, setSourceFilter] = useState('')
   const [search, setSearch] = useState('')
@@ -127,14 +127,12 @@ const LiveEvents = () => {
       ),
     [rows],
   )
-  const resources = useMemo(() => distinctValues(rows.map((row) => row.event.resource)), [rows])
   const modes = useMemo(() => distinctValues(rows.map((row) => row.event.mode)), [rows])
   const sources = useMemo(() => distinctValues(rows.map((row) => row.event.source)), [rows])
 
   const filtered = rows.filter(({ routingKey, event }) => {
     if (domainFilter && event.domain !== domainFilter) return false
     if (entityFilter && entityKey(event) !== entityFilter) return false
-    if (resourceFilter && event.resource !== resourceFilter) return false
     if (modeFilter && event.mode !== modeFilter) return false
     if (sourceFilter && event.source !== sourceFilter) return false
     if (search) {
@@ -142,7 +140,6 @@ const LiveEvents = () => {
         routingKey,
         event.domain,
         event.entityId,
-        event.resource,
         event.value,
         event.mode,
         event.source,
@@ -156,12 +153,11 @@ const LiveEvents = () => {
   })
 
   const hasActiveFilters = Boolean(
-    domainFilter || entityFilter || resourceFilter || modeFilter || sourceFilter || search,
+    domainFilter || entityFilter || modeFilter || sourceFilter || search,
   )
   const resetFilters = () => {
     setDomainFilter('')
     setEntityFilter('')
-    setResourceFilter('')
     setModeFilter('')
     setSourceFilter('')
     setSearch('')
@@ -226,20 +222,6 @@ const LiveEvents = () => {
           <CCol xs="auto">
             <CFormSelect
               size="sm"
-              value={resourceFilter}
-              onChange={(e) => setResourceFilter(e.target.value)}
-            >
-              <option value="">All resources</option>
-              {resources.map((resource) => (
-                <option key={resource} value={resource}>
-                  {resource}
-                </option>
-              ))}
-            </CFormSelect>
-          </CCol>
-          <CCol xs="auto">
-            <CFormSelect
-              size="sm"
               value={modeFilter}
               onChange={(e) => setModeFilter(e.target.value)}
             >
@@ -289,7 +271,6 @@ const LiveEvents = () => {
                 <CTableHeaderCell scope="col">Time</CTableHeaderCell>
                 <CTableHeaderCell scope="col">Routing key</CTableHeaderCell>
                 <CTableHeaderCell scope="col">Entity</CTableHeaderCell>
-                <CTableHeaderCell scope="col">Resource</CTableHeaderCell>
                 <CTableHeaderCell scope="col">Value</CTableHeaderCell>
                 <CTableHeaderCell scope="col">Mode</CTableHeaderCell>
                 <CTableHeaderCell scope="col">Source</CTableHeaderCell>
@@ -307,7 +288,6 @@ const LiveEvents = () => {
                   <CTableDataCell>
                     {row.event.domain}.{row.event.entityId}
                   </CTableDataCell>
-                  <CTableDataCell>{row.event.resource ?? '-'}</CTableDataCell>
                   <CTableDataCell>
                     {row.event.value !== undefined ? String(row.event.value) : '-'}
                   </CTableDataCell>

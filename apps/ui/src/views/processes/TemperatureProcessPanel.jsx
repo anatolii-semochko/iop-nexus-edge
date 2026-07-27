@@ -19,21 +19,46 @@ const LabeledIndicator = ({ active, color, label }) => (
  * process (AGENTS.md section 10) - shared by both since they look
  * identical, only their table-row actions differ. Min/Max write to the
  * process's own config (Postgres, via PATCH /processes/:id/config), not a
- * device resource - reuses NumericStepper (apps/ui/src/views/devices/
+ * device - reuses NumericStepper (apps/ui/src/views/devices/
  * NumericStepper.jsx) purely as the +/- input control, same as the
  * Temperature override in Dev Simulator.
+ *
+ * The sensor and its two actuators are three separate atomic Devices on
+ * the same Node now (to-do.txt's 2026-07-27 Device/Node refactor) -
+ * `process.config`'s sensorDeviceId/heaterDeviceId/coolerDeviceId is the
+ * role -> deviceId mapping this panel reads, not a single `process.
+ * device_id` with three named resources.
  */
 const TemperatureProcessPanel = ({ process, onConfigChange }) => {
-  const [device, setDevice] = useState(null)
-  const live = useDeviceLiveState(process.device_id)
+  const { sensorDeviceId, heaterDeviceId, coolerDeviceId } = process.config
+  const [sensor, setSensor] = useState(null)
+  const [heater, setHeater] = useState(null)
+  const [cooler, setCooler] = useState(null)
+  const liveSensor = useDeviceLiveState(sensorDeviceId)
+  const liveHeater = useDeviceLiveState(heaterDeviceId)
+  const liveCooler = useDeviceLiveState(coolerDeviceId)
 
   useEffect(() => {
-    if (process.device_id == null) return
+    if (sensorDeviceId == null) return
     api
-      .getDevice(process.device_id)
-      .then(setDevice)
-      .catch(() => setDevice(null))
-  }, [process.device_id])
+      .getDevice(sensorDeviceId)
+      .then(setSensor)
+      .catch(() => setSensor(null))
+  }, [sensorDeviceId])
+  useEffect(() => {
+    if (heaterDeviceId == null) return
+    api
+      .getDevice(heaterDeviceId)
+      .then(setHeater)
+      .catch(() => setHeater(null))
+  }, [heaterDeviceId])
+  useEffect(() => {
+    if (coolerDeviceId == null) return
+    api
+      .getDevice(coolerDeviceId)
+      .then(setCooler)
+      .catch(() => setCooler(null))
+  }, [coolerDeviceId])
 
   const handleCommit = async (field, value) => {
     // max cannot be less than min (AGENTS.md section 10) - checked
@@ -44,13 +69,11 @@ const TemperatureProcessPanel = ({ process, onConfigChange }) => {
     onConfigChange(result.config)
   }
 
-  if (!device) return null
+  if (!sensor || !heater || !cooler) return null
 
-  const temperature = live.Temperature
-    ? live.Temperature.value
-    : device.resources?.Temperature?.value
-  const coolerActive = (live.Cooler ? live.Cooler.value : device.resources?.Cooler?.value) === true
-  const heaterActive = (live.Heater ? live.Heater.value : device.resources?.Heater?.value) === true
+  const temperature = liveSensor.value !== undefined ? liveSensor.value : sensor.value
+  const coolerActive = (liveCooler.value !== undefined ? liveCooler.value : cooler.value) === true
+  const heaterActive = (liveHeater.value !== undefined ? liveHeater.value : heater.value) === true
 
   return (
     <div className="p-3 pt-0">

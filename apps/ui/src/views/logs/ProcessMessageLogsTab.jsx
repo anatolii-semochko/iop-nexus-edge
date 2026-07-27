@@ -36,7 +36,7 @@ const PAGE_SIZE_OPTIONS = [20, 50, 100]
  * view of process_messages (every WEM entry ever raised, including
  * resolved/hidden ones) - unlike the header notification center popup
  * (section 25), there's no mark-as-read action here; this is a full audit
- * trail, not an inbox. Reuses GET /process-messages (`scope: 'all'`)
+ * trail, not an inbox. Reuses GET /log-messages (`scope: 'all'`)
  * rather than a separate endpoint, since that's already exactly this data.
  */
 const ProcessMessageLogsTab = ({ processes }) => {

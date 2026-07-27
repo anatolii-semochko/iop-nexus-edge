@@ -119,7 +119,7 @@ export async function syncActiveMessages(
       text: string;
       hidden: boolean;
     }>(
-      `SELECT id, code, level, text, hidden FROM process_messages WHERE process_id = $1 AND type = $2 AND resolved_at IS NULL`,
+      `SELECT id, code, level, text, hidden FROM log_messages WHERE process_id = $1 AND type = $2 AND resolved_at IS NULL`,
       [processId, type],
     );
     const activeByCode = new Map(active.map((row) => [row.code, row]));
@@ -129,7 +129,7 @@ export async function syncActiveMessages(
       const existing = activeByCode.get(entry.code);
       if (existing) {
         if (existing.level !== entry.level || existing.text !== entry.text) {
-          await client.query(`UPDATE process_messages SET level = $1, text = $2, updated_at = now() WHERE id = $3`, [
+          await client.query(`UPDATE log_messages SET level = $1, text = $2, updated_at = now() WHERE id = $3`, [
             entry.level,
             entry.text,
             existing.id,
@@ -138,7 +138,7 @@ export async function syncActiveMessages(
         }
       } else {
         await client.query(
-          `INSERT INTO process_messages (process_id, type, level, code, text)
+          `INSERT INTO log_messages (process_id, type, level, code, text)
            VALUES ($1, $2, $3, $4, $5)`,
           [processId, type, entry.level, entry.code, entry.text],
         );
@@ -150,7 +150,7 @@ export async function syncActiveMessages(
     if (autoResolve !== "never") {
       for (const row of active) {
         if (!incomingCodes.has(row.code) && (autoResolve === "always" || row.hidden)) {
-          await client.query(`UPDATE process_messages SET resolved_at = now(), updated_at = now() WHERE id = $1`, [row.id]);
+          await client.query(`UPDATE log_messages SET resolved_at = now(), updated_at = now() WHERE id = $1`, [row.id]);
           changed = true;
         }
       }
@@ -187,7 +187,7 @@ export async function syncActiveMessages(
 // hidden its notification.
 export async function hasActiveEntries(processId: number): Promise<boolean> {
   const { rows } = await pool.query<{ exists: boolean }>(
-    `SELECT EXISTS(SELECT 1 FROM process_messages WHERE process_id = $1 AND resolved_at IS NULL) AS exists`,
+    `SELECT EXISTS(SELECT 1 FROM log_messages WHERE process_id = $1 AND resolved_at IS NULL) AS exists`,
     [processId],
   );
   return rows[0].exists;
@@ -205,7 +205,7 @@ async function maybeFlagForDashboard(processId: number): Promise<void> {
      SET dashboard_flagged_at = now()
      WHERE id = $1
        AND dashboard_flagged_at IS NULL
-       AND EXISTS (SELECT 1 FROM process_messages WHERE process_id = $1 AND resolved_at IS NULL)`,
+       AND EXISTS (SELECT 1 FROM log_messages WHERE process_id = $1 AND resolved_at IS NULL)`,
     [processId],
   );
 }
@@ -216,7 +216,7 @@ async function maybeFlagForDashboard(processId: number): Promise<void> {
 // appearing, resolved or not.
 export async function listActiveMessages(processId: number): Promise<ProcessMessage[]> {
   const { rows } = await pool.query<ProcessMessage>(
-    `SELECT * FROM process_messages WHERE process_id = $1 AND resolved_at IS NULL AND hidden = false`,
+    `SELECT * FROM log_messages WHERE process_id = $1 AND resolved_at IS NULL AND hidden = false`,
     [processId],
   );
   // `created_at` comes back from `pg` as a Date, not the `string` its own
@@ -271,7 +271,7 @@ function toPublicMessages(messages: ProcessMessage[]): ProcessPublicMessage[] {
 // required so this function still works from any future non-UI caller).
 export async function setHidden(messageId: number, hidden: boolean, userId: number | null): Promise<void> {
   const { rows } = await pool.query<{ process_id: number; type: MessageType }>(
-    `UPDATE process_messages
+    `UPDATE log_messages
      SET hidden = $1, hidden_by = $2, hidden_at = $3, updated_at = now()
      WHERE id = $4 AND hidden != $1
      RETURNING process_id, type`,
@@ -306,7 +306,7 @@ function unreadCountKey(type: MessageType): string {
  * truth, so this is what keeps the two from silently drifting apart. */
 export async function initUnreadCounts(): Promise<void> {
   const { rows } = await pool.query<{ type: MessageType; count: string }>(
-    `SELECT type, COUNT(*) FROM process_messages WHERE hidden = false GROUP BY type`,
+    `SELECT type, COUNT(*) FROM log_messages WHERE hidden = false GROUP BY type`,
   );
   const counts = new Map(rows.map((row) => [row.type, row.count]));
   await Promise.all(
@@ -419,7 +419,7 @@ export async function listProcessMessages(
               u.display_name AS hidden_by_display_name,
               u.username AS hidden_by_username,
               u.avatar_path AS hidden_by_avatar_path
-       FROM process_messages pm
+       FROM log_messages pm
        JOIN processes p ON p.id = pm.process_id
        JOIN process_groups g ON g.id = p.group_id
        LEFT JOIN users u ON u.id = pm.hidden_by
@@ -428,7 +428,7 @@ export async function listProcessMessages(
        LIMIT $${limitParam} OFFSET $${offsetParam}`,
       [...values, pageSize, offset],
     ),
-    pool.query<{ count: string }>(`SELECT COUNT(*) FROM process_messages pm WHERE ${where}`, values),
+    pool.query<{ count: string }>(`SELECT COUNT(*) FROM log_messages pm WHERE ${where}`, values),
   ]);
 
   return {

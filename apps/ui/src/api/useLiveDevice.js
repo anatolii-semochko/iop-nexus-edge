@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react'
 import { subscribeToLiveEvents, subscribeToLiveStatus } from './liveSocket'
 
 /**
- * Live per-resource overlay for one device - {resource: {value, mode,
- * valueAuto, valueManual, timestamp}} - patched in as events arrive over
- * the shared WebSocket (apps/messaging-gateway, AGENTS.md section 9), on
- * top of whatever a page already loaded via the REST API.
+ * Live overlay for one device - {value, mode, valueAuto, valueManual,
+ * timestamp}, patched in as events arrive over the shared WebSocket
+ * (apps/messaging-gateway, AGENTS.md section 9), on top of whatever a page
+ * already loaded via the REST API. Flat now, not keyed by resource name
+ * (to-do.txt's 2026-07-27 Device/Node refactor) - a Device is atomic,
+ * exactly one value.
  *
  * Subscribes once, keyed by every device's own id, rather than
  * resubscribing (and resetting local state mid-effect) whenever
@@ -24,14 +26,11 @@ export function useDeviceLiveState(deviceId) {
         setByDevice((prev) => ({
           ...prev,
           [event.entityId]: {
-            ...prev[event.entityId],
-            [event.resource]: {
-              value: event.value,
-              mode: event.mode,
-              valueAuto: event.valueAuto,
-              valueManual: event.valueManual,
-              timestamp: event.timestamp,
-            },
+            value: event.value,
+            mode: event.mode,
+            valueAuto: event.valueAuto,
+            valueManual: event.valueManual,
+            timestamp: event.timestamp,
           },
         }))
       }),

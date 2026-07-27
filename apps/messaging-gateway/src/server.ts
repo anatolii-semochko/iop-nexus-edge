@@ -60,7 +60,7 @@ export function buildServer() {
       Promise.all([readStateSnapshot(), readProcessStateSnapshot()])
         .then(([deviceSnapshot, processSnapshot]) => {
           const deviceEntries = deviceSnapshot.map((entry) => ({
-            routingKey: `device.${entry.deviceId}.${entry.resource}.updated`,
+            routingKey: `device.${entry.deviceId}.updated`,
             // Reshaped to the exact envelope shape live "event" messages
             // carry (AGENTS.md section 9) - entityId/timestamp, not this
             // cache row's own deviceId/updatedAt column names - so a
@@ -69,7 +69,6 @@ export function buildServer() {
             event: {
               domain: "device",
               entityId: entry.deviceId,
-              resource: entry.resource,
               value: entry.value,
               mode: entry.mode,
               valueAuto: entry.valueAuto,
@@ -79,7 +78,7 @@ export function buildServer() {
             },
           }));
           // At most one entry (AGENTS.md section 24) - unlike device
-          // entries above (one per resource), the whole fleet's process
+          // entries above (one per device), the whole fleet's process
           // state is one pre-assembled object, not something to fan out
           // per-process here.
           const processEntries = processSnapshot ? [toProcessStateEntry(processSnapshot)] : [];

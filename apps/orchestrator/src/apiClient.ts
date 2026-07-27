@@ -33,6 +33,14 @@ export interface ProcessRecord {
     cpuWarnMax?: number;
     ramWarnMax?: number;
     diskWarnMax?: number;
+    // temperature-control/temperature-monitor role -> deviceId mapping
+    // (to-do.txt's 2026-07-27 Device/Node refactor, roadmap Phase 4.1) - a
+    // single `device_id` above no longer says enough once the sensor and
+    // its two actuators are three separate atomic Devices, not one bundled
+    // one with three named resources.
+    sensorDeviceId?: number;
+    heaterDeviceId?: number;
+    coolerDeviceId?: number;
   };
   status?: "on" | "off";
   // Fleet-wide, unfiltered by any user's "hidden" dismissal (AGENTS.md's
@@ -92,13 +100,11 @@ export interface MessageInput {
 // syncActiveMessages there for what each mode means.
 export type AutoResolveMode = "always" | "when-hidden" | "never";
 
-export interface DeviceReading {
-  value: unknown;
-}
-
+// A Device is atomic now (to-do.txt's 2026-07-27 Device/Node refactor) -
+// exactly one value, not a map of named resources.
 export interface DeviceRecord {
   id: number;
-  resources: Record<string, DeviceReading | null>;
+  value: unknown;
 }
 
 // Mirrors apps/api's message_levels row shape (AGENTS.md's Active Zummer
@@ -119,11 +125,11 @@ export const apiClient = {
   // admin edit in Settings -> Message Levels should take effect on the
   // very next tick, not require an orchestrator restart.
   getMessageLevels: () => request<MessageLevelRecord[]>("/message-levels"),
-  // Orchestrator-driven write - only reaches EdgeX while the resource is
+  // Orchestrator-driven write - only reaches EdgeX while the device is
   // still AUTO (AGENTS.md section 6); always records the intended value
   // even while a human has it overridden MANUAL via the UI.
-  setResourceAuto: (deviceId: number, resource: string, value: unknown) =>
-    request(`/devices/${deviceId}/resources/${resource}/auto`, {
+  setDeviceAuto: (deviceId: number, value: unknown) =>
+    request(`/devices/${deviceId}/auto`, {
       method: "PUT",
       body: JSON.stringify({ value }),
     }),

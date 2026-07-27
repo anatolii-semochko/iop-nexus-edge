@@ -1,0 +1,6 @@
+# Forbidden-state rules for this device type, consumed by the central
+# Model State Validator (apps/api/src/validator.ts) - see AGENTS.md
+# section 7/30. Always empty for a node-attached device - cross-device
+# rules live on the node (../../safety.yaml), not here; this file exists
+# anyway so every device type has the same predictable shape.
+forbidden: []

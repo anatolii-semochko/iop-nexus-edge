@@ -264,7 +264,7 @@ export async function processRoutes(app: FastifyInstance): Promise<void> {
   // never actually blocks a real user - it just gives us `request.user.sub`
   // instead of trusting a client-supplied id, which would be spoofable.
   app.patch<{ Params: { messageId: string }; Body: { hidden: boolean } }>(
-    "/process-messages/:messageId",
+    "/log-messages/:messageId",
     { preHandler: requireAuth },
     async (request) => {
       await processMessages.setHidden(Number(request.params.messageId), request.body.hidden, request.user.sub);
@@ -290,7 +290,7 @@ export async function processRoutes(app: FastifyInstance): Promise<void> {
       page?: string;
       pageSize?: string;
     };
-  }>("/process-messages", async (request) => {
+  }>("/log-messages", async (request) => {
     const { type, scope, search, from, to } = request.query;
     const processId = request.query.processId ? Number(request.query.processId) : undefined;
     const page = Math.max(1, Number(request.query.page ?? 1));

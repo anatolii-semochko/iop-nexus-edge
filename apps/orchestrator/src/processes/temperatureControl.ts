@@ -1,9 +1,15 @@
 // "temperature-control" process kind (AGENTS.md section 10): actively
-// drives Cooler/Heater on a device to keep its Temperature within
+// drives Cooler/Heater on a Node's devices to keep its Temperature within
 // [min, max]. Runs once per tick while the process is "on"; while "off" it
 // does nothing further - except once, exactly on the on->off transition,
 // where it forces both actuators off rather than leaving whichever one was
 // last active running indefinitely with nothing watching it.
+//
+// Sensor/Heater/Cooler are three separate atomic Devices on the same Node
+// now (to-do.txt's 2026-07-27 Device/Node refactor) - `process.config`'s
+// sensorDeviceId/heaterDeviceId/coolerDeviceId (migration ...033) is the
+// role -> deviceId mapping this process needs, since a single `device_id`
+// no longer says enough on its own.
 
 import { apiClient, type ProcessRecord } from "../apiClient.js";
 import { logger } from "../logger.js";
@@ -15,8 +21,9 @@ import { logger } from "../logger.js";
 const lastStatus = new Map<number, "on" | "off">();
 
 export async function runTemperatureControl(process: ProcessRecord): Promise<void> {
-  if (process.device_id === null) {
-    logger.warn({ processId: process.id }, "temperature-control process has no device_id");
+  const { sensorDeviceId, heaterDeviceId, coolerDeviceId, min, max } = process.config;
+  if (sensorDeviceId === undefined || heaterDeviceId === undefined || coolerDeviceId === undefined) {
+    logger.warn({ processId: process.id }, "temperature-control process is missing sensorDeviceId/heaterDeviceId/coolerDeviceId");
     return;
   }
 
@@ -26,20 +33,19 @@ export async function runTemperatureControl(process: ProcessRecord): Promise<voi
 
   if (status === "off") {
     if (previous === "on") {
-      await apiClient.setResourceAuto(process.device_id, "Cooler", false);
-      await apiClient.setResourceAuto(process.device_id, "Heater", false);
+      await apiClient.setDeviceAuto(coolerDeviceId, false);
+      await apiClient.setDeviceAuto(heaterDeviceId, false);
     }
     return;
   }
 
-  const { min, max } = process.config;
   if (min === undefined || max === undefined) {
     logger.warn({ processId: process.id }, "temperature-control process has no min/max configured");
     return;
   }
 
-  const device = await apiClient.getDevice(process.device_id);
-  const temperature = Number(device.resources.Temperature?.value);
+  const sensor = await apiClient.getDevice(sensorDeviceId);
+  const temperature = Number(sensor.value);
   if (!Number.isFinite(temperature)) {
     logger.warn({ processId: process.id }, "temperature-control: no valid Temperature reading");
     return;
@@ -47,6 +53,6 @@ export async function runTemperatureControl(process: ProcessRecord): Promise<voi
 
   const cooling = temperature > max;
   const heating = temperature < min;
-  await apiClient.setResourceAuto(process.device_id, "Cooler", cooling);
-  await apiClient.setResourceAuto(process.device_id, "Heater", heating);
+  await apiClient.setDeviceAuto(coolerDeviceId, cooling);
+  await apiClient.setDeviceAuto(heaterDeviceId, heating);
 }

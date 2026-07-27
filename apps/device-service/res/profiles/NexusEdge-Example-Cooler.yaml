@@ -1,0 +1,24 @@
+# Smoke-test / demo profile only. Split out of the old bundled
+# NexusEdge-Example-Virtual profile (to-do.txt's 2026-07-27 Device/Node
+# refactor) - one atomic Device, one relay. Paired with
+# NexusEdge-Example-Heater on the same Node (example-thermal-node-01) -
+# the Devices API forbids both being active at once at the Node level
+# (nodes.forbidden), not here - EdgeX itself has no notion of that rule.
+apiVersion: "v2"
+name: "NexusEdge-Example-Cooler"
+manufacturer: "NexusEdge"
+model: "example-virtual-01"
+labels:
+  - "example"
+description: "Example cooler relay"
+
+deviceResources:
+  - name: "Cooler"
+    isHidden: false
+    description: "Example actuator - must never be on at the same time as example-heater-01"
+    properties:
+      valueType: "Bool"
+      readWrite: "RW"
+      defaultValue: "false"
+
+deviceCommands: []

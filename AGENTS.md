@@ -223,11 +223,13 @@ today is deliberately generic, since no real device type exists yet under
   `AddDevice`. Found by actually restarting the service against an
   already-provisioned device, not by inspection - worth remembering when
   adding anything else that's set up "on add."
-- `res/profiles/NexusEdge-Example-Virtual.yaml` and
-  `res/devices/example-devices.yaml` are a smoke-test fixture, not a real
-  device type — remove them once real device types are provisioned the
-  intended way (via the Device Registry, not a static file baked into the
-  service).
+- `res/profiles/NexusEdge-Example-{Temperature,Heater,Cooler,Switch}.yaml`
+  and `res/devices/example-devices.yaml` are a smoke-test fixture, not a
+  real device type — remove them once real device types are provisioned
+  the intended way (via the Device Registry, not a static file baked into
+  the service). (Split from one bundled `NexusEdge-Example-Virtual.yaml`
+  into these four single-value profiles by the 2026-07-28 Device/Node
+  correction, section 30.)
 
 Devices API contains:
 - a command adapter translating high-level calls (e.g.
@@ -272,64 +274,72 @@ Virtual Node Runtime.
   node firmware that will follow.
 
 **Implementation status**: the Redis-backed state described above exists
-now (`apps/api/src/dualDevicesModel.ts`), generalized to per
-**(device, resource)** rather than strictly per-device — the rest of this
-API already operates at resource granularity (`PUT
-/devices/:id/resources/:resource`, the Model State Validator), and a
-single-purpose device is just the case where it happens to have one
-resource. Redis keys: `dvm:{deviceId}:{resource}:{mode,valueAuto,
-valueManual}`.
+now (`apps/api/src/dualDevicesModel.ts`), keyed **per device**, not per
+(device, resource) - a `to-do.txt`-documented correction from 2026-07-28
+(see section 30). The original design generalized this to `(device,
+resource)`, reasoning that "a single-purpose device is just the case where
+it happens to have one resource" - that framing had the entity boundary
+backwards: a **Device is atomic** (one interface/protocol = one value,
+`section 7`), and what were being called "resources" on one bundled device
+(e.g. a temperature sensor and two relays sharing one EdgeX device purely
+for demo convenience) were actually three separate physical devices that
+had been incorrectly modeled as one. Redis keys: `dvm:{deviceId}:{mode,
+valueAuto,valueManual}`.
 
-- `PUT /devices/:id/resources/:resource` (the existing UI write path) is now
-  `setManualActive`: any direct UI write both sets `valueManual` and
-  switches that resource to `MANUAL` — a UI write *is* what "MANUAL" means.
-- `PUT /devices/:id/resources/:resource/auto` is `setActive` — records
-  `valueAuto`, but only reaches EdgeX while the resource is still `AUTO`.
-  Dormant until section 10's "Temperature Control" process became the first
-  real caller.
-- `POST /devices/:id/resources/:resource/release` returns a resource from
-  `MANUAL` to `AUTO`, immediately pushing whatever `valueAuto` the
-  orchestrator kept computing in the background — verified live: set
-  `Cooler` active via `/auto`, override it `MANUAL` via the plain `PUT`, call
-  `/auto` again (confirmed it does *not* reach EdgeX while `MANUAL`), then
-  `release` (confirmed the backgrounded `valueAuto` takes over immediately).
+- `PUT /devices/:id` (the UI write path) is `setManualActive`: any direct
+  UI write both sets `valueManual` and switches the device to `MANUAL` — a
+  UI write *is* what "MANUAL" means.
+- `PUT /devices/:id/auto` is `setActive` — records `valueAuto`, but only
+  reaches EdgeX while the device is still `AUTO`. First real caller:
+  section 10's "Temperature Control" process.
+- `POST /devices/:id/release` returns a device from `MANUAL` to `AUTO`,
+  immediately pushing whatever `valueAuto` the orchestrator kept computing
+  in the background — verified live (both before and after the
+  per-resource → per-device correction): set `Cooler` active via `/auto`,
+  override it `MANUAL` via the plain `PUT`, call `/auto` again (confirmed
+  it does *not* reach EdgeX while `MANUAL`), then `release` (confirmed the
+  backgrounded `valueAuto` takes over immediately).
 - `GET /system/mode` derives the aggregate `AUTO`/`SERVICE`/`MANUAL` from
-  the *full* resource list in Postgres (not just whatever happens to have a
-  Redis key) — a resource untouched in Redis is implicitly `AUTO`, and
+  the *full* device list in Postgres (not just whatever happens to have a
+  Redis key) — a device untouched in Redis is implicitly `AUTO`, and
   omitting it from the count would wrongly report `MANUAL` after a single
-  override among many resources (a real bug caught during testing, not
+  override among many devices (a real bug caught during testing, not
   hypothetical).
-- The Model State Validator (section above) now reads the *other* resource
+- The Model State Validator (section above) now reads the *other* device
   values it needs from this Redis state (via `resolveActiveValue`, falling
-  back to a live EdgeX read only the first time a resource is ever touched,
+  back to a live EdgeX read only the first time a device is ever touched,
   then caching it as the initial `valueAuto`) instead of live EdgeX reads on
   every write — resolves the simplification noted when the validator first
   shipped.
 - Not yet done: no consistency-check job reconciling Redis against EdgeX's
   actual state (the "if a scheduled consistency check finds a mismatch, an
-  error is raised" part above), and cross-device rules still aren't
-  possible (a rule only ever compares resources on the same device).
+  error is raised" part above). Cross-device rules **are** now possible
+  (section 7) — that was the specific gap the per-resource model couldn't
+  close, and closing it is what motivated the correction.
 
-**Read-only resources have no Dual Devices Model state at all** - not a
+**Read-only devices have no Dual Devices Model state at all** - not a
 third mode, an *absent* one. A pure sensor (e.g. `Temperature` on the
-smoke-test device, `Level` on the Light Regulator - section 7) is declared
-`readOnly: true` in `devices.capabilities.resources` (Postgres); `GET
-/devices/:id` then omits its `dualState` entry entirely rather than
-defaulting to `AUTO` (a resource nothing ever commands isn't meaningfully
-"automatic"), and `PUT /devices/:id/resources/:resource` /
-`.../resources/:resource/auto` / `.../resources/:resource/release` all
-reject it with 400 - there is no `MANUAL` to enter or `AUTO` to return to.
-The EdgeX device profile for such a resource still declares it `RW`, not
-`R` - EdgeX itself refuses writes to an `R` resource outright (405), which
-would make it impossible to ever push a new reading through core-command at
-all. Devices API is what actually enforces "no ordinary command surface for
-this resource", via a separate dev-only path: `PUT
-/devices/:id/resources/:resource/simulate` writes straight to EdgeX
-core-command, bypassing the Dual Devices Model entirely (mirrors a physical
-sensor producing a new value on its own), and publishes it exactly like a
-controllable resource's write does (`dualDevicesModel.publishReading` -
-`state:*` cache + `nexus.events`, see section 9), just without a
-mode/valueAuto/valueManual - a plain `{value, timestamp, source}`.
+example thermal node, `Level` on the Light Regulator - section 7) is
+declared `readOnly: true` in `devices.capabilities` (Postgres, a flat
+object now, not an array - section 7); `GET /devices/:id` then omits its
+`dualState` entirely rather than defaulting to `AUTO` (a device nothing
+ever commands isn't meaningfully "automatic"), and `PUT /devices/:id` /
+`.../auto` / `.../release` all reject it with 400 - there is no `MANUAL`
+to enter or `AUTO` to return to. The EdgeX device profile for such a
+device still declares its resource `RW`, not `R` - EdgeX itself refuses
+writes to an `R` resource outright (405), which would make it impossible
+to ever push a new reading through core-command at all. Devices API is
+what actually enforces "no ordinary command surface for this device", via
+a separate dev-only path: `PUT /devices/:id/simulate` writes straight to
+EdgeX core-command, bypassing the Dual Devices Model entirely (mirrors a
+physical sensor producing a new value on its own), and publishes it
+exactly like a controllable device's write does
+(`dualDevicesModel.publishReading` - `state:*` cache + `nexus.events`, see
+section 9), just without a mode/valueAuto/valueManual - a plain `{value,
+timestamp, source}`. `publishReading` deliberately does **not** log to
+`log_device` anymore (section 22/29/30) - the old unconditional "log every
+tick" behavior was removed outright in the same 2026-07-28 correction, by
+direct instruction; a future configurable process decides what/when to log.
 
 ## 7. Node & Device entities, `devices/` layout
 
@@ -358,6 +368,9 @@ devices/
   nodes/
     <node-type>/                     e.g. aquarium-maintenance-node
       node.yaml                      node identity schema, bus binding, defaults
+      safety.yaml                    CROSS-DEVICE forbidden-state/interlock rules for
+                                      this node's own devices (nodes.forbidden,
+                                      Postgres) - see below, added 2026-07-28
       firmware/                      shared STM32 project for the node (main, build);
                                       includes the per-device driver modules below
       devices/
@@ -366,9 +379,12 @@ devices/
                                        actuators, commands, units) — source of truth
                                        that the UI, Virtual Node Runtime and Devices
                                        API normalization are checked against
-          edgex-device-profile.yaml   EdgeX Device Profile (resources/commands)
-          safety.yaml                 this type's forbidden-state/interlock rules,
-                                       consumed by the central Model State Validator
+          edgex-device-profile.yaml   EdgeX Device Profile (one resource - a Device
+                                       is atomic, exactly one value)
+          safety.yaml                 always `forbidden: []` for a node-attached
+                                       device - cross-device rules live on the node
+                                       (above), not here; kept for shape consistency
+                                       with standalone/ below
           runtime/                    Virtual Node Runtime module (Go), mirrors
                                        the STM32 behavior
           firmware/                   STM32 driver module for this device, included
@@ -390,46 +406,63 @@ devices/
                                        definition over time
   standalone/
     <device-type>/                    same internal layout, no parent node — its
-                                       own bus binding lives in contract.schema.ts
+                                       own bus binding lives in contract.schema.ts,
+                                       its own safety.yaml IS the final word (no
+                                       node to defer cross-device rules to)
 ```
 
 A device type without a node (`standalone/`) still needs a `firmware/` of its
 own (it has no node-level project to be included into). `devices/standalone/
-light-regulator/` is the first real device type built to this layout (see
-its Implementation status note below) - `runtime/` and `firmware/` are
-deliberately absent there (nothing for either to add over the generic
-Virtual Node Runtime yet, no hardware to target), everything else
-(`contract.schema.ts`, `edgex-device-profile.yaml`, `safety.yaml`,
-`config/default-state.yaml`, `docs/`, `tests/`, `ui/control`,
-`ui/simulator`, `CHANGELOG.md`) is present and real.
+light-regulator/` and `devices/standalone/active-buzzer/` are real device
+types built to this layout - `runtime/` and `firmware/` are deliberately
+absent for both (nothing for either to add over the generic Virtual Node
+Runtime yet, no hardware to target), everything else (`contract.schema.ts`,
+`edgex-device-profile.yaml`, `safety.yaml`, `config/default-state.yaml`,
+`docs/`, `tests/`, `ui/control`, `ui/simulator` where applicable,
+`CHANGELOG.md`) is present and real. `devices/nodes/example-thermal-node/`
+(added 2026-07-28, section 30) is the **first real use** of the node-
+attached half of this layout - four device types (`temperature`, `heater`,
+`cooler`, `switch`) sharing one node, with the actual Heater/Cooler
+interlock rule living in the node's own `safety.yaml`/`nodes.forbidden`,
+not duplicated into either device's.
 
 **Implementation status**: the Postgres side of the Device Registry exists
 now (`apps/api/migrations`, `node-pg-migrate`) - `nodes` and `devices`
 tables, run automatically on every `apps/api` container start (idempotent;
-node-pg-migrate tracks what's applied). `devices.capabilities.resources` is
-an array of `{name, readOnly?, min?, max?, step?}` descriptors (not the
-richer `contract.schema.ts` contract described above - that file exists per
-device type today but nothing reads it across a process boundary yet, kept
-in sync by hand), and `devices.edgex_device_name` is how a registry row
-optionally links to an already-provisioned EdgeX device - there is still no
-write-side provisioning flow (registering a Postgres row does not create
-the EdgeX device, or vice versa; both the smoke-test example device and the
-Light Regulator were wired up the same manual way - a static
-`apps/device-service/res/devices/*.yaml` entry plus a Postgres seed
-migration).
+node-pg-migrate tracks what's applied). `devices.capabilities` is a **flat
+object** (`{edgexResource?, readOnly?, min?, max?, step?}`, not the array
+of named resources this used to be, section 30) - a Device is atomic, so
+"0 or 1 resource" collapsed to "0 or 1 value directly on the row".
+`edgexResource` is which EdgeX deviceResource/command name this device's
+single value is called under - an internal detail of talking to EdgeX
+(`apps/api/src/edgex.ts`), not a client-addressable dimension - there is no
+`.../resources/:name` anywhere in the URL space anymore. `forbidden` moved
+off `devices.capabilities` entirely, onto `nodes.forbidden` (an array of
+`{when: {device, equals}, conflictsWith: {device, equals}}`, `device`
+being a name resolved within that same node) - the richer
+`contract.schema.ts` contract described above exists per device type today
+but nothing reads it across a process boundary yet, kept in sync by hand.
+`devices.edgex_device_name` is how a registry row optionally links to an
+already-provisioned EdgeX device - there is still no write-side
+provisioning flow (registering a Postgres row does not create the EdgeX
+device, or vice versa; every device type so far was wired up the same
+manual way - a static `apps/device-service/res/devices/*.yaml` entry plus
+a Postgres seed migration).
 
 `apps/api` exposes this over HTTP: `GET /nodes`, `GET /nodes/:id` (registry
 only), `GET /devices` (registry rows plus, for any with an
 `edgex_device_name`, that device's live `operatingState`/`adminState` from
-one core-metadata call), `GET /devices/:id` (registry row plus the live
-value of every resource in `capabilities.resources`, read from EdgeX
-core-command, and each *controllable* resource's Dual Devices Model state -
-see the read-only-resources note in section 6), `PUT
-/devices/:id/resources/:resource` (Model State Validator, then proxies the
-write to EdgeX core-command; used by the UI's dev simulator page for
-controllable/actuator resources), and `PUT
-/devices/:id/resources/:resource/simulate` (the equivalent for `readOnly`
-sensor resources - section 6).
+one core-metadata call), `GET /devices/:id` (registry row plus the device's
+live `value`/`valueType`/`units`, read from EdgeX core-command, and - for a
+*controllable* device only - its Dual Devices Model `dualState` - see the
+read-only-devices note in section 6), `PUT /devices/:id` (Model State
+Validator, then proxies the write to EdgeX core-command; used by the UI's
+dev simulator page for controllable/actuator devices), `PUT
+/devices/:id/auto` (orchestrator-driven, `setActive`), `POST
+/devices/:id/release` (`MANUAL` back to `AUTO`), and `PUT
+/devices/:id/simulate` (the equivalent of the plain write for `readOnly`
+sensor devices - section 6). None of these take a `:resource` URL segment
+anymore (section 30) - each Device has exactly one value.
 
 EdgeX numeric readings need normalizing before they're usable: `apps/api/
 src/edgex.ts` parses every Int*/Uint*/Float* reading's `value` (EdgeX always
@@ -447,50 +480,58 @@ to (`int32`/`uint32`/`uint64` for `Int32`/`Uint32` resources), which
 `Uint32` resource existed to round-trip through it until the Light
 Regulator's `Level` resource did.
 
-**Model State Validator** (`apps/api/src/validator.ts`) now sits in front of
-that write path. Rules are declared per device in
-`devices.capabilities.forbidden` (Postgres) - `{ when: { resource, equals },
-conflictsWith: { resource, equals } }` - and rejected writes get a `409`
-with a reason. The example device (section 6/7's smoke-test fixture) was
-extended with `Heater`/`Cooler` actuators and exactly the rule already used
-as an example above ("heating and cooling must never be active at once"),
-so the mechanism is real and tested, not just scaffolding. Two
-simplifications to know about: rules only compare resources on the *same*
-device (no cross-device rules - that needs the Redis-backed Dual Devices
-Model state, which doesn't exist yet), and the validator re-reads the
-*other* resource's current value straight from EdgeX core-command on every
-write rather than a cached state store (extra HTTP round-trips per write;
-fine at today's scale, revisit once Dual Devices Model persistence exists).
+**Model State Validator** (`apps/api/src/validator.ts`) sits in front of
+that write path. Rules are declared per **node** in `nodes.forbidden`
+(Postgres) - `{ when: { device, equals }, conflictsWith: { device, equals
+} }`, `device` a name resolved among that node's own devices - and
+rejected writes get a `409` with a reason. **Cross-device now, not
+cross-resource on one device** (section 30, 2026-07-28 correction) -
+originally declared per-device as `devices.capabilities.forbidden` with
+`{resource, equals}` pairs, back when Heater/Cooler were (incorrectly)
+resources on one bundled device; moved to the node the moment they became
+the two separate devices they always physically were. The example thermal
+node's `Heater`/`Cooler` interlock (section 6's running example - "heating
+and cooling must never be active at once") is the rule that motivated
+both the original mechanism and this correction, still real and tested
+either way. One simplification still true after the correction: the
+validator re-reads the *other* device's current value via
+`dualDevicesModel.resolveActiveValue` (Redis-cached, section 6) rather
+than a live EdgeX read on every write - resolved in the original
+implementation, unaffected by this one.
 
 `apps/ui` has a first "Devices" section: Nodes list, Devices list, a generic
 device detail (production-style, read-only), and a Dev Simulator page
-(virtual devices only, shows and lets you override every resource). Both
-detail views sort resources by name (a device's resource order was
-otherwise whatever object-key order the API happened to return, which
-visibly reshuffled on every live update) and dispatch to a device type's own
+(virtual devices only, one row per device, override column per device).
+Since a Device carries exactly one value (section 30), there is no longer
+a per-device resource table to sort or reshuffle - both detail views show
+a single value directly. Each dispatches to a device type's own
 `ui/control`/`ui/simulator` component when one exists (`DEVICE_TYPE_CONTROLS`
-/ `DEVICE_TYPE_SIMULATORS` maps, keyed by `device.type` then resource name -
-today just the Light Regulator's `Level`), falling back to the generic
-table row otherwise. The Dev Simulator's generic override column is instant
-- no "Set" button - for `Bool` (checkbox) and any device-type-specific
-control (e.g. the Light Regulator's slider, debounced 150ms so dragging
-doesn't flood the API); a `NumericStepper` component (`apps/ui/src/views/
-devices/NumericStepper.jsx`) is the +/- control for anything else (e.g.
-`Temperature`) - no free-text input at all (an earlier version had one,
-gated on matching an exact signed two-decimal pattern before "Set" would
-even enable, which was confusing enough to remove entirely), each button
-commits immediately. A quick click steps once; holding past 1 second
-starts auto-repeating every 50ms until released (standard spinner-control
-behavior), with a `window`-level `pointerup`/`pointercancel` listener as a
-safety net so a release outside the button - a real drag off the edge, not
-just a testing artifact - can't leave the repeat running forever. Callers
-can optionally pass `min`/`max` to clamp the value (unbounded by default);
-`ResourceMonitorPanel.jsx` passes `min={0} max={100}` since its thresholds
-are percentages - a held repeat that hits the clamp stops itself rather
-than continuing to fire identical commits for as long as the button stays
-down. It also shows a device-wide "Auto value" column next to "Current value" (both
-turn red on mismatch) for controllable resources, and renames "Release to
-Auto" to "Auto", shown only while a resource is actually `MANUAL`.
+/ `DEVICE_TYPE_SIMULATORS` maps, keyed by `device.type` - flat now, no
+resource-name sub-key, since there is only ever one value per device -
+today the Light Regulator's `ui/control`+`ui/simulator` and the Active
+Zummer's `ui/control`), falling back to the generic row otherwise. The Dev
+Simulator's override column is instant - no "Set" button - for `Bool`
+(checkbox, decided by the device's live `valueType`) and any
+device-type-specific control (e.g. the Light Regulator's slider, debounced
+150ms so dragging doesn't flood the API); a `NumericStepper` component
+(`apps/ui/src/views/devices/NumericStepper.jsx`) is the +/- control for
+anything else (e.g. `Temperature`) - no free-text input at all (an earlier
+version had one, gated on matching an exact signed two-decimal pattern
+before "Set" would even enable, which was confusing enough to remove
+entirely), each button commits immediately. A quick click steps once;
+holding past 1 second starts auto-repeating every 50ms until released
+(standard spinner-control behavior), with a `window`-level
+`pointerup`/`pointercancel` listener as a safety net so a release outside
+the button - a real drag off the edge, not just a testing artifact - can't
+leave the repeat running forever. Callers can optionally pass `min`/`max`
+to clamp the value (unbounded by default); `ResourceMonitorPanel.jsx`
+passes `min={0} max={100}` since its thresholds are percentages (unrelated
+homonym - CPU/RAM/disk, section 21, not a Device at all) - a held repeat
+that hits the clamp stops itself rather than continuing to fire identical
+commits for as long as the button stays down. Each row also shows an
+"Auto value" column next to "Current value" (both turn red on mismatch)
+for controllable devices, and renames "Release to Auto" to "Auto", shown
+only while a device is actually `MANUAL`.
 
 `devices/` device-type components are imported straight into `apps/ui` from
 outside its own package (`import ... from 'devices/standalone/light-
@@ -520,21 +561,24 @@ already named "Event Bus" in section 3) rather than adding a second broker -
 fanning events out to UI WebSocket clients.
 
 **Exchange and routing keys**: one topic exchange, `nexus.events`, durable.
-Routing key shape: `<domain>.<entityId>.<resource>.<eventType>` — today only
-`device.<deviceId>.<resource>.updated` exists (published by
-`dualDevicesModel.ts` — see below). `node.<id>.heartbeat` and
-`system.mode.changed` are reserved shapes for later, not implemented yet.
+Routing key shape: `<domain>.<entityId>.<eventType>` — today only
+`device.<deviceId>.updated` exists (published by `dualDevicesModel.ts` —
+see below). No `<resource>` segment anymore (section 30, 2026-07-28 - a
+Device is atomic, one value, nothing left to name). `node.<id>.heartbeat`
+and `system.mode.changed` are reserved shapes for later, not implemented
+yet.
 
-**Envelope** (JSON body of every message): `{ domain, entityId, resource,
-value, mode, valueAuto, valueManual, timestamp, source }` — one flat shape
-for every event type, deliberately not modeled per-event-type since nothing
-so far needs it.
+**Envelope** (JSON body of every message): `{ domain, entityId, value,
+mode, valueAuto, valueManual, timestamp, source }` — one flat shape for
+every event type, deliberately not modeled per-event-type since nothing so
+far needs it. No `resource` field (section 30).
 
 **Publish side** (`apps/api/src/messaging.ts` + `dualDevicesModel.ts`):
 every `setActive`/`setManualActive`/`release` call ends by publishing the
-resource's new effective state and refreshing a Redis cache key,
-`state:{deviceId}:{resource}` → `{ value, mode, valueAuto, valueManual,
-updatedAt, source }`. This is a **separate key from `dvm:*`** (section 6) —
+device's new effective state and refreshing a Redis cache key,
+`state:{deviceId}` → `{ value, mode, valueAuto, valueManual, updatedAt,
+source }` (no `:{resource}` suffix, section 30). This is a **separate key
+from `dvm:*`** (section 6) —
 `state:*` has **no TTL**: it is last-known-value state, valid until the next
 write, not a liveness/heartbeat signal. There is no heartbeat producer
 anywhere yet (`apps/device-service` doesn't emit one), so a TTL-based
@@ -602,22 +646,18 @@ Socket.IO (an unneeded protocol layer over plain WebSocket).
   `vite.config.mjs` for the local-dev mirror). Its `subscribeToLiveEvents`
   listener receives `{routingKey, event}` for every message (snapshot
   entries and live pushes alike, same shape). `src/api/useLiveDevice.js`
-  exposes `useDeviceLiveState(deviceId)` (per-resource `{value, mode,
-  valueAuto, valueManual, timestamp}` overlay) and
+  exposes `useDeviceLiveState(deviceId)` (flat `{value, mode, valueAuto,
+  valueManual, timestamp}` overlay, no resource sub-key - section 30) and
   `useLiveConnectionStatus()` (for the small `LiveBadge` shown on the Device
   Detail, Dev Simulator, and Live Events pages). Device Detail/Dev Simulator
   patch live value/mode over whatever the initial REST `GET /devices/:id`
   returned, without touching the Dev Simulator's in-progress draft inputs.
-  `views/devices/LiveEvents.jsx` (`/live-events`) is a raw, unfiltered feed
-  of every message the socket receives, newest first, capped at a **fixed
-  constant** (`MAX_EVENTS = 200` in that file) — a placeholder until a real
-  filter/limit control is built; don't read that number as a considered
-  design choice. Verified end-to-end through the exact browser path
-  (`ws://localhost:8080/ws` via the UI's nginx, not hitting
-  `messaging-gateway` directly) and the production UI bundle builds cleanly
-  with this code — **not** verified in an actual browser window (no
-  browser tool available in this environment); the user should confirm the
-  Live badge and value updates render correctly on first real use.
+  `views/logs/LiveEvents.jsx` (`/live-events`, moved into the Logs nav group
+  - section 29) is a raw feed of every message the socket receives, newest
+  first, with domain/entity/mode/source filters + free-text search (client-
+  side over the buffer) and a user-picked buffer size (100/200/500/1000,
+  section 29/30) - superseded the earlier fixed `MAX_EVENTS = 200` constant
+  this note originally flagged as a placeholder.
 - Every service shares one RabbitMQ user (see Access model above) — fine at
   today's single-tenant, no-auth stage.
 
@@ -672,13 +712,21 @@ general concept but nothing uses them yet), `POST /processes/:id/critical`
 (orchestrator-only — there is no "make critical" button in the UI).
 
 **The two seeded processes** (`apps/api/migrations/
-..._seed-temperature-control-processes.ts`), both against
-`example-virtual-sensor-01`, group "Temperature Control":
+..._seed-temperature-control-processes.ts`), group "Temperature Control".
+Originally both against one bundled `example-virtual-sensor-01` device
+(`Temperature`/`Heater`/`Cooler` as its three "resources"); since the
+2026-07-28 Device/Node correction (section 30) each is a separate atomic
+Device on one Node (`example-thermal-node-01`:
+`example-temperature-01`/`example-heater-01`/`example-cooler-01`), and
+`process.config`'s `sensorDeviceId`/`heaterDeviceId`/`coolerDeviceId`
+(migration `..._add-device-roles-to-temperature-processes.ts`) is the role
+→ deviceId mapping both processes below now read instead of a single
+`process.device_id`:
 
 1. **Temperature Control** (`controllable`, `ON`/`OFF`) — every tick while
-   `on`: reads `Temperature`, writes `Cooler`/`Heater` via `PUT
-   /devices/:id/resources/:resource/auto` (`setActive` — the *first* real
-   caller of that endpoint, dormant since the Dual Devices Model shipped).
+   `on`: reads the sensor device's value, writes the heater/cooler devices
+   via `PUT /devices/:id/auto` (`setActive` — the *first* real caller of
+   that endpoint, dormant since the Dual Devices Model shipped).
    `Cooler = temperature > max`, `Heater = temperature < min`, written
    every tick unconditionally (matches `/auto`'s own documented intent —
    "the orchestrator keeps updating `valueAuto` in the background" — this
@@ -691,11 +739,11 @@ general concept but nothing uses them yet), `POST /processes/:id/critical`
    `max` (`Cooler` turned on), flipped the process `OFF` (`Cooler` forced
    back to `false`), flipped back `ON`.
 2. **Temperature Safety Monitor** (`permanent`, no actions) — independent
-   of process 1, deliberately configured with a **wider** min/max (`15/28`
-   vs. process 1's `18/25` — confirmed: independent values by design, a
-   permanent monitor may have wider critical margins than the controller it
-   watches, not a duplicate of the same numbers) — every tick: reads
-   `Temperature`/`Cooler`/`Heater` directly (the live EdgeX-reported values,
+   of process 1, deliberately configured with a **wider** min/max than the
+   controller (confirmed: independent values by design, a permanent
+   monitor may have wider critical margins than the controller it watches,
+   not a duplicate of the same numbers) — every tick: reads the three
+   devices' values directly (the live EdgeX-reported values,
    not the Dual Devices Model's computed "active" value — the point is
    catching *actual* device-reported divergence), raises `critical` if
    temperature is outside its own range **or** `Cooler`/`Heater` are both
@@ -727,9 +775,10 @@ chevron last (everything interactive pressed to the row's right edge,
 chevron after actions, not before) — expanding a per-`kind` detail panel
 below the row: `TemperatureProcessPanel.jsx`, shared by both temperature-\*
 kinds since they look identical (`NumericStepper` — the same component Dev
-Simulator uses for `Temperature` — for `min`/`max` writing to the process's
-own config, not a device resource; current temperature in large type; big
-Cooler/Heater indicators, colored only while active). Live `status`/
+Simulator uses — for `min`/`max` writing to the process's own config, not
+a device; current temperature in large type, read from the sensor device;
+big Cooler/Heater indicators, each reading its own device live, colored
+only while active). Live `status`/
 `critical` overlay via `useProcessLiveState`
 (`apps/ui/src/api/useLiveProcess.js`) — same one-shared-subscription,
 keyed-by-id pattern as `useDeviceLiveState` (section 9), reused rather than
@@ -2554,25 +2603,36 @@ group **Logs**, containing `Live Events` (moved out of the Devices group -
 same component, relocated to `apps/ui/src/views/logs/`) and the new
 **Logs** page itself.
 
+> **Renamed by the 2026-07-28 Device/Node correction (section 30):**
+> `device_command_logs` → `log_command`, `sensor_reading_logs` →
+> `log_device`, `process_messages` → `log_messages`; `deviceCommandLog.ts`
+> → `commandLog.ts`, `sensorReadingLog.ts` → `deviceLog.ts`; routes moved
+> to `GET /logs/commands` / `GET /logs/devices`; both tables also lost
+> their `resource` column/filter (a Device is now atomic, so
+> "which resource on this device" no longer exists - search is by device
+> name only). `DeviceCommandLogsTab.jsx` → `CommandLogsTab.jsx`,
+> `SensorReadingLogsTab.jsx` → `DeviceLogsTab.jsx`. The rest of this
+> section otherwise still describes the current shape (filters, pagination,
+> column layout) - only the names above changed.
+
 ### Backend
 
-- `apps/api/src/deviceCommandLog.ts` / `sensorReadingLog.ts` each gained a
-  `list*Logs` function (device/action/resource-search/date-range filters,
-  paginated, `LEFT JOIN devices` for a display name - `device_id` is
-  nullable, `ON DELETE SET NULL`, so a deleted device's history still
-  shows with `device_name: null`). Same shape as
-  `processMessages.listProcessMessages`.
-- `apps/api/src/routes/logs.ts` - `GET /logs/device-commands` and
-  `GET /logs/sensor-readings`. No third route for processes: the
-  **processes tab reuses the existing `GET /process-messages`**
-  (`scope: 'all'`) rather than duplicating a nearly-identical endpoint -
-  `processMessages.ts` gained optional `from`/`to` ISO-timestamp bounds and
-  `group_name` (joined from `process_groups`) for this purpose; the
-  notification center popup (section 25) never sets `from`/`to` and is
-  unaffected.
-- New migration adds a `created_at` index to `process_messages` (the other
-  two log tables already had one from their own creation migrations) -
-  this page is the first consumer to filter/sort that table by date range.
+- `apps/api/src/commandLog.ts` / `deviceLog.ts` each gained a `list*Logs`
+  function (device-name-search/date-range filters, paginated,
+  `LEFT JOIN devices` for a display name - `device_id` is nullable,
+  `ON DELETE SET NULL`, so a deleted device's history still shows with
+  `device_name: null`). Same shape as `processMessages.listProcessMessages`.
+- `apps/api/src/routes/logs.ts` - `GET /logs/commands` and
+  `GET /logs/devices`. No third route for processes: the **processes tab
+  reuses the existing `GET /log-messages`** (`scope: 'all'`) rather than
+  duplicating a nearly-identical endpoint - `processMessages.ts` gained
+  optional `from`/`to` ISO-timestamp bounds and `group_name` (joined from
+  `process_groups`) for this purpose; the notification center popup
+  (section 25) never sets `from`/`to` and is unaffected.
+- New migration adds a `created_at` index to `process_messages`/
+  `log_messages` (the other two log tables already had one from their own
+  creation migrations) - this page is the first consumer to filter/sort
+  that table by date range.
 
 ### Frontend
 
@@ -2595,11 +2655,11 @@ same component, relocated to `apps/ui/src/views/logs/`) and the new
 - `apps/ui/src/views/logs/LogsList.jsx` - `CTabs`/`CTabList` (not
   `CTabContent`/`CTabPanel`, same reasoning as the Processes page, section
   23 - an inactive tab shouldn't keep its own fetch/pagination state
-  mounted), three tabs: `DeviceCommandLogsTab.jsx`, `SensorReadingLogsTab.
-  jsx`, `ProcessMessageLogsTab.jsx`. Devices/processes lists are fetched
-  once at the page level and passed down for each tab's own selector.
-- Each tab: its own relevant selectors (device/action for deviceCommands;
-  device for sensors; type/process for processes) + text search +
+  mounted), three tabs: `CommandLogsTab.jsx`, `DeviceLogsTab.jsx`,
+  `ProcessMessageLogsTab.jsx`. Devices/processes lists are fetched once at
+  the page level and passed down for each tab's own selector.
+- Each tab: its own relevant selectors (device/action for commands; device
+  for devices; type/process for processes) + text search +
   `DateRangeFilter` + reload + `ResetFiltersButton`, then a plain table +
   `TablePagination` (page sizes `[20, 50, 100]`, matching the notification
   center's own append-only-log convention rather than the client-side
@@ -2617,17 +2677,201 @@ same component, relocated to `apps/ui/src/views/logs/`) and the new
 
 ### Deferred - freshness ("OK"/"ERROR") status column
 
-The original request described a `status` column for the deviceCommands/
-sensors tabs meaning "was this value refreshed within its expected
-interval" (OK) vs "overdue" (ERROR) - conceptually a per-`(device,
-resource)` staleness check, similar in spirit to Heartbeating Control
-(section 28) but for individual sensor/command resources rather than
-whole processes/devices/nodes. **Not implemented** - there is no existing
-"expected update interval" concept per device resource to check against,
+The original request described a `status` column for the commands/devices
+tabs meaning "was this value refreshed within its expected interval" (OK)
+vs "overdue" (ERROR) - conceptually a per-device staleness check, similar
+in spirit to Heartbeating Control (section 28) but for individual devices
+rather than whole processes/nodes. **Not implemented** - there is no
+existing "expected update interval" concept per device to check against,
 and the user explicitly agreed to skip it for now rather than force a
 design under this task's scope, asking only that it be written down as
 future work. Whoever picks this up next should look at whether it
-belongs as a new per-resource config field (`devices.capabilities`?) or as
-its own table, and whether Heartbeating Control's ticks-based model is
-reusable here or genuinely a different shape (a sensor reading interval
+belongs as a new device config field (`devices.capabilities`?) or as its
+own table, and whether Heartbeating Control's ticks-based model is
+reusable here or genuinely a different shape (a device reading interval
 isn't tied to the orchestrator's own tick loop the way a process's is).
+Note also that after the 2026-07-28 correction (section 30), `log_device`
+is no longer written from raw pings at all - see section 30 - so this
+deferred feature would need to be rethought against whatever future
+logging process ends up populating that table.
+
+## 30. Device/Node model correction (Devices no longer bundle "resources")
+
+A fundamental modeling error, present since the project's very first
+device-related commits, was corrected on 2026-07-28: what this codebase
+called a "Device" (in Postgres, `devices` table) was actually a **Node** -
+a controller (e.g. an STM32) that has one or more **atomic** physical
+devices attached to it (a button, a joystick, a relay, a sensor). What the
+codebase called a "Resource" (a named value living under a Device, e.g.
+`devices.capabilities.resources.Level`) was actually the **Device**
+itself. A Device has exactly one interface/protocol and one value - it is
+never a bundle. A physical assembly like an I2C joystick-with-
+microcontroller-on-a-board still counts as one Device if the software only
+ever addresses it as a single data stream; four separate buttons wired
+independently are four separate Devices.
+
+This was not a rename - the two concepts nest the opposite way from how
+they were originally implemented (a "Device" used to contain "Resources";
+now a **Node** contains **Devices**), so the correction touched the
+Postgres schema, Redis key shapes, REST routes, RabbitMQ routing keys,
+WebSocket envelopes, the EdgeX device-profile layer, the orchestrator, and
+the UI. It was executed as six phases, each with its own live
+verification (curl, psql, browser, raw WebSocket scripts) before moving
+to the next - no phase was taken on faith.
+
+### The corrected model
+
+- **Device** = atomic physical device. One interface/protocol, one value.
+  Examples: a button, a joystick, a relay, a single-channel sensor, a
+  display, a microcontroller running its own firmware. `devices` table,
+  now with a `node_id` foreign key (nullable - a Device can attach
+  directly, see below) instead of the old flat `capabilities.resources`
+  map; `devices.capabilities` is now a flat shape
+  (`{edgexResource?, readOnly?, min?, max?, step?}` - see section 7) with
+  no "resource" dimension at all.
+- **Node** = a controller multiple atomic Devices attach to (e.g. an
+  STM32). New `nodes` table (`id`, `name`, `forbidden` jsonb - the
+  Model State Validator's forbidden-state rules, moved here from
+  per-Device since a rule like "heater and cooler can't both be on" is a
+  property of the physical assembly, not of either Device alone -
+  section 7). A Device's `node_id` is nullable: Devices and Nodes can both
+  connect to the computer directly or through each other, over multiple
+  interfaces/drivers simultaneously, via EdgeX Foundry as the common
+  ingestion gate ("EdgeX Gate") - the Node is an organizational/safety
+  grouping, not a required transport hop.
+- **"Resource" is eliminated** as a concept everywhere in the stack. It
+  never referred to a real independent thing - it was this codebase's
+  incorrect name for what should have been a whole separate Device.
+- The Virtual Node Runtime / simulator (section 5) simulates the entire
+  connected hardware network, matching this model directly: each virtual
+  EdgeX device already corresponded 1:1 with a single value even before
+  the correction (`backendFor()` resolves physical/virtual per EdgeX
+  device) - this was the concrete evidence that the bundling was
+  architecturally wrong, not merely a naming/cosmetics issue.
+- Network topology is a star: one Device uses exactly one transport at a
+  time. This correction is a pure data-model change - no transport/
+  networking-layer code changed.
+
+### Log tables renamed and re-scoped
+
+Three append-only log tables (section 22/29), renamed to match the
+corrected model and to drop the now-nonexistent `resource` dimension:
+
+| Old name               | New name      | Change                          |
+|-------------------------|---------------|----------------------------------|
+| `sensor_reading_logs`   | `log_device`  | dropped `resource` column        |
+| `device_command_logs`   | `log_command` | dropped `resource` column        |
+| `process_messages`      | `log_messages`| name only (column shape unchanged) |
+
+Migration `1690000000032_rename-log-tables.ts` renamed each table plus
+every dependent sequence/index/constraint via explicit raw SQL (Postgres's
+`ALTER TABLE ... RENAME` does **not** cascade to these) - the old/new
+names for each were captured from `pg_indexes`/`pg_constraint` directly
+before writing the migration, and the full `up`/`down` round trip was
+verified live with zero errors and zero data loss.
+
+**`log_device` is no longer written from device pings at all.** Before
+this correction, every sensor-reading tick was logged unconditionally.
+The user's explicit instruction was to remove this behavior completely
+now, rather than build an immediate replacement: `dualDevicesModel.ts`'s
+`publishReading()` no longer calls into any log-writing function. A
+future **configurable process** (one or several, per rule/schedule - not
+yet designed) will be added later to populate `log_device` selectively.
+Until then the table exists (renamed, schema-correct) but nothing writes
+rows into it via this path; `log_command` is unaffected and still logs
+every write, same as before.
+
+### What changed, by layer
+
+- **`apps/device-service` (Go, EdgeX profiles)** - the bundled
+  `NexusEdge-Example-Virtual.yaml` profile (one EdgeX device, four
+  deviceResources: Temperature/Heater/Cooler/Switch) split into four
+  single-resource profiles (`NexusEdge-Example-{Temperature,Heater,
+  Cooler,Switch}.yaml`) and four separate `deviceList` entries in
+  `res/devices/example-devices.yaml`, each with its own
+  `protocols.backend.mode`. The 10s Temperature autoEvent moved to the
+  Temperature entry only.
+- **Postgres** - `nodes` table added (`forbidden` jsonb); `processes`
+  gained `node_id`; `devices.capabilities` flattened (light-regulator-01,
+  active-buzzer-01 rewritten in place); the old bundled
+  `example-virtual-sensor-01` row replaced by one `example-thermal-node`
+  Node row + four Device rows; `processes.config` for the
+  temperature-control/temperature-monitor kinds gained explicit
+  `sensorDeviceId`/`heaterDeviceId`/`coolerDeviceId` role mappings (a
+  process addresses specific Devices by id now, not "the bundled device's
+  named resources"); the three log tables renamed as above. See migrations
+  `1690000000028`-`1690000000033`.
+- **`apps/api`** - `edgex.ts`'s `readResource`/`writeResource` →
+  `readValue`/`writeValue` (`resource` param → `commandName`);
+  `validator.ts` rewritten around `{device, equals}` pairs instead of
+  `{resource, equals}`, evaluated against a Node's `forbidden` list
+  instead of a Device's; `dualDevicesModel.ts` rewritten so every function
+  and every Redis key (`dvm:{deviceId}:...`, `state:{deviceId}`) is keyed
+  by Device id alone (section 6 already reflects this); `commandLog.ts`/
+  `deviceLog.ts` renamed from `deviceCommandLog.ts`/`sensorReadingLog.ts`;
+  `routes/devices.ts` rewritten around single-value Devices (`GET
+  /devices/:id` now returns `value`/`valueType`/`units`/`dualState`
+  directly, no `resources` map) with Node-scoped `checkForbidden()`;
+  `messaging.ts`'s `DeviceEventEnvelope` dropped its `resource` field,
+  RabbitMQ routing key format changed from
+  `device.<id>.<resource>.updated` to `device.<id>.updated`.
+- **`apps/messaging-gateway`** - not originally in scope for this
+  correction but necessarily touched: its Redis state-snapshot reader and
+  WS fan-out were both coupled to the old `resource`-keyed shapes
+  (`redis.ts`'s `CachedState`, `server.ts`'s envelope construction) and
+  had to be updated to match `apps/api`'s new key/envelope formats.
+- **`apps/orchestrator`** - `apiClient.ts`'s `DeviceRecord` is now
+  `{id, value}` (was `{id, resources}`); `setResourceAuto(deviceId,
+  resource, value)` → `setDeviceAuto(deviceId, value)`;
+  `temperatureControl.ts`/`temperatureMonitor.ts` read their target
+  Devices via the new `process.config.sensorDeviceId`/`heaterDeviceId`/
+  `coolerDeviceId` role mapping instead of one bundled device's named
+  resources; `activeBuzzer.ts` calls `setDeviceAuto` directly.
+- **`apps/ui`** - `DeviceDetail.jsx` and `DevSimulator.jsx` rewritten
+  around a single value per Device (`DevSimulator.jsx`'s per-device
+  resource table collapsed to one row per Device via a new
+  `DeviceSimulatorRow` component); `TemperatureProcessPanel.jsx` now makes
+  three separate `useDeviceLiveState`/`getDevice` calls (one per role);
+  `ActiveBuzzerPanel.jsx` reads `live.value`/`device.value` directly (was
+  `live.Buzzer`/`device.resources?.Buzzer?.value`); Logs page tabs and
+  Live Events (section 29) lost their Resource filters/columns entirely.
+- **`devices/` design-time layout (section 7)** - first real use of the
+  node-attached shape,
+  `devices/nodes/example-thermal-node/{node.yaml,safety.yaml,devices/
+  {temperature,heater,cooler,switch}/}`, each device directory following
+  the same `contract.schema.ts`/`edgex-device-profile.yaml`/`safety.yaml`/
+  `config/default-state.yaml`/`docs/README.md`/`tests/README.md`/
+  `CHANGELOG.md` template already established by
+  `devices/standalone/light-regulator`. New convention established here
+  (no prior precedent existed): a node-attached Device's own `safety.yaml`
+  is always empty - a cross-device forbidden-state rule (e.g. "heater and
+  cooler can't both be on") is declared once, on the **Node's**
+  `safety.yaml`/`nodes.forbidden`, not duplicated onto each Device
+  involved.
+
+### Bugs found and fixed along the way (not part of the original scope, but caused/exposed by this work)
+
+- EdgeX core-command always returns `Bool`-typed readings as the literal
+  string `"false"`/`"true"`, never a JSON boolean - `normalizeReading()`
+  in `edgex.ts` previously only normalized numeric types; extended to also
+  convert Bool strings, otherwise a freshly-read (never
+  Dual-Devices-Model-written) Bool Device's `currentValue === true` checks
+  silently always failed. Pre-existing bug, unrelated to this correction
+  except that rewriting `edgex.ts` surfaced it.
+- `dualDevicesModel.ts`'s `publishReading()` still called `logReading()`
+  after the mechanical "drop the resource parameter" pass (an oversight,
+  caught at the start of the phase touching the orchestrator) - the user's
+  instruction was to remove the call entirely, not just adapt its
+  signature; fixed and verified via a before/after `log_device` row-count
+  check across a `/simulate` call.
+- `GET /devices/:id` initially returned only a bare `value` (an oversight
+  from the same pass, caught one phase later while updating the UI),
+  losing the `valueType`/`units` metadata the UI needs to choose
+  Bool-checkbox vs numeric-stepper rendering and to display units; fixed
+  by returning `value`/`valueType`/`units` as sibling fields.
+- `LiveEvents.jsx` (section 29) - not in this correction's original file
+  list, since it was built earlier in the same session after the
+  correction's own plan had already been written - broke silently (its
+  Resource filter/column always showed empty) once the WS envelope
+  dropped `resource`; caught live in the browser and fixed by removing the
+  Resource filter/column entirely.

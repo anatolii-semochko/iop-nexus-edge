@@ -1,0 +1,5 @@
+# Initial simulated value. Seeded into apps/device-service's Virtual Node
+# Runtime via the "initial.Cooler" protocol property - see
+# apps/device-service/res/devices/example-devices.yaml - kept here too as
+# this device type's own declared default (AGENTS.md section 7).
+Cooler: false

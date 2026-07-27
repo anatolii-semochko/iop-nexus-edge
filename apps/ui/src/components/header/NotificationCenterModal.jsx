@@ -66,7 +66,7 @@ const DEFAULT_PAGE_SIZE = 20
  * `messages` array is already exactly "currently active, unhidden" per
  * process, so no REST call/pagination for it at all, just a client-side
  * flatten+filter/sort. "New"/"All" still hit the server-paginated
- * `GET /process-messages` (section 11's "client-side, tens of rows"
+ * `GET /log-messages` (section 11's "client-side, tens of rows"
  * doesn't hold for an append-only log). "Active" only makes UI sense for
  * warning/error (a `message` never resolves - section 22), hidden when
  * `type === 'message'`.

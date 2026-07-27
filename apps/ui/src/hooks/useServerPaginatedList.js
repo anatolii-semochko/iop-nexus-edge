@@ -5,7 +5,7 @@ const DEFAULT_PAGE_SIZE = 20
 /**
  * Shared server-side paginated list state (fetch on filter/page/pageSize
  * change, loading/error/reload) - the same hand-rolled shape
- * NotificationCenterModal.jsx already uses for GET /process-messages,
+ * NotificationCenterModal.jsx already uses for GET /log-messages,
  * factored out here since the Logs page (AGENTS.md section 29) needs the
  * identical pattern three more times. Distinct from `usePagination.js`
  * (client-side slicing of an already-fetched array) - this one owns the

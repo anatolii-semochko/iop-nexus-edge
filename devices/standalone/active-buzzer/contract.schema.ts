@@ -16,21 +16,19 @@
  * agree with. Nothing yet reads this file at runtime across process
  * boundaries (Go, SQL) - see the Implementation status note in AGENTS.md
  * section 7: kept in sync by hand today, same as every other device type.
+ *
+ * A Device is atomic (AGENTS.md section 30) - exactly one value, so this
+ * contract has no `resources` map the way it did before the 2026-07-28
+ * Device/Node correction.
  */
 export const activeBuzzerContract = {
   deviceType: 'active-buzzer',
-  resources: {
-    Buzzer: {
-      valueType: 'Bool',
-      // Ordinary actuator - has an AUTO/MANUAL concept (Dual Devices
-      // Model), unlike light-regulator's read-only Level. Driven AUTO by
-      // the "active-buzzer" process kind (apps/orchestrator/src/processes/
-      // activeBuzzer.ts) via PUT .../resources/Buzzer/auto, same as
-      // Cooler/Heater are driven by temperature-control.
-      readOnly: false,
-      description: "Active buzzer's built-in generator - true sounds, false is silent",
-    },
-  },
+  valueType: 'Bool',
+  // Ordinary actuator - has an AUTO/MANUAL concept (Dual Devices Model),
+  // unlike light-regulator's read-only Level. Driven AUTO by the
+  // "active-buzzer" process kind (apps/orchestrator/src/processes/
+  // activeBuzzer.ts) via PUT /devices/:id/auto, same as Cooler/Heater are
+  // driven by temperature-control.
+  readOnly: false,
+  description: "Active buzzer's built-in generator - true sounds, false is silent",
 }
-
-export type ActiveBuzzerResource = keyof typeof activeBuzzerContract.resources

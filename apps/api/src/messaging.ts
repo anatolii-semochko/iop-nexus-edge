@@ -22,10 +22,9 @@ export const EVENTS_EXCHANGE = "nexus.events";
 export interface DeviceEventEnvelope {
   domain: "device";
   entityId: number;
-  resource: string;
   value: unknown;
-  // Absent for a readOnly (sensor) resource - it has no Dual Devices Model
-  // concept at all (AGENTS.md section 6/7), unlike a controllable resource,
+  // Absent for a readOnly (sensor) device - it has no Dual Devices Model
+  // concept at all (AGENTS.md section 6/7), unlike a controllable device,
   // which always has all three.
   mode?: string;
   valueAuto?: unknown;
@@ -58,5 +57,5 @@ async function publish(routingKey: string, envelope: unknown): Promise<void> {
 }
 
 export function publishDeviceEvent(envelope: DeviceEventEnvelope): Promise<void> {
-  return publish(`device.${envelope.entityId}.${envelope.resource}.updated`, envelope);
+  return publish(`device.${envelope.entityId}.updated`, envelope);
 }

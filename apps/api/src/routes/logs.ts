@@ -1,14 +1,14 @@
 import type { FastifyInstance } from "fastify";
 
-import * as deviceCommandLog from "../deviceCommandLog.js";
-import type { DeviceCommandAction } from "../deviceCommandLog.js";
-import * as sensorReadingLog from "../sensorReadingLog.js";
+import * as commandLog from "../commandLog.js";
+import type { DeviceCommandAction } from "../commandLog.js";
+import * as deviceLog from "../deviceLog.js";
 
-// Read side of the two append-only log tables (AGENTS.md section 22) for
-// the Logs page's deviceCommands/sensors tabs (section 29) - the
-// processes tab reuses GET /process-messages (routes/processes.ts)
-// instead of a third route here, since that endpoint already covers the
-// same table/pagination shape.
+// Read side of the two append-only log tables (AGENTS.md section 22,
+// renamed in the 2026-07-27 Device/Node refactor) for the Logs page's
+// commands/devices tabs (section 29) - the processes tab reuses
+// GET /log-messages (routes/processes.ts) instead of a third route here,
+// since that endpoint already covers the same table/pagination shape.
 
 function parsePage(value: string | undefined): number {
   return Math.max(1, Number(value ?? 1));
@@ -29,10 +29,10 @@ export async function logRoutes(app: FastifyInstance): Promise<void> {
       page?: string;
       pageSize?: string;
     };
-  }>("/logs/device-commands", async (request) => {
+  }>("/logs/commands", async (request) => {
     const { action, search, from, to } = request.query;
     const deviceId = request.query.deviceId ? Number(request.query.deviceId) : undefined;
-    return deviceCommandLog.listDeviceCommandLogs({
+    return commandLog.listCommandLogs({
       deviceId,
       action,
       search,
@@ -52,10 +52,10 @@ export async function logRoutes(app: FastifyInstance): Promise<void> {
       page?: string;
       pageSize?: string;
     };
-  }>("/logs/sensor-readings", async (request) => {
+  }>("/logs/devices", async (request) => {
     const { search, from, to } = request.query;
     const deviceId = request.query.deviceId ? Number(request.query.deviceId) : undefined;
-    return sensorReadingLog.listSensorReadingLogs({
+    return deviceLog.listDeviceLogs({
       deviceId,
       search,
       from,

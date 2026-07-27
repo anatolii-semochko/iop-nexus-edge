@@ -5,7 +5,7 @@ import React from 'react'
  * simulates a person physically turning the dial. Pure/controlled: knows
  * nothing about HTTP - the caller (apps/ui's Dev Simulator page) owns
  * fetching the current value and pushing changes through
- * PUT .../resources/Level/simulate (AGENTS.md section 7).
+ * PUT /devices/:id/simulate (AGENTS.md section 7).
  */
 const LightRegulatorSimulator = ({ value, min = 0, max = 100, step = 1, disabled = false, onChange }) => (
   <div className="d-flex align-items-center gap-2">

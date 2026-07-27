@@ -13,21 +13,19 @@
  * the Implementation status note in AGENTS.md section 7: no device type
  * has cross-layer enforcement wired up yet, this is kept in sync by hand
  * today, same as every other device type would be.
+ *
+ * A Device is atomic (AGENTS.md section 30) - exactly one value, so this
+ * contract has no `resources` map the way it did before the 2026-07-28
+ * Device/Node correction.
  */
 export const lightRegulatorContract = {
   deviceType: 'light-regulator',
-  resources: {
-    Level: {
-      valueType: 'Int32',
-      // No AUTO/MANUAL concept at all - a pure sensor, never commanded
-      // (apps/api/src/routes/devices.ts ResourceCapability.readOnly).
-      readOnly: true,
-      min: 0,
-      max: 100,
-      step: 1,
-      description: 'Current position of the physical linear regulator (0-100)',
-    },
-  },
+  valueType: 'Int32',
+  // No AUTO/MANUAL concept at all - a pure sensor, never commanded
+  // (apps/api/src/routes/devices.ts DeviceCapabilities.readOnly).
+  readOnly: true,
+  min: 0,
+  max: 100,
+  step: 1,
+  description: 'Current position of the physical linear regulator (0-100)',
 }
-
-export type LightRegulatorResource = keyof typeof lightRegulatorContract.resources

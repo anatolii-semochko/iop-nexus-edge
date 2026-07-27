@@ -1,0 +1,23 @@
+# Smoke-test / demo profile only. Split out of the old bundled
+# NexusEdge-Example-Virtual profile (to-do.txt's 2026-07-27 Device/Node
+# refactor) - one atomic Device, one boolean actuator. Not driven by any
+# process today (same as before the split - it was already unused), kept
+# as the fourth device on example-thermal-node-01 per direct instruction.
+apiVersion: "v2"
+name: "NexusEdge-Example-Switch"
+manufacturer: "NexusEdge"
+model: "example-virtual-01"
+labels:
+  - "example"
+description: "Example actuated boolean state"
+
+deviceResources:
+  - name: "Switch"
+    isHidden: false
+    description: "Example actuated boolean state"
+    properties:
+      valueType: "Bool"
+      readWrite: "RW"
+      defaultValue: "false"
+
+deviceCommands: []

@@ -4,20 +4,17 @@
 // Virtual Node Runtime. Distinct from the Virtual Node Runtime itself,
 // which lives in apps/device-service, below EdgeX.
 //
-// Generalized here to per (device, resource) rather than strictly
-// per-device, since that's the granularity the rest of this API (and the
-// Model State Validator) already operates at - a single-purpose device
-// (e.g. a valve) is just the case where a device happens to have one
-// resource.
+// Per-device, not per (device, resource) (to-do.txt's 2026-07-27
+// Device/Node refactor) - a Device is atomic now, exactly one value, so
+// the extra dimension this module used to key on is gone.
 
 import { logger } from "./logger.js";
 import { publishDeviceEvent } from "./messaging.js";
 import { redis } from "./redis.js";
-import { logReading } from "./sensorReadingLog.js";
 
 export type Mode = "AUTO" | "MANUAL";
 
-export interface ResourceState {
+export interface DeviceState {
   mode: Mode;
   valueAuto: unknown;
   valueManual: unknown;
@@ -26,8 +23,8 @@ export interface ResourceState {
   active: unknown;
 }
 
-function keysFor(deviceId: number, resource: string) {
-  const prefix = `dvm:${deviceId}:${resource}`;
+function keysFor(deviceId: number) {
+  const prefix = `dvm:${deviceId}`;
   return {
     mode: `${prefix}:mode`,
     valueAuto: `${prefix}:valueAuto`,
@@ -55,21 +52,21 @@ function encode(value: unknown): string {
 }
 
 /**
- * Publishes the resource's current effective state onto the shared
+ * Publishes the device's current effective state onto the shared
  * `nexus.events` bus (see apps/messaging-gateway) and refreshes the
- * `state:{deviceId}:{resource}` Redis cache the gateway serves as an
- * initial snapshot to new WebSocket clients. Deliberately a separate key
- * from `dvm:*` above rather than derived from it on read: `state:*` has no
- * TTL (it is last-known-value state, valid until the next write - not a
- * heartbeat/liveness signal; there is no heartbeat producer yet at all).
+ * `state:{deviceId}` Redis cache the gateway serves as an initial snapshot
+ * to new WebSocket clients. Deliberately a separate key from `dvm:*` above
+ * rather than derived from it on read: `state:*` has no TTL (it is
+ * last-known-value state, valid until the next write - not a heartbeat/
+ * liveness signal; there is no heartbeat producer yet at all).
  * Best-effort - a cache/bus hiccup must never fail the device write path
  * this is called from.
  */
-async function publishState(deviceId: number, resource: string, state: ResourceState, source: string): Promise<void> {
+async function publishState(deviceId: number, state: DeviceState, source: string): Promise<void> {
   const timestamp = new Date().toISOString();
   try {
     await redis.set(
-      `state:${deviceId}:${resource}`,
+      `state:${deviceId}`,
       encode({
         value: state.active,
         mode: state.mode,
@@ -80,13 +77,12 @@ async function publishState(deviceId: number, resource: string, state: ResourceS
       }),
     );
   } catch (err) {
-    logger.warn({ err, deviceId, resource }, "failed to refresh state cache");
+    logger.warn({ err, deviceId }, "failed to refresh state cache");
   }
 
   await publishDeviceEvent({
     domain: "device",
     entityId: deviceId,
-    resource,
     value: state.active,
     mode: state.mode,
     valueAuto: state.valueAuto,
@@ -98,29 +94,33 @@ async function publishState(deviceId: number, resource: string, state: ResourceS
 
 /**
  * Same as publishState above (cache refresh + nexus.events publish), for a
- * readOnly (sensor) resource that has no Dual Devices Model state at all -
+ * readOnly (sensor) device that has no Dual Devices Model state at all -
  * no `dvm:*` keys, no mode/valueAuto/valueManual, just the value itself.
  * Called from the .../simulate write path (routes/devices.ts), which is
- * the only way such a resource's value ever changes today - and, once a
- * real EdgeX push/poll path exists, where that would call in too, which is
- * exactly why sensor_reading_logs (AGENTS.md section 22) is logged from
- * here rather than from the /simulate route itself: every reading gets
- * logged regardless of where it actually came from.
+ * the only way such a device's value ever changes today.
+ *
+ * Deliberately does NOT log to log_device anymore (to-do.txt's 2026-07-27
+ * Device/Node refactor, direct instruction) - the old unconditional
+ * "log every tick" behavior is removed outright, not replaced, in this
+ * refactor. A future configurable process (or several) will decide what/
+ * when to log into log_device; deviceLog.ts's logReading()/listDeviceLogs()
+ * both still exist (the table and its read API survive, serving whatever
+ * history was already logged before this change), just nothing calls
+ * logReading() from here anymore.
  */
-export async function publishReading(deviceId: number, resource: string, value: unknown, source: string): Promise<void> {
+export async function publishReading(deviceId: number, value: unknown, source: string): Promise<void> {
   const timestamp = new Date().toISOString();
   try {
-    await redis.set(`state:${deviceId}:${resource}`, encode({ value, updatedAt: timestamp, source }));
+    await redis.set(`state:${deviceId}`, encode({ value, updatedAt: timestamp, source }));
   } catch (err) {
-    logger.warn({ err, deviceId, resource }, "failed to refresh state cache");
+    logger.warn({ err, deviceId }, "failed to refresh state cache");
   }
 
-  await logReading({ deviceId, resource, value, source });
-  await publishDeviceEvent({ domain: "device", entityId: deviceId, resource, value, timestamp, source });
+  await publishDeviceEvent({ domain: "device", entityId: deviceId, value, timestamp, source });
 }
 
-export async function getState(deviceId: number, resource: string): Promise<ResourceState> {
-  const k = keysFor(deviceId, resource);
+export async function getState(deviceId: number): Promise<DeviceState> {
+  const k = keysFor(deviceId);
   const [mode, rawAuto, rawManual] = await Promise.all([
     redis.get(k.mode),
     redis.get(k.valueAuto),
@@ -140,73 +140,69 @@ export async function getState(deviceId: number, resource: string): Promise<Reso
 }
 
 /** Orchestrator-driven. Always records valueAuto, but only becomes the
- * resource's active value while it is currently in AUTO mode - a manual
+ * device's active value while it is currently in AUTO mode - a manual
  * override keeps controlling the device even while the orchestrator keeps
  * computing what it would set automatically, so that value can take over
- * immediately once the resource is released back to AUTO. */
-export async function setActive(deviceId: number, resource: string, value: unknown): Promise<ResourceState> {
-  await redis.set(keysFor(deviceId, resource).valueAuto, encode(value));
-  const state = await getState(deviceId, resource);
-  await publishState(deviceId, resource, state, "api");
+ * immediately once the device is released back to AUTO. */
+export async function setActive(deviceId: number, value: unknown): Promise<DeviceState> {
+  await redis.set(keysFor(deviceId).valueAuto, encode(value));
+  const state = await getState(deviceId);
+  await publishState(deviceId, state, "api");
   return state;
 }
 
-/** UI-driven manual override. Always becomes the resource's active value. */
-export async function setManualActive(deviceId: number, resource: string, value: unknown): Promise<ResourceState> {
-  const k = keysFor(deviceId, resource);
+/** UI-driven manual override. Always becomes the device's active value. */
+export async function setManualActive(deviceId: number, value: unknown): Promise<DeviceState> {
+  const k = keysFor(deviceId);
   await Promise.all([redis.set(k.valueManual, encode(value)), redis.set(k.mode, "MANUAL")]);
-  const state = await getState(deviceId, resource);
-  await publishState(deviceId, resource, state, "api");
+  const state = await getState(deviceId);
+  await publishState(deviceId, state, "api");
   return state;
 }
 
-/** Releases a resource back to automatic control - the orchestrator's last
+/** Releases a device back to automatic control - the orchestrator's last
  * computed valueAuto becomes the active value again. */
-export async function release(deviceId: number, resource: string): Promise<ResourceState> {
-  await redis.set(keysFor(deviceId, resource).mode, "AUTO");
-  const state = await getState(deviceId, resource);
-  await publishState(deviceId, resource, state, "api");
+export async function release(deviceId: number): Promise<DeviceState> {
+  await redis.set(keysFor(deviceId).mode, "AUTO");
+  const state = await getState(deviceId);
+  await publishState(deviceId, state, "api");
   return state;
 }
 
 /**
- * The resource's current active value, for the Model State Validator to
- * check other resources against. If this resource has never gone through
- * setActive/setManualActive, Redis has nothing recorded yet (a fresh
- * device) - fall back to reading it live (the caller decides how) and
- * cache it as the initial AUTO value, so later checks don't need to.
+ * The device's current active value, for the Model State Validator to
+ * check other devices on the same node against. If this device has never
+ * gone through setActive/setManualActive, Redis has nothing recorded yet
+ * (a fresh device) - fall back to reading it live (the caller decides how)
+ * and cache it as the initial AUTO value, so later checks don't need to.
  */
-export async function resolveActiveValue(
-  deviceId: number,
-  resource: string,
-  readLive: () => Promise<unknown>,
-): Promise<unknown> {
-  const state = await getState(deviceId, resource);
+export async function resolveActiveValue(deviceId: number, readLive: () => Promise<unknown>): Promise<unknown> {
+  const state = await getState(deviceId);
   if (state.valueAuto !== undefined || state.valueManual !== undefined) {
     return state.active;
   }
   const live = await readLive();
-  await setActive(deviceId, resource, live);
+  await setActive(deviceId, live);
   return live;
 }
 
 /**
- * System-wide aggregate: AUTO if none of `resources` has been overridden,
+ * System-wide aggregate: AUTO if none of `deviceIds` has been overridden,
  * MANUAL if every one has, SERVICE if it's a mix - matches the three
  * states in AGENTS.md section 6 (SERVICE is derived, not separately
- * stored). `resources` must be the *full* set of (deviceId, resource)
- * pairs that exist (from Postgres) - a resource with no Redis key at all
- * is implicitly AUTO (never overridden), and omitting it here would
- * silently drop it from the count instead of counting it as AUTO.
+ * stored). `deviceIds` must be the *full* set of controllable device ids
+ * that exist (from Postgres) - a device with no Redis key at all is
+ * implicitly AUTO (never overridden), and omitting it here would silently
+ * drop it from the count instead of counting it as AUTO.
  */
-export async function systemMode(resources: Array<{ deviceId: number; resource: string }>): Promise<Mode | "SERVICE"> {
-  if (resources.length === 0) {
+export async function systemMode(deviceIds: number[]): Promise<Mode | "SERVICE"> {
+  if (deviceIds.length === 0) {
     return "AUTO";
   }
 
   const modes = await Promise.all(
-    resources.map(async ({ deviceId, resource }) => {
-      const raw = await redis.get(keysFor(deviceId, resource).mode);
+    deviceIds.map(async (deviceId) => {
+      const raw = await redis.get(keysFor(deviceId).mode);
       return raw === "MANUAL" ? "MANUAL" : "AUTO";
     }),
   );

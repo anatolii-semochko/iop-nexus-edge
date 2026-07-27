@@ -1,0 +1,17 @@
+name: "NexusEdge-Example-Cooler"
+manufacturer: "NexusEdge"
+model: "example-cooler"
+labels:
+  - "example"
+  - "thermal"
+description: "Example cooler relay - atomic device, one Bool value"
+
+deviceResources:
+  - name: "Cooler"
+    isHidden: false
+    description: "Cooler relay state - true cools, false is idle"
+    properties:
+      valueType: "Bool"
+      readWrite: "RW"
+
+deviceCommands: []
