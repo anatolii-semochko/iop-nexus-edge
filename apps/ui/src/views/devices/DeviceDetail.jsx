@@ -4,17 +4,7 @@ import { CAlert, CBadge, CCard, CCardBody, CCardHeader, CSpinner } from '@coreui
 import { api } from '../../api/client'
 import { useDeviceLiveState } from '../../api/useLiveDevice'
 import LiveBadge from './LiveBadge'
-import LightRegulatorControl from 'devices/standalone/light-regulator/ui/control/LightRegulatorControl.jsx'
-import ActiveBuzzerControl from 'devices/standalone/active-buzzer/ui/control/ActiveBuzzerControl.jsx'
-
-// device.type -> its own ui/control component (AGENTS.md section 7) - a
-// Device is atomic (to-do.txt's 2026-07-27 Device/Node refactor), so this
-// is a flat map now, not nested by resource name. Same pattern as
-// DEVICE_TYPE_SIMULATORS in DevSimulator.jsx.
-const DEVICE_TYPE_CONTROLS = {
-  'light-regulator': LightRegulatorControl,
-  'active-buzzer': ActiveBuzzerControl,
-}
+import { deviceControls } from '../../deviceTypeRegistry'
 
 const formatValue = (value, units) => {
   if (value === null || value === undefined) return '-'
@@ -27,8 +17,9 @@ const modeColor = (mode) => (mode === 'MANUAL' ? 'warning' : 'success')
  * Production-style device view: read-only current state. Generic (not
  * device-specific) by default - see AGENTS.md section 7 for the
  * per-device-type ui/control component this is a stand-in for, used
- * instead wherever a device type has one (see DEVICE_TYPE_CONTROLS). A
- * Device has exactly one value now, not a table of resources.
+ * instead wherever a device type has one (see deviceControls,
+ * deviceTypeRegistry.js). A Device has exactly one value now, not a
+ * table of resources.
  */
 const DeviceDetail = () => {
   const { id } = useParams()
@@ -53,7 +44,7 @@ const DeviceDetail = () => {
   // No fallback to "AUTO" - a readOnly (sensor) device has no Dual Devices
   // Model mode at all (AGENTS.md section 6/7).
   const mode = live.mode ?? device.dualState?.mode
-  const CustomControl = DEVICE_TYPE_CONTROLS[device.type]
+  const CustomControl = deviceControls[device.type]
 
   return (
     <CCard className="mb-4">

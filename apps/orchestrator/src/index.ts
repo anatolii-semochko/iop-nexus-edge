@@ -9,19 +9,18 @@ import { runHeartbeatControlTest } from "./processes/heartbeatControlTest.js";
 import { runResourceMonitor } from "./processes/resourceMonitor.js";
 import { runTemperatureControl } from "./processes/temperatureControl.js";
 import { runTemperatureMonitor } from "./processes/temperatureMonitor.js";
+import { processRegistry } from "./processRegistry.js";
 import { TICK_INTERVAL_MS } from "./tickInterval.js";
 
-// process.kind -> its control-loop function (AGENTS.md section 10). Not a
-// generic plugin system yet (that's future work per AGENTS.md section 4's
-// "plugin lifecycle") - just the fixed set of kinds that exist today.
-const RUNNERS: Record<string, (process: ProcessRecord) => Promise<void>> = {
-  "temperature-control": runTemperatureControl,
-  "temperature-monitor": runTemperatureMonitor,
-  "resource-monitor": runResourceMonitor,
-  "active-buzzer": runActiveBuzzer,
-  "heartbeat-control": runHeartbeatControl,
-  "heartbeat-control-test": runHeartbeatControlTest,
-};
+// Built-in process kinds (AGENTS.md section 10) - registered through the
+// same processRegistry a target-project plugin would use (extension
+// points design, to-do.txt 2026-07-28).
+processRegistry.register("temperature-control", runTemperatureControl);
+processRegistry.register("temperature-monitor", runTemperatureMonitor);
+processRegistry.register("resource-monitor", runResourceMonitor);
+processRegistry.register("active-buzzer", runActiveBuzzer);
+processRegistry.register("heartbeat-control", runHeartbeatControl);
+processRegistry.register("heartbeat-control-test", runHeartbeatControlTest);
 
 async function tick(): Promise<void> {
   let processes: ProcessRecord[];
@@ -40,7 +39,7 @@ async function tick(): Promise<void> {
 
   await Promise.all(
     processes.map(async (process) => {
-      const runner = RUNNERS[process.kind];
+      const runner = processRegistry.get(process.kind);
       if (!runner) return;
       try {
         await runner(process);

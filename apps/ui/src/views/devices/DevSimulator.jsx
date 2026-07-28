@@ -23,16 +23,7 @@ import { api } from '../../api/client'
 import { useDeviceLiveState } from '../../api/useLiveDevice'
 import LiveBadge from './LiveBadge'
 import NumericStepper from './NumericStepper'
-import LightRegulatorSimulator from 'devices/standalone/light-regulator/ui/simulator/LightRegulatorSimulator.jsx'
-
-// device.type -> its own ui/simulator component (AGENTS.md section 7) - a
-// Device is atomic (to-do.txt's 2026-07-27 Device/Node refactor), so this
-// is a flat map now, not nested by resource name. Only one real device
-// type has one today; this is a plain map rather than a discovery
-// mechanism because there is nothing yet to discover more than one of.
-const DEVICE_TYPE_SIMULATORS = {
-  'light-regulator': LightRegulatorSimulator,
-}
+import { deviceSimulators } from '../../deviceTypeRegistry'
 
 // How long to wait after the last slider move before actually sending it -
 // dragging a range input fires onChange on every pixel step; without this,
@@ -55,7 +46,8 @@ const modeColor = (mode) => {
  * it - writes through Devices API -> EdgeX core-command, handled by the
  * Virtual Node Runtime (AGENTS.md section 6). Generic stand-in for the
  * per-device-type dev/ui simulator (AGENTS.md section 7), except for a
- * device type with its own component (see DEVICE_TYPE_SIMULATORS).
+ * device type with its own component (see deviceSimulators,
+ * deviceTypeRegistry.js).
  */
 const DeviceSimulatorRow = ({ device, onError }) => {
   const [detail, setDetail] = useState(null)
@@ -134,7 +126,7 @@ const DeviceSimulatorRow = ({ device, onError }) => {
     ? undefined
     : (live.valueAuto ?? detail.dualState?.valueAuto)
   const mismatch = autoValue !== undefined && String(autoValue) !== String(currentValue)
-  const CustomSimulator = DEVICE_TYPE_SIMULATORS[detail.type]
+  const CustomSimulator = deviceSimulators[detail.type]
 
   return (
     <CTableRow>

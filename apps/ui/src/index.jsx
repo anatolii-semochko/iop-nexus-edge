@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { Provider } from 'react-redux'
 import 'core-js'
 
+import './builtinDeviceTypes'
 import App from './App'
 import store from './store'
 
