@@ -6,6 +6,7 @@ import fastifyMultipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
 
+import { loadApiPlugins } from "./apiPlugins.js";
 import { config } from "./config.js";
 import { startProcessStateBroadcastLoop } from "./processBroadcast.js";
 import { initUnreadCounts } from "./processMessages.js";
@@ -51,6 +52,11 @@ await app.register(tabGroupRoutes);
 await app.register(messageGroupRoutes);
 await app.register(messageLevelRoutes);
 await app.register(logRoutes);
+
+// Command-API extension points (extension points design, to-do.txt
+// 2026-07-28) - Library and private DNP api.ts plugins, registered after
+// every built-in route so a plugin can't accidentally shadow one.
+await loadApiPlugins(app);
 
 // Recomputes the notification center's unread counters from Postgres
 // (AGENTS.md section 25) before the broadcast loop's own first tick reads

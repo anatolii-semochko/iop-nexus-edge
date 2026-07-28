@@ -27,6 +27,11 @@ COPY --from=prod-deps /workspace/apps/api/node_modules ./apps/api/node_modules
 COPY --from=prod-deps /workspace/apps/api/package.json ./apps/api/package.json
 COPY --from=build /workspace/apps/api/dist ./apps/api/dist
 COPY --from=build /workspace/apps/api/migrations ./apps/api/migrations
+# Library DNP api.ts plugins (extension points design, to-do.txt
+# 2026-07-28) - scanned by apiPlugins.ts at BUILTIN_DEVICES_DIR (defaults
+# to /workspace/devices, matching this COPY's destination). None exist
+# yet; copied unconditionally so the day one is added it's already there.
+COPY devices ./devices
 WORKDIR /workspace/apps/api
 EXPOSE 3001
 # Migrations run on every container start (node-pg-migrate tracks applied
