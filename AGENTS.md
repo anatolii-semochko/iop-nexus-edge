@@ -5,9 +5,11 @@ Read this file before making changes. Keep it updated: whenever you add an
 important service, module, component, or make an architectural change, update
 this file and `README.md` accordingly.
 
-See `docs/PROJECT_MASTER-1.1.md` for the full architecture vision, and
+See `docs/PROJECT_MASTER-1.1.md` for the full architecture vision,
 `docs/DEVELOPMENT_LOG.md` for the dated history of how this platform got
-to its current state and why.
+to its current state and why, and `docs/CREATING_A_TARGET_PROJECT.md`
+for the manual checklist to bootstrap a new project on top of this one
+(section 31's extension points design).
 
 Section numbers below have a few historical gaps (§8, §12, §14, §16, §18
 don't exist) - some early sections were merged/reworked before this file
@@ -2875,3 +2877,90 @@ every write, same as before.
   Resource filter/column always showed empty) once the WS envelope
   dropped `resource`; caught live in the browser and fixed by removing the
   Resource filter/column entirely.
+
+## 31. Extension points (target projects add DNPs/commands/UI without forking)
+
+A target project (e.g. `../nexus-edge-smart-house`, sibling repo, the
+reference example - see `docs/CREATING_A_TARGET_PROJECT.md` for the
+manual bootstrap checklist) adds its own private DNPs, command routes,
+and device UI without modifying or forking this repo. Built-in
+(Library) DNPs use the exact same mechanism a private plugin would - no
+special-casing "official" vs "private" anywhere below.
+
+- **`apps/orchestrator`'s `processRegistry`** (`src/processRegistry.ts`)
+  - `register(kind, runner)`/`get(kind)`, a `Map` under a small API,
+    replacing the old static `RUNNERS` object literal. Built-in kinds
+    register via `registerBuiltinProcessKinds()` inside the exported
+    `startOrchestrator()` factory (`src/server.ts`); a target project's
+    own process registers into the same `processRegistry` before calling
+    `startOrchestrator()`.
+- **`apps/ui`'s `deviceTypeRegistry`** (`src/deviceTypeRegistry.js`) -
+  plain objects `deviceControls`/`deviceSimulators`, written to via
+  `registerControl`/`registerSimulator`, read via bracket access
+  (`deviceControls[type]`) rather than a getter - `react-hooks/
+  static-components` flags a component obtained through a function call
+  as "created during render" even when the call is a pure lookup.
+  Built-ins register from `builtinDeviceTypes.js` (imported once,
+  side-effect, from `index.jsx`); a target project's own types register
+  the same way from its own `plugins/*/ui/register.js` - see the UI
+  point below for how that file gets bundled in at all.
+- **`apps/api`'s command-API plugin loader** (`src/apiPlugins.ts`,
+  `loadApiPlugins()`) - recursively scans `config.apiPlugins.
+  builtinDevicesDir` (`/workspace/devices`, Library - `devices/` is
+  copied into the runtime image specifically for this, see the
+  Dockerfile) and, if set, `config.apiPlugins.extraDir` (env
+  `EXTRA_API_PLUGINS_DIR`, a target project's own `plugins/`, mounted
+  read-only), for any `api.ts` file. Each one is dynamic-imported
+  directly - **Node 22 strips TypeScript types natively, no build step
+  needed** (verified directly: `node hello.ts` and a dynamic `import()`
+  of a raw `.ts` file both work out of the box in the `node:22-alpine`
+  image this repo uses). A file's default export must be a plain Fastify
+  plugin (`export default async function(app) {...}`), registered via
+  `app.register()` - same shape every `routes/*.ts` in this app already
+  exports. Only needed when the generic Device API (write/auto/simulate)
+  and Process API aren't enough; nothing in the Library needs one today.
+- **`apps/device-service`'s `EXTRA_RES_DIR`**
+  (`internal/extrares/extrares.go`, `Merge()`) - the EdgeX SDK's
+  `Device.ProfilesDir`/`DevicesDir` config keys are each exactly one
+  directory, read once inside `startup.Bootstrap` with no exposed hook
+  to add a second source (`internal/provision` isn't importable outside
+  the SDK module - confirmed by reading the SDK source directly, not
+  assumed). `Merge()` symlinks `*.yaml`/`*.yml` from
+  `$EXTRA_RES_DIR/profiles`/`$EXTRA_RES_DIR/devices` into this service's
+  own `./res/profiles`/`./res/devices` **before** `startup.Bootstrap`
+  runs - the only integration point available without forking the SDK.
+  Fails loudly on a filename collision rather than silently shadowing a
+  built-in file. No-op if `EXTRA_RES_DIR` is unset.
+- **`apps/ui`'s build-time plugin glob** (`src/pluginDeviceTypes.js`) -
+  `import.meta.glob('plugins/*/ui/register.js', { eager: true })`. Vite
+  bundles the UI into one static file at build time, so this is the one
+  extension point that genuinely cannot be runtime-loaded the way the
+  three above are - `import.meta.glob` is Vite's own build-time
+  equivalent of a directory scan. Resolves through a new `vite.config.
+  mjs` alias, `plugins/` -> repo-root `plugins/` (same convention as the
+  existing `devices/` alias) - verified live with a throwaway spike
+  (temporary alias + glob + marker file, a real `vite build`, grepped
+  the output bundle for the marker) that `import.meta.glob` resolves
+  through a custom alias the same way a static import already does, not
+  assumed. A target project's own `plugins/<name>/ui/register.js` is a
+  plain side-effect file (same style as `builtinDeviceTypes.js`),
+  importing `deviceControls`/`deviceSimulators` via a path that only
+  resolves correctly inside the merged build-time tree a target
+  project's **own** `apps/ui/Dockerfile` assembles (this repo's own ui
+  Dockerfile can't be reused unmodified the way api/orchestrator/
+  device-service's can - see `docs/CREATING_A_TARGET_PROJECT.md` section
+  6 for the exact Dockerfile/build-context shape). `plugins/` is empty
+  in this repo (reserved, section 2/4) - zero matches, so this is a
+  no-op for this repo's own build.
+- **Not designed yet**: a genuine Dashboard *widget* host (a standalone
+  tile on the Dashboard page, not tied to one device's own page) -
+  Dashboard is still tabs/entities (section 23), not a composable widget
+  grid. The same `register.js`/glob mechanism will apply once one
+  exists.
+- **Deliberately not part of this list**: Postgres schema/seed data. A
+  target project's own migrations are just its own separate SQL/
+  node-pg-migrate run against the same database, independent of this
+  repo's migration sequence - no extension point needed since nothing
+  here gates it. (This repo's own migrations are one undivided sequence
+  that includes its demo/smoke-test fixtures - a target project inherits
+  those unconditionally today; revisit if that's ever undesirable.)

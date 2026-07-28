@@ -30,6 +30,16 @@ export default defineConfig(() => {
           find: 'devices/',
           replacement: `${path.resolve(__dirname, '../../devices')}/`,
         },
+        // Extension points (to-do.txt 2026-07-28) - lets
+        // pluginDeviceTypes.js's import.meta.glob('plugins/*/ui/
+        // register.js', ...) reach a target project's own plugins/,
+        // same convention as devices/ above. Verified live (spike,
+        // to-do.txt) that import.meta.glob resolves through a custom
+        // alias the same way a static import does.
+        {
+          find: 'plugins/',
+          replacement: `${path.resolve(__dirname, '../../plugins')}/`,
+        },
         // devices/ lives outside apps/ui's own package, so plain Node
         // resolution (walking up node_modules from the importing file)
         // would never find react there - pin it to apps/ui's own copy so

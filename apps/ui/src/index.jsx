@@ -4,6 +4,7 @@ import { Provider } from 'react-redux'
 import 'core-js'
 
 import './builtinDeviceTypes'
+import './pluginDeviceTypes'
 import App from './App'
 import store from './store'
 
