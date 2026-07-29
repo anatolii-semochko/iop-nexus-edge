@@ -34,6 +34,7 @@ import {
 import { AppSidebarNav } from './AppSidebarNav'
 
 import chipLogo from '../assets/brand/chip-logo.svg'
+import { PROJECT_NAME } from '../projectName'
 
 // sidebar nav config
 import navigation from '../_nav'
@@ -74,7 +75,7 @@ const AppSidebar = () => {
       <CSidebarHeader className="border-bottom">
         <CSidebarBrand to="/" className="text-decoration-none d-flex align-items-center">
           <img src={chipLogo} alt="" height={32} className="me-2" />
-          <span className="sidebar-brand-full fw-semibold fs-5 lh-1">NexusEdge</span>
+          <span className="sidebar-brand-full fw-semibold fs-5 lh-1">{PROJECT_NAME}</span>
         </CSidebarBrand>
         <CCloseButton
           className="d-lg-none"

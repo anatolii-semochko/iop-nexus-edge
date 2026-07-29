@@ -18,6 +18,7 @@ import {
 import CIcon from '@coreui/icons-react'
 import { cilLockLocked, cilUser } from '@coreui/icons'
 import { api } from '../../../api/client'
+import { PROJECT_NAME } from '../../../projectName'
 
 /**
  * Real login form (AGENTS.md section 13) - no self-registration link (the
@@ -56,7 +57,7 @@ const Login = () => {
               <CCardBody>
                 <CForm onSubmit={handleSubmit}>
                   <h1>Login</h1>
-                  <p className="text-body-secondary">Sign in to NexusEdge</p>
+                  <p className="text-body-secondary">Sign in to {PROJECT_NAME}</p>
                   {error && <CAlert color="danger">{error}</CAlert>}
                   <CInputGroup className="mb-3">
                     <CInputGroupText>
