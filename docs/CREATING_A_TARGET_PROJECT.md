@@ -1,32 +1,50 @@
 # Creating a target project on nexus-edge
 
-Manual checklist for bootstrapping a new project on top of nexus-edge
-(Core+Base) - see `to-do.txt`'s extension points design (2026-07-28) for
-the reasoning behind each piece. `../nexus-edge-smart-house` (sibling
-repo) is the reference example every step below points at - copy from it
-rather than starting blank.
+Bootstrapping a new project on top of nexus-edge (Core+Base) - see
+`to-do.txt`'s extension points design (2026-07-28/29) for the reasoning
+behind each piece. `../nexus-edge-smart-house` (sibling repo) is the
+reference example with real content (a private DNP, a command route, a
+process plugin, a UI control) - read it to see the pieces below actually
+used, don't copy it wholesale.
 
-This is a checklist, not a generator, on purpose: as of 2026-07-29 there
-is exactly one real target project, and the shape below is still
-settling (see "Known gaps" at the end). Turn this into a `nexus-edge new
-<name>` scaffolding command once a second target project has validated
-that the shape is actually stable - building the generator now would
-lock in a template that's still one data point.
+**Sections 1-4 below are automated** (Фаза В, 2026-07-29): run `make
+new-project` in this checkout, answer two prompts (display name, target
+folder path - not required to be a sibling of `nexus-edge`), then `cd`
+there and `make up-all`. What it generates is exactly
+`templates/target-project/` with placeholders filled in - read that
+directory if you want to see precisely what you're getting, or to change
+the template itself. **Sections 5-7 (the actual extension points) stay
+manual** - what you add there depends entirely on what you're building,
+there's nothing left to automate.
 
-## 1. Directory + git
+## 1-4. What `make new-project` generates
 
-- New directory **sibling to `nexus-edge`** (its own git repo), kebab-case
-  name, e.g. `../my-project`. Docker build contexts below assume this
-  sibling layout - `git clone`/checkout both repos into sibling paths on
-  CI too.
-- `git init`, add a `.gitignore` (`.env`, `node_modules/`).
+- New directory (its own git repo, `git init`), **not required to be a
+  sibling of `nexus-edge`** - `.env`'s `NEXUS_EDGE_SOURCE_PATH` records
+  wherever it actually is (absolute or relative), which is what lets
+  several `nexus-edge` versions be checked out side by side for active
+  development, each target project pointing at whichever one it needs.
+- `.env` (gitignored) + `.env.example`, `docker-compose.yml`,
+  `docker-compose.edgex.yml`, `apps/ui/Dockerfile`, `Makefile`, empty
+  `plugins/`/`extra-res/`/`migrations/`.
+- Project name (shown in the UI next to the logo) and a slug (derived
+  from the target folder's own name - not asked twice) fill in the
+  compose project name, container name prefixes, and default Postgres/
+  RabbitMQ credentials.
+- `NEXUS_EDGE_VERSION` (nexus-edge's own `package.json` version at
+  generation time) - `make build`/`up`/`up-all` compare it against
+  `NEXUS_EDGE_SOURCE_PATH`'s *current* version and warn (not block) on a
+  mismatch. A simple exact-version check, not semver ranges - revisit
+  once there's a real reason to.
 
-## 2. Ports (`.env` / `.env.example`)
-
-Copy `nexus-edge-smart-house/.env.example` as a starting point. Every
-port that gets a `ports:` mapping in either compose file must differ
-from `nexus-edge`'s own dev stack (and from any other target project
-running on the same machine) - offset by e.g. +100 per project.
+**Known trap, still worth reading even though the generator handles the
+mechanics**: every port that gets a `ports:` mapping in either compose
+file must differ from `nexus-edge`'s own dev stack and from any other
+target project running on the same machine - the generated `.env` ships
+with `nexus-edge-smart-house`'s own port numbers as a starting point,
+**not scanned for actual collisions** (Пропозиція Е, to-do.txt
+2026-07-29 - deliberately out of scope). Check `docker ps` and adjust
+before `make up-all` if anything else is already running.
 
 **Known trap** (hit 2026-07-28 building the UI plugin example):
 `EDGEX_CORE_METADATA_PORT` (and the other three `EDGEX_CORE_*_PORT` vars)
@@ -40,32 +58,6 @@ of them, hardcode a literal, separate port number directly in
 var for both sides, or `apps/api`'s own EdgeX calls silently fail
 (`GET /devices` returns `edgex: null` for every device, `ECONNREFUSED` in
 `apps/api`'s logs).
-
-## 3. `docker-compose.yml`
-
-- `postgres`, `redis`, `rabbitmq` - own instances, own named volumes, own
-  `container_name` prefix (distinct from `nexus-edge-*` and any other
-  project's prefix).
-- `orchestrator`, `api`: `build: { context: ../nexus-edge, dockerfile:
-  apps/{orchestrator,api}/Dockerfile }` - reused **unmodified**, no fork.
-  Both load extensions at runtime (env + volume mount), see step 5.
-- `messaging-gateway`: same reuse pattern, needed only if `ui` is
-  included (step 6).
-- `migrate-extra` (one-off, only if you have a private Postgres seed):
-  plain `postgres:16-alpine` + `psql`, waits for `nexus-edge`'s own
-  migrations to create the `devices` table, then applies
-  `./migrations/*.sql`. Not a second `node-pg-migrate` instance unless
-  you actually have an evolving migration history, not just a one-time
-  seed - see `nexus-edge-smart-house/docker-compose.yml` for the exact
-  retry-loop command.
-
-## 4. `docker-compose.edgex.yml`
-
-Copy `nexus-edge-smart-house/docker-compose.edgex.yml` wholesale and
-rename the `smarthouse-` container prefix + `name:` project field. This
-is the full EdgeX stack (own instance, not shared with `nexus-edge`'s) -
-`device-service` is `build: { context: ../nexus-edge, dockerfile:
-apps/device-service/Dockerfile }`, reused unmodified.
 
 ## 5. Backend extension points (runtime, no build-time work)
 
@@ -142,14 +134,18 @@ a browser bundle. This means:
   { eager: true })`) - **the relative import path only resolves inside
   the merged build-time tree the Dockerfile below assembles**, not in
   this repo standalone.
-- **Own `apps/ui/Dockerfile`** - copy `nexus-edge-smart-house/apps/ui/
-  Dockerfile`. Cannot reuse `nexus-edge`'s own ui Dockerfile unmodified
-  (unlike every other service above) - the build needs to see both
-  `nexus-edge/apps/ui` and this project's own `plugins/` at once.
-- `docker-compose.yml`'s `ui` service: `build: { context: .., dockerfile:
-  <this-project>/apps/ui/Dockerfile }` - context is the **shared parent**
-  of both sibling repos, not `../nexus-edge` alone (the one place this
-  differs from every other service's build block).
+- **Own `apps/ui/Dockerfile`** - already generated by `make new-project`
+  (section 1-4) since branding alone needs it; cannot reuse `nexus-edge`'s
+  own ui Dockerfile unmodified (unlike every other service above) - the
+  build needs to see both `nexus-edge`'s source and this project's own
+  `plugins/` at once.
+- `docker-compose.yml`'s `ui` service uses BuildKit's
+  `additional_contexts` (a named `nexus-edge` context pointed at
+  `NEXUS_EDGE_SOURCE_PATH`) rather than a shared-parent-directory
+  `context: ..` - works for `nexus-edge` checked out anywhere, not just
+  as a sibling directory (the one place this differs from every other
+  service's build block, which just uses `context:
+  ${NEXUS_EDGE_SOURCE_PATH}` directly).
 
 A genuine Dashboard *widget* (a standalone tile, not tied to one
 device's page) isn't possible yet - there is no generic Dashboard widget

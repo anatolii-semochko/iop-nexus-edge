@@ -2995,6 +2995,32 @@ special-casing "official" vs "private" anywhere below.
   target project's own migrations are just its own separate SQL/
   node-pg-migrate run against the same database, independent of this
   repo's migration sequence - no extension point needed since nothing
-  here gates it. (This repo's own migrations are one undivided sequence
-  that includes its demo/smoke-test fixtures - a target project inherits
-  those unconditionally today; revisit if that's ever undesirable.)
+  here gates it. (This repo's own migrations used to unconditionally
+  seed demo/smoke-test fixtures into every target project - fixed
+  2026-07-29, see `SEED_DEMO_FIXTURES` below.)
+- **`SEED_DEMO_FIXTURES`** (env, `apps/api/migrations/
+  1690000000034_gate-demo-fixtures.ts`) - unset/false (`.env.example`
+  default, every target project) deletes `light-regulator-01`/
+  `active-buzzer-01`+its process/`heartbeat-control-test` right after
+  they're seeded; `true` (this repo's own local `.env`) leaves them.
+  `temperature-control`/`temperature-monitor` are handled differently
+  (migration `1690000000035`, unconditional, scoped to this repo's own
+  `example-thermal-node-01` by `node_id` - **not** by `kind`, which
+  would also match a target project's own same-kind process plugin, a
+  real bug caught live building `nexus-edge-smart-house`'s temperature-
+  control example) - their process CODE moved out of this repo entirely
+  (section 10's note), so there is no runner left here to seed rows for
+  even with the flag on.
+- **`make new-project`** (`Makefile`, `scripts/new-project.sh`,
+  `templates/target-project/`) - generates a new target project from
+  the template (placeholders filled in: display name, a slug derived
+  from the target folder's own name, `NEXUS_EDGE_SOURCE_PATH` computed
+  relative to wherever it's generated, `NEXUS_EDGE_VERSION` from this
+  repo's own `package.json`). Automates `docs/
+  CREATING_A_TARGET_PROJECT.md` sections 1-4 (directory/git, both
+  compose files, `.env`) - sections 5-7 (the extension points
+  themselves) stay manual, since what goes there depends entirely on
+  what's being built. Verified live end-to-end (generate, fix the
+  inevitable port collision with an already-running project by hand,
+  `make up-all`): a fresh project shows its own custom name in the UI
+  and has exactly the two base system processes, zero devices.

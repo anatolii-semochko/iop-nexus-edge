@@ -1,7 +1,13 @@
-.PHONY: up down up-all down-all build logs ps restart edgex-up edgex-down sh
+.PHONY: up down up-all down-all build logs ps restart edgex-up edgex-down sh new-project
 
 COMPOSE       := docker compose -f docker-compose.yml
 COMPOSE_FULL  := docker compose -f docker-compose.yml -f docker-compose.edgex.yml
+
+## Bootstrap a new target project from templates/target-project/
+## (extension points design, to-do.txt 2026-07-29 "Фаза В") - see
+## docs/CREATING_A_TARGET_PROJECT.md.
+new-project:
+	@sh scripts/new-project.sh
 
 ## Platform services only (postgres, redis, rabbitmq, orchestrator, api, ui)
 up:
