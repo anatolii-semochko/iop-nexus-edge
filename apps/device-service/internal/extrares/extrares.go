@@ -60,16 +60,30 @@ func mergeInto(srcDir, dstDir string) error {
 		}
 
 		dst := filepath.Join(dstDir, entry.Name())
-		if _, err := os.Lstat(dst); err == nil {
+		src, err := filepath.Abs(filepath.Join(srcDir, entry.Name()))
+		if err != nil {
+			return err
+		}
+
+		if existing, err := os.Readlink(dst); err == nil {
+			// Already a symlink from a previous run of this same function
+			// (docker compose restart reuses the container's filesystem,
+			// unlike a fresh `up` - Merge() runs again on every process
+			// start, found live 2026-07-29). Same source - already
+			// correctly merged, nothing to do. Different source - a real
+			// collision (two different EXTRA_RES_DIR entries want the same
+			// filename), still fails loudly.
+			if existing == src {
+				continue
+			}
+			return fmt.Errorf("%s already symlinked to %s, not %s (built-in vs extra name collision)", dst, existing, src)
+		} else if _, err := os.Lstat(dst); err == nil {
+			// Exists but isn't a symlink at all - a real built-in file.
 			return fmt.Errorf("%s already exists (built-in vs extra name collision)", dst)
 		} else if !os.IsNotExist(err) {
 			return err
 		}
 
-		src, err := filepath.Abs(filepath.Join(srcDir, entry.Name()))
-		if err != nil {
-			return err
-		}
 		if err := os.Symlink(src, dst); err != nil {
 			return err
 		}

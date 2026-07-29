@@ -3,23 +3,22 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { apiClient, type ProcessRecord } from "./apiClient.js";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
+import { loadProcessPlugins } from "./processPlugins.js";
 import { runActiveBuzzer } from "./processes/activeBuzzer.js";
 import { runHeartbeatControl } from "./processes/heartbeatControl.js";
 import { runHeartbeatControlTest } from "./processes/heartbeatControlTest.js";
 import { runResourceMonitor } from "./processes/resourceMonitor.js";
-import { runTemperatureControl } from "./processes/temperatureControl.js";
-import { runTemperatureMonitor } from "./processes/temperatureMonitor.js";
 import { processRegistry } from "./processRegistry.js";
 import { TICK_INTERVAL_MS } from "./tickInterval.js";
 
 // Built-in process kinds (AGENTS.md section 10) - registered through the
 // same processRegistry a target-project plugin would use (extension
-// points design, to-do.txt 2026-07-28). A target project registers its
-// own kinds via the exported `processRegistry` before calling
-// startOrchestrator() - this call only ever adds the built-in six.
+// points design, to-do.txt 2026-07-28/29). temperature-control/
+// temperature-monitor moved out (to-do.txt 2026-07-29 "chistiy proekt"
+// decision) - they were always a demo assembly on top of the example
+// Library devices, not a base system capability; nexus-edge-smart-house
+// now owns that recipe as its own process plugin (see processPlugins.ts).
 function registerBuiltinProcessKinds(): void {
-  processRegistry.register("temperature-control", runTemperatureControl);
-  processRegistry.register("temperature-monitor", runTemperatureMonitor);
   processRegistry.register("resource-monitor", runResourceMonitor);
   processRegistry.register("active-buzzer", runActiveBuzzer);
   processRegistry.register("heartbeat-control", runHeartbeatControl);
@@ -72,6 +71,7 @@ async function tick(): Promise<void> {
  */
 export async function startOrchestrator(): Promise<FastifyInstance> {
   registerBuiltinProcessKinds();
+  await loadProcessPlugins();
 
   setInterval(() => {
     void tick();

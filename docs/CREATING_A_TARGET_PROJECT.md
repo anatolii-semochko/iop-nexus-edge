@@ -96,7 +96,34 @@ without a build step. Reuse the already-registered Device API through
 `apps/api`'s internal modules aren't exposed through its `package.json`
 `exports` (only the `startApiServer()` factory is).
 
-## 6. UI extension point (build-time - only if you need a custom control)
+## 6. Process plugins (custom process kinds - only if a device needs active control logic)
+
+Skip this section if your DNPs are all passive (sensors, or actuators
+only ever written from the UI/API directly) - a device with no process
+watching it still works fine.
+
+- `apps/orchestrator`'s `EXTRA_PROCESS_PLUGINS_DIR` (env, mounted
+  read-only, same pattern as `EXTRA_API_PLUGINS_DIR`) is scanned for any
+  `plugins/<name>/process.ts`. Default export:
+  `(register, { apiClient, logger }) => void` - call
+  `register(kind, runnerFn)` once per kind this file owns.
+  Dependencies come in as plain function arguments (same reasoning as
+  `api.ts`'s `app` argument) - don't `import` anything from
+  `@nexus-edge/orchestrator` inside this file, it doesn't need to.
+- `nexus-edge-smart-house/plugins/temperature-control/process.ts` is the
+  worked example - moved there wholesale from `nexus-edge`'s own
+  `apps/orchestrator` (to-do.txt 2026-07-29), the first real DNP-plus-
+  process "recipe": a Node + role-mapped Devices (sensor/heater/cooler)
+  + two process kinds (`temperature-control`, `temperature-monitor`)
+  driving them via `apiClient.setDeviceAuto()`. Copy and rename
+  (device names/ids, min/max, sensor role) to build your own version of
+  the same pattern rather than starting from scratch - the underlying
+  Device *types* (temperature/heater/cooler/switch) already exist in
+  `nexus-edge`'s own Library (`devices/nodes/example-thermal-node/`);
+  only the specific instance wiring + process logic is what you're
+  copying.
+
+## 7. UI extension point (build-time - only if you need a custom control)
 
 A device without a custom `ui/register.js` still shows up automatically
 in the generic Devices/DevSimulator pages - **skip this section
@@ -131,16 +158,17 @@ apply once one exists.
 
 ## Known gaps (not blockers, just be aware)
 
-- `nexus-edge`'s own Postgres migrations are one undivided sequence -
-  they include its demo/smoke-test fixtures (`light-regulator-01`,
-  `active-buzzer-01`, `example-thermal-node`'s four devices, six demo
-  processes), which any target project inherits unconditionally along
-  with the real schema. Revisit if this ever needs to not be the case
-  (separate schema-only migrations from demo-seed migrations).
+- ~~`nexus-edge`'s own Postgres migrations bundle demo/smoke-test
+  fixtures unconditionally~~ - fixed 2026-07-29: gated behind
+  `SEED_DEMO_FIXTURES` (unset/false by default, `nexus-edge`'s own local
+  `.env` sets it `true`). A fresh target project's database has zero
+  devices/nodes and exactly two processes (`resource-monitor`,
+  `heartbeat-control`) unless you seed your own, same as
+  `nexus-edge-smart-house/migrations/001_seed_motion_sensor.sql` does.
 - No `file:`/`workspace:` npm dependency on `@nexus-edge/*` is needed for
-  anything in this checklist - every extension point here is env/
-  directory-driven at runtime or build-time-glob-driven, not a
-  TypeScript import. A real npm link becomes necessary only for a
-  custom **process kind** (needs `processRegistry` from
-  `@nexus-edge/orchestrator`) or if a plugin's own code needs to import
-  something from `@nexus-edge/api` beyond what `app.inject()` can reach.
+  **anything** in this checklist, including a custom process kind
+  (section 6) - every extension point here is env/directory-driven at
+  runtime or build-time-glob-driven, not a TypeScript import. A real npm
+  `file:` link on `@nexus-edge/orchestrator` (its `processRegistry`
+  export) remains possible if a target project specifically wants
+  tighter integration, but nothing here requires it.

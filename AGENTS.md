@@ -678,13 +678,14 @@ registry, Redis is live state that changes every tick):
   (controllable|permanent), kind, actions text[], device_id, config jsonb`.
   `group_id` references `process_groups` (id, name) - a real, independently
   manageable entity, not a free-text column (section 19). `kind` is a
-  discriminator (e.g. `temperature-control`,
-  `temperature-monitor`) selecting which control-loop function
-  `apps/orchestrator` runs for it — not a generic plugin system yet (that's
-  future work per section 4's "plugin lifecycle"), just a fixed
-  `Record<kind, runner>` map (`apps/orchestrator/src/index.ts`).
+  discriminator (e.g. `resource-monitor`, `heartbeat-control`) selecting
+  which control-loop function `apps/orchestrator` runs for it —
+  `processRegistry` (a `Map<kind, runner>`, `src/processRegistry.ts`),
+  populated by built-ins in `src/server.ts`'s `registerBuiltinProcessKinds()`
+  and by a target project's own process plugins (`src/processPlugins.ts`,
+  section 31's extension points) - not a fixed object literal any more.
   `config` is loose jsonb like `devices.capabilities` — shape depends on
-  `kind`; today just `{min, max}` for the temperature-\* kinds.
+  `kind`.
 - Live state — **Redis**, in `apps/api/src/processRegistry.ts` (mirrors
   `dualDevicesModel.ts` in spirit, though its own storage shape changed in
   section 24): one hash per process, `process:{id}:public`, fields
@@ -713,6 +714,21 @@ merged in, like `GET /devices` does for EdgeX state), `PATCH
 general concept but nothing uses them yet), `POST /processes/:id/critical`
 (orchestrator-only — there is no "make critical" button in the UI).
 
+**Temperature Control / Temperature Safety Monitor - moved to
+nexus-edge-smart-house (to-do.txt 2026-07-29 "chistiy proekt" decision).**
+This repo's own `apps/orchestrator` no longer registers these kinds - the
+seed migrations below are still present in this repo's history (gated
+behind `SEED_DEMO_FIXTURES`, section 31) but the process CODE itself now
+lives as `nexus-edge-smart-house/plugins/temperature-control/process.ts`,
+the first real worked example of the process-plugin extension point.
+Kept below (paths updated in-place where it matters) since the
+*patterns* it illustrates - `sensorDeviceId`/`heaterDeviceId`/
+`coolerDeviceId` role config, the on→off edge tracked in an in-memory
+`Map`, the independent-safety-monitor shape, `linkedProcessIds` removal,
+WEM producer wiring - are still exactly how a real process plugin looks
+and behaves, just no longer bundled into this repo's own orchestrator by
+default.
+
 **The two seeded processes** (`apps/api/migrations/
 ..._seed-temperature-control-processes.ts`), group "Temperature Control".
 Originally both against one bundled `example-virtual-sensor-01` device
@@ -735,8 +751,8 @@ Device on one Node (`example-thermal-node-01`:
    is genuinely that background computation, not something to debounce).
    While `off`: does nothing further, **except once, exactly on the
    on→off transition** (tracked in an in-memory `Map` in
-   `apps/orchestrator/src/processes/temperatureControl.ts` — resets on
-   restart, which is fine, nothing here needs to survive one), where it
+   `nexus-edge-smart-house/plugins/temperature-control/process.ts` — resets
+   on restart, which is fine, nothing here needs to survive one), where it
    forces both actuators off — confirmed live: pushed temperature above
    `max` (`Cooler` turned on), flipped the process `OFF` (`Cooler` forced
    back to `false`), flipped back `ON`.
@@ -2887,13 +2903,31 @@ and device UI without modifying or forking this repo. Built-in
 (Library) DNPs use the exact same mechanism a private plugin would - no
 special-casing "official" vs "private" anywhere below.
 
-- **`apps/orchestrator`'s `processRegistry`** (`src/processRegistry.ts`)
-  - `register(kind, runner)`/`get(kind)`, a `Map` under a small API,
-    replacing the old static `RUNNERS` object literal. Built-in kinds
-    register via `registerBuiltinProcessKinds()` inside the exported
-    `startOrchestrator()` factory (`src/server.ts`); a target project's
-    own process registers into the same `processRegistry` before calling
-    `startOrchestrator()`.
+- **`apps/orchestrator`'s process-plugin loader** (`src/processPlugins.ts`,
+  `loadProcessPlugins()`) - same runtime directory-scan pattern as
+  `apiPlugins.ts` below: scans `EXTRA_PROCESS_PLUGINS_DIR` (env, a target
+  project's own `plugins/`, mounted read-only) for any `process.ts` file,
+  dynamic-imported directly (no build step, same Node 22 native
+  TypeScript stripping). A file's default export is `(register, {
+  apiClient, logger }) => void` - deliberately receiving its dependencies
+  as plain function arguments rather than importing them from
+  `@nexus-edge/orchestrator`, the same reason `apiPlugins.ts`'s Fastify
+  plugins receive `app` as an argument: it sidesteps Node module
+  resolution ever needing to find that package from an arbitrary mounted
+  file path. `register(kind, runner)` forwards straight into
+  `processRegistry` (`src/processRegistry.ts` - `register(kind, runner)`/
+  `get(kind)`, a `Map` under a small API), the same one
+  `registerBuiltinProcessKinds()` (`src/server.ts`) populates for the
+  built-in kinds - `loadProcessPlugins()` runs right after it, inside
+  `startOrchestrator()`. `nexus-edge-smart-house/plugins/
+  temperature-control/process.ts` is the first real worked example
+  (moved out of this repo's own orchestrator entirely - see this
+  section's note in section 10). `processRegistry` is still exported via
+  `package.json` (`./processRegistry`, a real `file:` npm dependency
+  would work too, for a target project wanting tighter integration) but
+  the plugin loader above is the recommended path - it needs no
+  npm package/Dockerfile of the target project's own, matching every
+  other extension point's low ceremony.
 - **`apps/ui`'s `deviceTypeRegistry`** (`src/deviceTypeRegistry.js`) -
   plain objects `deviceControls`/`deviceSimulators`, written to via
   `registerControl`/`registerSimulator`, read via bracket access

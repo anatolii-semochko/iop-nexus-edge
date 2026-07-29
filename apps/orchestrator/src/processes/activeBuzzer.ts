@@ -4,8 +4,9 @@
 // platform's first sound-output process, others to follow later (some
 // controllable, some not, per the user's own stated direction). Runs once
 // per tick (1s, same as every other process kind) while "on"; while "off"
-// it forces the buzzer silent, same on->off edge handling as
-// temperatureControl.ts.
+// it forces the buzzer silent, same on->off edge handling the
+// temperature-control process plugin uses (moved to
+// nexus-edge-smart-house, to-do.txt 2026-07-29).
 //
 // `constant` mode needs no timer at all - the buzzer is simply held true
 // for as long as the condition (and this process) stays on. `shortBeep`/
