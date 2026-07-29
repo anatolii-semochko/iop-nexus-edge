@@ -15,8 +15,25 @@ import type { MigrationBuilder } from "node-pg-migrate";
 // A new migration rather than editing 007/031/033/034 in place - this
 // session's established discipline (to-do.txt) never edits an
 // already-applied migration.
+//
+// EDITED same day after landing (exception to the rule above, not a
+// second violation of it): the original `WHERE kind IN (...)` matched
+// ANY process using these kind strings, not just nexus-edge's own -
+// caught live deleting nexus-edge-smart-house's legitimate "Living Room
+// Temperature Control"/"...Monitor" rows (same kind, different name/
+// node - the kind string is a process-plugin dispatch key, shared by
+// design, AGENTS.md section 31). Scoped to the specific node this
+// repo's own migration 031 created instead - a target project's own
+// same-kind processes on their own node are never touched. Restored
+// nexus-edge-smart-house's deleted rows by re-running its own
+// migrate-extra (idempotent WHERE NOT EXISTS guard, migrations/
+// 002_seed_living_room_thermal.sql) after this fix landed.
 export const up = (pgm: MigrationBuilder): void => {
-  pgm.sql(`DELETE FROM processes WHERE kind IN ('temperature-control', 'temperature-monitor')`);
+  pgm.sql(`
+    DELETE FROM processes
+    WHERE kind IN ('temperature-control', 'temperature-monitor')
+      AND node_id = (SELECT id FROM nodes WHERE name = 'example-thermal-node-01')
+  `);
   pgm.sql(`
     DELETE FROM devices
     WHERE name IN ('example-temperature-01', 'example-heater-01', 'example-cooler-01', 'example-switch-01')
