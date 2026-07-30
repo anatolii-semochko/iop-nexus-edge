@@ -30,11 +30,11 @@ export default defineConfig(() => {
           find: 'devices/',
           replacement: `${path.resolve(__dirname, '../../devices')}/`,
         },
-        // Extension points (to-do.txt 2026-07-28) - lets
+        // Extension points (AGENTS_TO_DO.md 2026-07-28) - lets
         // pluginDeviceTypes.js's import.meta.glob('plugins/*/ui/
         // register.js', ...) reach a target project's own plugins/,
         // same convention as devices/ above. Verified live (spike,
-        // to-do.txt) that import.meta.glob resolves through a custom
+        // AGENTS_TO_DO.md) that import.meta.glob resolves through a custom
         // alias the same way a static import does.
         {
           find: 'plugins/',

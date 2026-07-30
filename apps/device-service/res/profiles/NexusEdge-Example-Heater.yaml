@@ -1,5 +1,5 @@
 # Smoke-test / demo profile only. Split out of the old bundled
-# NexusEdge-Example-Virtual profile (to-do.txt's 2026-07-27 Device/Node
+# NexusEdge-Example-Virtual profile (AGENTS_TO_DO.md's 2026-07-27 Device/Node
 # refactor) - one atomic Device, one relay. Paired with
 # NexusEdge-Example-Cooler on the same Node (example-thermal-node-01) -
 # the Devices API forbids both being active at once at the Node level

@@ -30,7 +30,7 @@ required to develop or demo against.
 
 This is a working vertical slice, not a scaffold — every item below runs
 end-to-end today, verified live in a running container stack (see
-`to-do.txt` for the full, dated build log):
+`../AGENTS_TO_DO.md` for the full, dated build log):
 
 - **EdgeX Foundry integration** (Palau 4.0.2) with a **custom Go
   device-service** (`apps/device-service`) written against the EdgeX
@@ -143,9 +143,10 @@ architecture/vision document, kept for historical context and flagged
 where it's since diverged. Read in that order for, respectively: *what
 happened and why*, *how it works*, and *where it started from*.
 
-(The project is also steered day-to-day in `to-do.txt`, a local,
-gitignored working journal in Ukrainian - not part of this repository's
-git history, mentioned here only so its absence from a clone isn't a
+(The project is also steered day-to-day in `../AGENTS_TO_DO.md`, a
+local, gitignored working journal in Ukrainian one level up - shared by
+this repo and its sibling target-project repos, not part of any of their
+git histories, mentioned here only so its absence from a clone isn't a
 surprise.)
 
 ## License

@@ -6,7 +6,7 @@
 //
 // Rules are declared per node in `nodes.forbidden` (Postgres) - see
 // apps/api/migrations. Scoped to a Node, not a Device, since a Device is
-// atomic now (to-do.txt's 2026-07-27 Device/Node refactor) - a rule like
+// atomic now (AGENTS_TO_DO.md's 2026-07-27 Device/Node refactor) - a rule like
 // "Heater and Cooler must never both be active" is a property of the
 // physical assembly they're both mounted on, not of either Device in
 // isolation. `device` here is a device *name*, resolved within the same

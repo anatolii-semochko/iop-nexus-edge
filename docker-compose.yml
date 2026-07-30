@@ -26,7 +26,7 @@ services:
       # separation POSTGRES_PORT/POSTGRES_HOST_PORT already have below.
       # Host-side debug port only; reusing REDIS_PORT for both broke
       # nexus-edge-smart-house's EdgeX connection the same way
-      # (to-do.txt 2026-07-28).
+      # (AGENTS_TO_DO.md 2026-07-28).
       - "127.0.0.1:${REDIS_HOST_PORT}:6379"
     volumes:
       - redis-data:/data

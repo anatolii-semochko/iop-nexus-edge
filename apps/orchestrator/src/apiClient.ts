@@ -34,7 +34,7 @@ export interface ProcessRecord {
     ramWarnMax?: number;
     diskWarnMax?: number;
     // temperature-control/temperature-monitor role -> deviceId mapping
-    // (to-do.txt's 2026-07-27 Device/Node refactor, roadmap Phase 4.1) - a
+    // (AGENTS_TO_DO.md's 2026-07-27 Device/Node refactor, roadmap Phase 4.1) - a
     // single `device_id` above no longer says enough once the sensor and
     // its two actuators are three separate atomic Devices, not one bundled
     // one with three named resources.
@@ -69,7 +69,7 @@ export interface ProcessRecord {
 
 // Mirrors apps/api's heartbeatControl.ts shape exactly (AGENTS.md's
 // Heartbeating Control section) - no shared types package exists yet
-// (to-do.txt's refactoring notes, Etap 1/Phase 2) so this is hand-kept in
+// (AGENTS_TO_DO.md's refactoring notes, Etap 1/Phase 2) so this is hand-kept in
 // sync, same known risk as every other cross-service DTO in this app.
 export interface HeartbeatThreshold {
   numberSkippedTicks: number;
@@ -100,7 +100,7 @@ export interface MessageInput {
 // syncActiveMessages there for what each mode means.
 export type AutoResolveMode = "always" | "when-hidden" | "never";
 
-// A Device is atomic now (to-do.txt's 2026-07-27 Device/Node refactor) -
+// A Device is atomic now (AGENTS_TO_DO.md's 2026-07-27 Device/Node refactor) -
 // exactly one value, not a map of named resources.
 export interface DeviceRecord {
   id: number;

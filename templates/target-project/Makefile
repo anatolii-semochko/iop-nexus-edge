@@ -3,7 +3,7 @@
 COMPOSE       := docker compose -f docker-compose.yml
 COMPOSE_FULL  := docker compose -f docker-compose.yml -f docker-compose.edgex.yml
 
-# Version check (Фаза В extension points design, nexus-edge to-do.txt
+# Version check (Фаза В extension points design, nexus-edge AGENTS_TO_DO.md
 # 2026-07-29) - simple exact-version comparison, warns and continues
 # rather than blocking. Deliberately not a semver-range compatibility
 # check - premature without more than one real target project to learn

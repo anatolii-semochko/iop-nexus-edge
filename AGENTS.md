@@ -277,7 +277,7 @@ Virtual Node Runtime.
 
 **Implementation status**: the Redis-backed state described above exists
 now (`apps/api/src/dualDevicesModel.ts`), keyed **per device**, not per
-(device, resource) - a `to-do.txt`-documented correction from 2026-07-28
+(device, resource) - a `AGENTS_TO_DO.md`-documented correction from 2026-07-28
 (see section 30). The original design generalized this to `(device,
 resource)`, reasoning that "a single-purpose device is just the case where
 it happens to have one resource" - that framing had the entity boundary
@@ -715,7 +715,7 @@ general concept but nothing uses them yet), `POST /processes/:id/critical`
 (orchestrator-only — there is no "make critical" button in the UI).
 
 **Temperature Control / Temperature Safety Monitor - moved to
-nexus-edge-smart-house (to-do.txt 2026-07-29 "chistiy proekt" decision).**
+nexus-edge-smart-house (AGENTS_TO_DO.md 2026-07-29 "chistiy proekt" decision).**
 This repo's own `apps/orchestrator` no longer registers these kinds - the
 seed migrations below are still present in this repo's history (gated
 behind `SEED_DEMO_FIXTURES`, section 31) but the process CODE itself now
@@ -2422,7 +2422,7 @@ through the same WEM/`message_levels` pipeline every other alarm already
 uses. Built after an explicit discussion with the user distinguishing
 "not yet built" (this, and its planned siblings - command-path auth,
 Redis/EdgeX reconciliation) from "wrong at the root" (nothing found -
-see to-do.txt's refactoring notes) - heartbeating was already on the
+see AGENTS_TO_DO.md's refactoring notes) - heartbeating was already on the
 user's own roadmap, pulled forward as a real design/build pass.
 
 ### Config vs runtime split

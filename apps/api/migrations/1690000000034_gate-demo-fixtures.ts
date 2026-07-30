@@ -1,6 +1,6 @@
 import type { MigrationBuilder } from "node-pg-migrate";
 
-// "Chistiy proekt" decision (to-do.txt 2026-07-29). Device TYPES
+// "Chistiy proekt" decision (AGENTS_TO_DO.md 2026-07-29). Device TYPES
 // (light-regulator, active-buzzer, temperature/heater/cooler/switch)
 // stay in the public Library (devices/) either way - only the specific
 // PROVISIONED INSTANCES these earlier migrations (005, 023-024, 031,

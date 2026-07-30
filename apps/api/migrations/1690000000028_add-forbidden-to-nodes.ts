@@ -1,7 +1,7 @@
 import type { MigrationBuilder } from "node-pg-migrate";
 
 // Model State Validator forbidden-rules move here from devices.capabilities
-// (to-do.txt's 2026-07-27 Device/Node refactor, Proposal A) - now that a
+// (AGENTS_TO_DO.md's 2026-07-27 Device/Node refactor, Proposal A) - now that a
 // Device is atomic (one value, no bundled resources), a rule like "Heater
 // and Cooler must never both be active" is a property of the physical
 // assembly they're both mounted on (the Node), not of either Device in

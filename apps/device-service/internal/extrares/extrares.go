@@ -1,5 +1,5 @@
 // Package extrares merges an optional extra profiles/devices directory
-// (EXTRA_RES_DIR, extension points design - to-do.txt 2026-07-28) into
+// (EXTRA_RES_DIR, extension points design - AGENTS_TO_DO.md 2026-07-28) into
 // this service's own ./res/profiles and ./res/devices before the EdgeX
 // SDK's startup.Bootstrap runs.
 //

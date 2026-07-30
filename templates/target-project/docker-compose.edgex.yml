@@ -196,7 +196,7 @@ services:
   # nexus-edge's own device-service, reused via build context (not an
   # npm dependency - Go binaries aren't consumed that way). EXTRA_RES_DIR
   # + the volume mount is this project's own private DNPs (extension
-  # points design, nexus-edge to-do.txt 2026-07-28) - merged into
+  # points design, nexus-edge AGENTS_TO_DO.md 2026-07-28) - merged into
   # res/profiles+res/devices at container start (internal/extrares),
   # alongside nexus-edge's own baked-in Library fixtures. Empty
   # extra-res/ at generation time is fine - a no-op until you add one.

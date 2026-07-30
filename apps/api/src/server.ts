@@ -24,7 +24,7 @@ import { userRoutes } from "./routes/users.js";
 
 /**
  * Builds, wires and starts the whole API service - the "nexus-edge as a
- * dependency" entrypoint (extension points design, to-do.txt
+ * dependency" entrypoint (extension points design, AGENTS_TO_DO.md
  * 2026-07-28): a target project's own process imports and calls this
  * directly instead of running this app's own index.ts. Built-in routes,
  * command-API extension points (apiPlugins.ts - Library then private,
@@ -65,7 +65,7 @@ export async function startApiServer(): Promise<FastifyInstance> {
   await app.register(messageLevelRoutes);
   await app.register(logRoutes);
 
-  // Command-API extension points (extension points design, to-do.txt
+  // Command-API extension points (extension points design, AGENTS_TO_DO.md
   // 2026-07-28) - Library and private DNP api.ts plugins, registered after
   // every built-in route so a plugin can't accidentally shadow one.
   await loadApiPlugins(app);

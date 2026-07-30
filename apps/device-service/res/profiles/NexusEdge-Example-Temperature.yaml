@@ -1,7 +1,7 @@
 # Smoke-test / demo profile only - not a "real" device type built for a
 # target project. Split out of the old bundled NexusEdge-Example-Virtual
 # profile (Switch/Temperature/Heater/Cooler forced into one EdgeX device)
-# into one atomic Device per physical part - see to-do.txt's 2026-07-27
+# into one atomic Device per physical part - see AGENTS_TO_DO.md's 2026-07-27
 # Device/Node refactor. Exercises the Virtual Node Runtime end-to-end,
 # same as before.
 apiVersion: "v2"

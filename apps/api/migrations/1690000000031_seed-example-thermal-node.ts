@@ -2,7 +2,7 @@ import type { MigrationBuilder } from "node-pg-migrate";
 
 // Replaces the smoke-test example-virtual-sensor-01 (one Postgres devices
 // row bundling four unrelated atomic devices - a sensor and three relays -
-// as "resources") with the corrected model (to-do.txt's 2026-07-27
+// as "resources") with the corrected model (AGENTS_TO_DO.md's 2026-07-27
 // Device/Node refactor): one Node row + four separate atomic Device rows,
 // matching the four separate EdgeX devices migration ...Phase 1 already
 // registered (apps/device-service/res/devices/example-devices.yaml).

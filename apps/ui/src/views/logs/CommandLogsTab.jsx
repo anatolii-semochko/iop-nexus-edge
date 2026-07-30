@@ -29,7 +29,7 @@ const formatValue = (value) => (value === null || value === undefined ? '-' : St
 
 /**
  * Logs page (AGENTS.md section 29) - commands tab. Read side of
- * `log_command` (renamed from `device_command_logs`, to-do.txt's
+ * `log_command` (renamed from `device_command_logs`, AGENTS_TO_DO.md's
  * 2026-07-27 Device/Node refactor), which had no query surface at all
  * before section 29 (write-only, commandLog.ts's own logCommand).
  * Historical/append-only, no per-row interaction - a straight audit

@@ -58,7 +58,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      # Extension points (extension points design, nexus-edge to-do.txt
+      # Extension points (extension points design, nexus-edge AGENTS_TO_DO.md
       # 2026-07-29) - processPlugins.ts scans this for this project's
       # own process kinds (plugins/<name>/process.ts). Empty plugins/ at
       # generation time is fine - a no-op until you add one.
@@ -82,7 +82,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      # Extension points (extension points design, nexus-edge to-do.txt
+      # Extension points (extension points design, nexus-edge AGENTS_TO_DO.md
       # 2026-07-28) - apiPlugins.ts scans this in addition to the
       # Library (devices/, baked into the nexus-edge image).
       EXTRA_API_PLUGINS_DIR: /workspace/plugins
@@ -154,7 +154,7 @@ services:
       - __SLUG__-network
 
   # Own Dockerfile + build context (extension points design, nexus-edge
-  # to-do.txt 2026-07-28/29) - see apps/ui/Dockerfile's header comment
+  # AGENTS_TO_DO.md 2026-07-28/29) - see apps/ui/Dockerfile's header comment
   # for why this one service can't reuse nexus-edge's Dockerfile
   # unmodified the way api/orchestrator/device-service do.
   # additional_contexts (not a shared parent context) is what lets

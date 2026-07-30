@@ -24,7 +24,7 @@ const LabeledIndicator = ({ active, color, label }) => (
  * Temperature override in Dev Simulator.
  *
  * The sensor and its two actuators are three separate atomic Devices on
- * the same Node now (to-do.txt's 2026-07-27 Device/Node refactor) -
+ * the same Node now (AGENTS_TO_DO.md's 2026-07-27 Device/Node refactor) -
  * `process.config`'s sensorDeviceId/heaterDeviceId/coolerDeviceId is the
  * role -> deviceId mapping this panel reads, not a single `process.
  * device_id` with three named resources.

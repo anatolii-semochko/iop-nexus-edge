@@ -1,6 +1,6 @@
 import type { MigrationBuilder } from "node-pg-migrate";
 
-// Contextual reference (to-do.txt's 2026-07-27 Device/Node refactor,
+// Contextual reference (AGENTS_TO_DO.md's 2026-07-27 Device/Node refactor,
 // roadmap Phase 2.4) for a process whose devices span an entire Node
 // (e.g. Temperature Control, which will drive several separate atomic
 // Devices on the same node once Phase 4 lands) - for UI/grouping display

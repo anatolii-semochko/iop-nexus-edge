@@ -7,7 +7,7 @@ import type { FastifyInstance } from "fastify";
 import { config } from "./config.js";
 
 /**
- * Command-API extension points (extension points design, to-do.txt
+ * Command-API extension points (extension points design, AGENTS_TO_DO.md
  * 2026-07-28). A DNP folder (devices/standalone/<type>/,
  * devices/nodes/<node-type>/devices/<type>/, or a target project's own
  * plugins/<name>/) MAY carry one api.ts, needed only when the generic

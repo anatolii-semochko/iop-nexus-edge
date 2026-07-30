@@ -1,7 +1,7 @@
 // device.type -> its own ui/control and ui/simulator component (AGENTS.md
 // section 7). Built-in types (see builtinDeviceTypes.js) register through
 // the exact same register* calls a target-project plugin would use -
-// extension points design, to-do.txt 2026-07-28 - no special-casing for
+// extension points design, AGENTS_TO_DO.md 2026-07-28 - no special-casing for
 // "official" types.
 //
 // Plain objects, read via bracket access (deviceControls[type]) rather

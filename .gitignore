@@ -1,6 +1,3 @@
-to-do.txt
-to-do-archive*.txt
-
 # local IDE / tooling settings
 .idea/
 .claude/

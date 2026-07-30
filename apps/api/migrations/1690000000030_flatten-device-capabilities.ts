@@ -1,6 +1,6 @@
 import type { MigrationBuilder } from "node-pg-migrate";
 
-// devices.capabilities drops its "resources" array wrapper (to-do.txt's
+// devices.capabilities drops its "resources" array wrapper (AGENTS_TO_DO.md's
 // 2026-07-27 Device/Node refactor, roadmap Phase 2.1) - a Device is atomic
 // now (one value), so "0 or 1 resource" collapses to a flat object
 // directly on the row instead of an array of length 0/1. `forbidden`

@@ -9,9 +9,11 @@ reference - trust it over this log if the two ever disagree) and in git
 history/commit messages. This file exists so the reasoning behind a
 decision doesn't have to be re-derived or re-asked for later.
 
-Distilled from the project's own working journal (`to-do.txt`, gitignored,
-Ukrainian) - see that file for the full unfiltered back-and-forth if more
-context on a specific exchange is ever needed.
+Distilled from the project's own working journal (`../AGENTS_TO_DO.md`,
+one level up, gitignored, Ukrainian) - see that file (and its linked
+`archive-development/AGENTS_DEV_*.md` chronology) for the full
+unfiltered back-and-forth if more context on a specific exchange is ever
+needed.
 
 ## 2026-07-22 - Project scaffold
 
@@ -353,7 +355,7 @@ own.
 With the first hardware order placed but not yet arrived, and a
 significant amount of iterative rework behind the project, a deliberate
 four-stage refactor was started: analyze, discuss, plan, execute
-(mirroring `to-do.txt`'s own structure). The architecture audit
+(mirroring `AGENTS_TO_DO.md`'s own structure). The architecture audit
 (read directly, verified by running the actual tools, not guessed)
 turned up several real, previously-unnoticed gaps:
 

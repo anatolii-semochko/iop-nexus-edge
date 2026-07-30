@@ -1,7 +1,9 @@
 # Creating a target project on nexus-edge
 
 Bootstrapping a new project on top of nexus-edge (Core+Base) - see
-`to-do.txt`'s extension points design (2026-07-28/29) for the reasoning
+`../AGENTS_TO_DO.md` (specifically
+`../archive-development/AGENTS_DEV_extensibility-and-target-projects.md`)
+for the extension points design (2026-07-28/29) and the reasoning
 behind each piece. `../nexus-edge-smart-house` (sibling repo) is the
 reference example with real content (a private DNP, a command route, a
 process plugin, a UI control) - read it to see the pieces below actually
@@ -42,7 +44,7 @@ mechanics**: every port that gets a `ports:` mapping in either compose
 file must differ from `nexus-edge`'s own dev stack and from any other
 target project running on the same machine - the generated `.env` ships
 with `nexus-edge-smart-house`'s own port numbers as a starting point,
-**not scanned for actual collisions** (Пропозиція Е, to-do.txt
+**not scanned for actual collisions** (Пропозиція Е, AGENTS_TO_DO.md
 2026-07-29 - deliberately out of scope). Check `docker ps` and adjust
 before `make up-all` if anything else is already running.
 
@@ -104,7 +106,7 @@ watching it still works fine.
   `@nexus-edge/orchestrator` inside this file, it doesn't need to.
 - `nexus-edge-smart-house/plugins/temperature-control/process.ts` is the
   worked example - moved there wholesale from `nexus-edge`'s own
-  `apps/orchestrator` (to-do.txt 2026-07-29), the first real DNP-plus-
+  `apps/orchestrator` (AGENTS_TO_DO.md 2026-07-29), the first real DNP-plus-
   process "recipe": a Node + role-mapped Devices (sensor/heater/cooler)
   + two process kinds (`temperature-control`, `temperature-monitor`)
   driving them via `apiClient.setDeviceAuto()`. Copy and rename

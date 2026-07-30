@@ -103,7 +103,7 @@ function normalizeReading(reading: EdgeXReading): EdgeXReading {
  * deviceResource/command this atomic Device's single value is called under.
  * This is purely an internal EdgeX-protocol detail the caller resolves
  * before getting here, not a re-introduction of "resource" as something a
- * client addresses directly (to-do.txt's 2026-07-27 Device/Node refactor -
+ * client addresses directly (AGENTS_TO_DO.md's 2026-07-27 Device/Node refactor -
  * every Device has exactly one value, there is no per-resource URL/state/
  * log dimension left anywhere above this module).
  */

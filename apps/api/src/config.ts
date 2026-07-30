@@ -57,7 +57,7 @@ export const config = {
   processState: {
     broadcastIntervalMs: Number(process.env.PROCESS_STATE_BROADCAST_INTERVAL_MS ?? 5000),
   },
-  // Command-API extension points (extension points design, to-do.txt
+  // Command-API extension points (extension points design, AGENTS_TO_DO.md
   // 2026-07-28) - both scanned for api.ts plugin files by apiPlugins.ts,
   // Library first then private. builtinDevicesDir has no consumers yet
   // (zero api.ts today) but is always scanned - see apiPlugins.ts.

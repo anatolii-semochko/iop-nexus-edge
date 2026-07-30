@@ -1,4 +1,4 @@
-// Extension points (to-do.txt 2026-07-28) - build-time equivalent of
+// Extension points (AGENTS_TO_DO.md 2026-07-28) - build-time equivalent of
 // apiPlugins.ts's runtime directory scan. A Vite/React bundle can't
 // dynamically import an arbitrary file at runtime the way Node can
 // (everything ships as one static bundle), so plugin UI registration

@@ -8,7 +8,7 @@ import { logger } from "./logger.js";
 import { processRegistry, type ProcessRunner } from "./processRegistry.js";
 
 /**
- * Extension points (to-do.txt 2026-07-29) - a target project's own
+ * Extension points (AGENTS_TO_DO.md 2026-07-29) - a target project's own
  * process kind, loaded from EXTRA_PROCESS_PLUGINS_DIR (env, a mounted
  * directory - unset here, nothing to scan for this repo's own
  * docker-compose). Same mechanism as apps/api's apiPlugins.ts: Node 22

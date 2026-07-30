@@ -4,7 +4,7 @@ COMPOSE       := docker compose -f docker-compose.yml
 COMPOSE_FULL  := docker compose -f docker-compose.yml -f docker-compose.edgex.yml
 
 ## Bootstrap a new target project from templates/target-project/
-## (extension points design, to-do.txt 2026-07-29 "Фаза В") - see
+## (extension points design, AGENTS_TO_DO.md 2026-07-29 "Фаза В") - see
 ## docs/CREATING_A_TARGET_PROJECT.md.
 new-project:
 	@sh scripts/new-project.sh

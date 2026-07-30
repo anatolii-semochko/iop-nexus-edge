@@ -2,7 +2,7 @@
 # scan/env-driven, nexus-edge's own Dockerfile reused unmodified), the
 # UI can't load a plugin at runtime - Vite bundles everything into one
 # static JS file at build time. This project's own Dockerfile is
-# required (extension points design, to-do.txt 2026-07-28/29): the build
+# required (extension points design, AGENTS_TO_DO.md 2026-07-28/29): the build
 # needs to see BOTH nexus-edge's source AND this project's own plugins/
 # at once. Uses BuildKit's additional_contexts (docker-compose.yml's
 # "nexus-edge" named context, pointed at NEXUS_EDGE_SOURCE_PATH) rather

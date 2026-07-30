@@ -1,7 +1,7 @@
 import type { MigrationBuilder } from "node-pg-migrate";
 
 // temperature-control/temperature-monitor process CODE moved out of this
-// repo entirely (to-do.txt 2026-07-29 "chistiy proekt" Фаза Б) - unlike
+// repo entirely (AGENTS_TO_DO.md 2026-07-29 "chistiy proekt" Фаза Б) - unlike
 // light-regulator/active-buzzer/heartbeat-control-test (migration 034,
 // gated behind SEED_DEMO_FIXTURES - still genuinely usable demo fixtures
 // for this repo's own local dev, since their process/no-process code
@@ -13,7 +13,7 @@ import type { MigrationBuilder } from "node-pg-migrate";
 // unconditional, not flag-gated like migration 034's.
 //
 // A new migration rather than editing 007/031/033/034 in place - this
-// session's established discipline (to-do.txt) never edits an
+// session's established discipline (AGENTS_TO_DO.md) never edits an
 // already-applied migration.
 //
 // EDITED same day after landing (exception to the rule above, not a

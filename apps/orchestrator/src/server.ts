@@ -13,8 +13,8 @@ import { TICK_INTERVAL_MS } from "./tickInterval.js";
 
 // Built-in process kinds (AGENTS.md section 10) - registered through the
 // same processRegistry a target-project plugin would use (extension
-// points design, to-do.txt 2026-07-28/29). temperature-control/
-// temperature-monitor moved out (to-do.txt 2026-07-29 "chistiy proekt"
+// points design, AGENTS_TO_DO.md 2026-07-28/29). temperature-control/
+// temperature-monitor moved out (AGENTS_TO_DO.md 2026-07-29 "chistiy proekt"
 // decision) - they were always a demo assembly on top of the example
 // Library devices, not a base system capability; nexus-edge-smart-house
 // now owns that recipe as its own process plugin (see processPlugins.ts).
@@ -65,7 +65,7 @@ async function tick(): Promise<void> {
 /**
  * Registers the built-in process kinds, starts the tick loop and the
  * (health-check only) HTTP server - the "nexus-edge as a dependency"
- * entrypoint (extension points design, to-do.txt 2026-07-28). A target
+ * entrypoint (extension points design, AGENTS_TO_DO.md 2026-07-28). A target
  * project's own process calls processRegistry.register() for its own
  * kinds, then calls this, instead of running this app's own index.ts.
  */

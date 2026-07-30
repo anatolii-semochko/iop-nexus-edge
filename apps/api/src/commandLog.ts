@@ -1,6 +1,6 @@
 // Audit trail of every write sent through the Devices API's four mutating
 // endpoints (AGENTS.md section 22) - append-only. Table `log_command`
-// (renamed from `device_command_logs`, to-do.txt's 2026-07-27 Device/Node
+// (renamed from `device_command_logs`, AGENTS_TO_DO.md's 2026-07-27 Device/Node
 // refactor) - no `resource` column anymore: a Device is atomic, exactly
 // one value, so `device_id` alone already says what was written.
 

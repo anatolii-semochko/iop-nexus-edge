@@ -1,5 +1,5 @@
 // First real test file in the repo (AGENTS.md's refactoring notes,
-// to-do.txt Etap 1/Fаза 0) - starts with determineAlarmPlan specifically
+// AGENTS_TO_DO.md Etap 1/Fаза 0) - starts with determineAlarmPlan specifically
 // because it's pure (no I/O) and sits directly on the class of bug this
 // codebase has hit repeatedly (silent priority/precedence mistakes), not
 // because it's the only thing that could be tested.

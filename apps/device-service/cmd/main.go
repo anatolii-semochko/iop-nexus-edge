@@ -13,7 +13,7 @@ import (
 const serviceName = "device-nexus-edge"
 
 func main() {
-	// Extension points (to-do.txt 2026-07-28) - must run before Bootstrap,
+	// Extension points (AGENTS_TO_DO.md 2026-07-28) - must run before Bootstrap,
 	// which is what actually reads ./res/profiles and ./res/devices.
 	if err := extrares.Merge("./res/profiles", "./res/devices"); err != nil {
 		log.Fatalf("extrares.Merge: %v", err)

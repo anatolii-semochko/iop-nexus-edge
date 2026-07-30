@@ -46,7 +46,7 @@ export const api = {
   listDevices: () => request('/devices'),
   getDevice: (id) => request(`/devices/${id}`),
   // A UI write is always a manual override (Dual Devices Model MANUAL mode
-  // - see AGENTS.md section 6). No `resource` param anymore (to-do.txt's
+  // - see AGENTS.md section 6). No `resource` param anymore (AGENTS_TO_DO.md's
   // 2026-07-27 Device/Node refactor) - a Device is atomic, exactly one value.
   writeDevice: (id, value) =>
     request(`/devices/${id}`, {
@@ -73,7 +73,7 @@ export const api = {
     request(`/processes/${id}/action`, { method: 'POST', body: JSON.stringify({ action }) }),
   // WEM (AGENTS.md section 22/25) - global dismiss (who/when is recorded
   // server-side from the session cookie, not sent here). `/log-messages`
-  // (renamed from `/process-messages`, to-do.txt's 2026-07-27 Device/Node
+  // (renamed from `/process-messages`, AGENTS_TO_DO.md's 2026-07-27 Device/Node
   // refactor) backs the underlying `log_messages` table (was
   // `process_messages`).
   hideMessage: (messageId) =>
@@ -96,7 +96,7 @@ export const api = {
     return request(`/log-messages?${params}`)
   },
   // Logs page (AGENTS.md section 29) - commands/devices tabs (renamed from
-  // deviceCommands/sensors, to-do.txt's 2026-07-27 Device/Node refactor -
+  // deviceCommands/sensors, AGENTS_TO_DO.md's 2026-07-27 Device/Node refactor -
   // matches the renamed log_command/log_device tables). The processes tab
   // reuses listProcessMessages above instead of a third function here.
   listCommandLogs: ({ deviceId, action, search, from, to, page, pageSize }) => {

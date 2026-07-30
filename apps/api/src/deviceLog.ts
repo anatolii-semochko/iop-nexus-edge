@@ -1,7 +1,7 @@
 // Time series of every readOnly (sensor) device value published via
 // dualDevicesModel.publishReading (AGENTS.md section 22) - append-only,
 // no filtering yet (logs everything unconditionally). Table `log_device`
-// (renamed from `sensor_reading_logs`, to-do.txt's 2026-07-27 Device/Node
+// (renamed from `sensor_reading_logs`, AGENTS_TO_DO.md's 2026-07-27 Device/Node
 // refactor) - no `resource` column anymore: a Device is atomic, exactly
 // one value, so `device_id` alone already says what this reading is.
 

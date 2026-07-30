@@ -1,4 +1,4 @@
-// UI branding (extension points design, to-do.txt 2026-07-29 "Фаза В") -
+// UI branding (extension points design, AGENTS_TO_DO.md 2026-07-29 "Фаза В") -
 // build-time only, same reasoning devices/plugins get compiled in at
 // build time rather than loaded at runtime: a target project's own
 // apps/ui/Dockerfile passes VITE_PROJECT_NAME as a build arg. Defaults

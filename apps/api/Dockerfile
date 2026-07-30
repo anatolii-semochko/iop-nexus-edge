@@ -27,7 +27,7 @@ COPY --from=prod-deps /workspace/apps/api/node_modules ./apps/api/node_modules
 COPY --from=prod-deps /workspace/apps/api/package.json ./apps/api/package.json
 COPY --from=build /workspace/apps/api/dist ./apps/api/dist
 COPY --from=build /workspace/apps/api/migrations ./apps/api/migrations
-# Library DNP api.ts plugins (extension points design, to-do.txt
+# Library DNP api.ts plugins (extension points design, AGENTS_TO_DO.md
 # 2026-07-28) - scanned by apiPlugins.ts at BUILTIN_DEVICES_DIR (defaults
 # to /workspace/devices, matching this COPY's destination). None exist
 # yet; copied unconditionally so the day one is added it's already there.

@@ -28,7 +28,7 @@ const formatValue = (value) => (value === null || value === undefined ? '-' : St
 
 /**
  * Logs page (AGENTS.md section 29) - devices tab. Read side of
- * `log_device` (renamed from `sensor_reading_logs`, to-do.txt's
+ * `log_device` (renamed from `sensor_reading_logs`, AGENTS_TO_DO.md's
  * 2026-07-27 Device/Node refactor) - every readOnly device reading, logged
  * unconditionally while a producer existed. As of that same refactor, no
  * producer calls this anymore (dualDevicesModel.publishReading no longer

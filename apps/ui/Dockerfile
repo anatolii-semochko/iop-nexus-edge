@@ -13,7 +13,7 @@ COPY apps/ui apps/ui
 # AGENTS.md section 7) that apps/ui imports directly via the 'devices/'
 # alias in vite.config.mjs - needs to be present in the build context too.
 COPY devices devices
-# UI branding (extension points design, to-do.txt 2026-07-29 "Фаза В") -
+# UI branding (extension points design, AGENTS_TO_DO.md 2026-07-29 "Фаза В") -
 # defaults to "NexusEdge" for this repo's own build; a target project's
 # own apps/ui/Dockerfile passes its own name as a build arg. Read by
 # both src/projectName.js (import.meta.env) and index.html's

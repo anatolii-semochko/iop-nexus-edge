@@ -15,7 +15,7 @@ const TAB_DEFS = [
  * Logs page (AGENTS.md section 29) - a tabbed historical browser over the
  * three append-only log tables (log_command, log_device, log_messages -
  * renamed from device_command_logs/sensor_reading_logs/process_messages,
- * to-do.txt's 2026-07-27 Device/Node refactor), following the same
+ * AGENTS_TO_DO.md's 2026-07-27 Device/Node refactor), following the same
  * CTabs/CTabList pattern as the Processes page (section 22) rather than
  * CTabContent/CTabPanel, so an inactive tab doesn't keep fetching/
  * pagination state mounted for no reason. Devices/processes are fetched

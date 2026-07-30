@@ -1,6 +1,6 @@
 import type { MigrationBuilder } from "node-pg-migrate";
 
-// Renames the three log tables to their final names (to-do.txt's
+// Renames the three log tables to their final names (AGENTS_TO_DO.md's
 // 2026-07-27 Device/Node refactor, direct instruction: "Потрібно існуючі
 // таблиці ... перейменувати + підлаштувати ... Ну, і всю інфраструктуру"):
 // sensor_reading_logs -> log_device, device_command_logs -> log_command,

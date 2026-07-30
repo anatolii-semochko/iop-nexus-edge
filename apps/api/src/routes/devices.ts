@@ -8,7 +8,7 @@ import { devicesNeededFor, validateWrite, type ForbiddenRule } from "../validato
 
 /**
  * A Device's declared capabilities (Postgres `devices.capabilities`) - flat,
- * not an array (to-do.txt's 2026-07-27 Device/Node refactor): a Device is
+ * not an array (AGENTS_TO_DO.md's 2026-07-27 Device/Node refactor): a Device is
  * atomic, exactly one value, so there is nothing left to enumerate.
  * `edgexResource` is which EdgeX deviceResource/command this Device's value
  * is called under - an internal detail of talking to EdgeX, not something a
@@ -303,7 +303,7 @@ async function requireEdgeXDevice(
 }
 
 /**
- * Model State Validator, node-scoped (to-do.txt's 2026-07-27 Device/Node
+ * Model State Validator, node-scoped (AGENTS_TO_DO.md's 2026-07-27 Device/Node
  * refactor) - checks the written device's new value against its sibling
  * devices' *current* values on the same Node, per `nodes.forbidden`. A
  * device with no node has nothing to check against (a forbidden rule only

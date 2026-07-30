@@ -67,7 +67,7 @@ const entityKey = (event) => `${event.domain}.${event.entityId}`
  * views/devices).
  *
  * Filters (domain/entity/mode/source selectors + free-text search - no
- * resource selector anymore, a Device is atomic now, to-do.txt's
+ * resource selector anymore, a Device is atomic now, AGENTS_TO_DO.md's
  * 2026-07-27 Device/Node refactor) are purely client-side over the
  * in-memory buffer above, not a server query - "Clear" still empties the
  * whole buffer; "Reset filters" (only shown once a filter is active) just

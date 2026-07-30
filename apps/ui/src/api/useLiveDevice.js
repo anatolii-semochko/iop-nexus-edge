@@ -6,7 +6,7 @@ import { subscribeToLiveEvents, subscribeToLiveStatus } from './liveSocket'
  * timestamp}, patched in as events arrive over the shared WebSocket
  * (apps/messaging-gateway, AGENTS.md section 9), on top of whatever a page
  * already loaded via the REST API. Flat now, not keyed by resource name
- * (to-do.txt's 2026-07-27 Device/Node refactor) - a Device is atomic,
+ * (AGENTS_TO_DO.md's 2026-07-27 Device/Node refactor) - a Device is atomic,
  * exactly one value.
  *
  * Subscribes once, keyed by every device's own id, rather than

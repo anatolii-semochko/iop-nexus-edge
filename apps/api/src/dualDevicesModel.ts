@@ -4,7 +4,7 @@
 // Virtual Node Runtime. Distinct from the Virtual Node Runtime itself,
 // which lives in apps/device-service, below EdgeX.
 //
-// Per-device, not per (device, resource) (to-do.txt's 2026-07-27
+// Per-device, not per (device, resource) (AGENTS_TO_DO.md's 2026-07-27
 // Device/Node refactor) - a Device is atomic now, exactly one value, so
 // the extra dimension this module used to key on is gone.
 
@@ -99,7 +99,7 @@ async function publishState(deviceId: number, state: DeviceState, source: string
  * Called from the .../simulate write path (routes/devices.ts), which is
  * the only way such a device's value ever changes today.
  *
- * Deliberately does NOT log to log_device anymore (to-do.txt's 2026-07-27
+ * Deliberately does NOT log to log_device anymore (AGENTS_TO_DO.md's 2026-07-27
  * Device/Node refactor, direct instruction) - the old unconditional
  * "log every tick" behavior is removed outright, not replaced, in this
  * refactor. A future configurable process (or several) will decide what/

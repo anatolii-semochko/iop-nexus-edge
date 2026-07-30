@@ -3,7 +3,7 @@
 # (a temperature sensor + three independent relays), each its own EdgeX
 # device with its own protocols.backend.mode - previously bundled into one
 # EdgeX device with four resources, forcing them to share a single
-# physical/virtual mode (see to-do.txt's 2026-07-27 Device/Node refactor,
+# physical/virtual mode (see AGENTS_TO_DO.md's 2026-07-27 Device/Node refactor,
 # and apps/device-service/internal/driver/backend.go's own doc comment on
 # why that coupling was wrong). Registered as devices in the Device
 # Registry attached to a single Node ("example-thermal-node-01" - see

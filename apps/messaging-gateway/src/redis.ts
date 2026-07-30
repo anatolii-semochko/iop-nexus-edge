@@ -36,7 +36,7 @@ export interface CachedState {
  * is the only writer. Unlike the `dvm:*` keys it writes for its own AUTO/
  * MANUAL bookkeeping, `state:*` has no TTL - it is last-known-value state
  * (stays valid until the next write), not a heartbeat/liveness signal.
- * One key per device (`state:{deviceId}`, to-do.txt's 2026-07-27
+ * One key per device (`state:{deviceId}`, AGENTS_TO_DO.md's 2026-07-27
  * Device/Node refactor) - a Device is atomic now, no resource dimension
  * left to key on.
  */

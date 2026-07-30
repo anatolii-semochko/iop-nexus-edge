@@ -1,6 +1,6 @@
 #!/bin/sh
 # Bootstraps a new target project from templates/target-project/
-# (extension points design, to-do.txt 2026-07-29 "Фаза В") - see
+# (extension points design, AGENTS_TO_DO.md 2026-07-29 "Фаза В") - see
 # docs/CREATING_A_TARGET_PROJECT.md for the manual version of every
 # step this automates. Run via `make new-project`, not directly (the
 # Makefile target is the documented entrypoint).

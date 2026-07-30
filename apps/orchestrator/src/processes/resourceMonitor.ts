@@ -25,7 +25,7 @@ import { apiClient, type MessageInput, type ProcessRecord } from "../apiClient.j
 // (in-memory only, resets cleanly on restart; nothing here needs to
 // survive one) - same pattern the temperature-control process plugin
 // uses for its own on->off edge tracking (nexus-edge-smart-house,
-// to-do.txt 2026-07-29).
+// AGENTS_TO_DO.md 2026-07-29).
 let lastCpuSample: { idle: number; total: number } | undefined;
 
 function readCpuPercent(): number | undefined {
