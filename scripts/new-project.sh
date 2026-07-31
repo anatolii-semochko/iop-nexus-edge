@@ -33,6 +33,19 @@ if [ -e "$TARGET_PATH_RAW" ]; then
   exit 1
 fi
 
+# Refuse a target path nested inside this nexus-edge checkout itself -
+# a target project depends on nexus-edge from the outside
+# (NEXUS_EDGE_SOURCE_PATH), it must not end up living inside it.
+# realpath -m resolves the would-be absolute path without requiring it
+# to exist yet, so this runs before anything is created.
+TARGET_ABS=$(realpath -m "$TARGET_PATH_RAW")
+case "$TARGET_ABS/" in
+  "$NEXUS_EDGE_DIR/"*)
+    echo "$TARGET_PATH_RAW resolves to $TARGET_ABS, which is inside this nexus-edge checkout ($NEXUS_EDGE_DIR) - pick a path outside it." >&2
+    exit 1
+    ;;
+esac
+
 mkdir -p "$TARGET_PATH_RAW"
 TARGET_DIR=$(cd "$TARGET_PATH_RAW" && pwd)
 
@@ -77,19 +90,38 @@ sed -i \
   -e "s|^RABBITMQ_DEFAULT_PASS=.*|RABBITMQ_DEFAULT_PASS=change-me|" \
   "$TARGET_DIR/.env"
 
+# Port defaults are a starting point, not guaranteed free (docs/
+# CREATING_A_TARGET_PROJECT.md's "Known trap" section) - actually check
+# now and move anything taken to the next free port, best-effort (a
+# port free here can still race with something else before `make
+# up-all` actually binds it).
+"$TARGET_DIR/scripts/check-ports.sh" --assign
+
 if [ ! -d "$TARGET_DIR/.git" ]; then
   git -C "$TARGET_DIR" init -q
 fi
+git -C "$TARGET_DIR" add -A
+if ! git -C "$TARGET_DIR" commit -q -m "Initial commit from nexus-edge make new-project ($NEXUS_EDGE_VERSION)"; then
+  echo "WARNING: initial commit failed (likely no git user.name/user.email configured) - files are staged, commit manually: git -C $TARGET_PATH_RAW commit -m 'Initial commit'" >&2
+fi
+
+UI_PORT_FINAL=$(grep -m1 '^UI_PORT=' "$TARGET_DIR/.env" | cut -d= -f2)
 
 cat <<EOF
 
 Done. Next steps:
   cd $TARGET_PATH_RAW
-  \$EDITOR .env               # review ports/credentials - see the file's
-                              # own header comment about checking for
+  \$EDITOR .env               # review credentials - see the file's own
+                              # header comment about checking for
                               # collisions with other running projects
   make up-all                 # build + start everything, including EdgeX
 
 Then follow docs/CREATING_A_TARGET_PROJECT.md sections 5-7 (in this
 nexus-edge checkout) to add your first DNP/command/UI plugin.
 EOF
+
+if [ -t 1 ]; then
+  printf '\n\033[32mUI will be available at: http://localhost:%s\033[0m\n' "$UI_PORT_FINAL"
+else
+  printf '\nUI will be available at: http://localhost:%s\n' "$UI_PORT_FINAL"
+fi

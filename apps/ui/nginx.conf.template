@@ -2,6 +2,37 @@
 # /etc/nginx/templates/*.template -> /etc/nginx/conf.d/*) so API_PORT and
 # MESSAGING_GATEWAY_PORT come from the environment (.env), never hardcoded
 # here.
+#
+# REAL BUG found 2026-07-31 (make new-project dry run, verify-project):
+# a static hostname in proxy_pass (`proxy_pass http://api:PORT/`) is
+# resolved by nginx ONCE, at worker startup, and cached for the
+# worker's lifetime - never re-resolved. If `api`'s container hadn't
+# been assigned its final IP yet at that exact moment (a startup-order
+# race - `depends_on` only waits for "started", not "healthy"/DNS-
+# settled), or if `api` is later recreated on its own (`docker compose
+# up -d api` / `restart api` without also restarting `ui`), nginx keeps
+# proxying to a stale/wrong IP - here it silently pointed at
+# device-service's address after api came up in a different order,
+# every /api/ request got a 502 "Connection refused" despite api itself
+# being perfectly healthy. Fix: `resolver` pointed at Docker's own
+# embedded DNS (127.0.0.11, always present on a compose-created bridge
+# network) + a variable in proxy_pass instead of a literal - nginx only
+# skips its cache and re-resolves per-request when the upstream is a
+# variable, not a static host, so this makes it self-heal across
+# container recreation without needing to restart ui too.
+#
+# SECOND bug found immediately after fixing the first one (same dry
+# run): nginx's "replace the matched location prefix with proxy_pass's
+# own URI, then append the rest of the request path" behavior (the
+# usual reason `location /api/ { proxy_pass http://x/; }` strips the
+# /api/ prefix) does NOT work once proxy_pass's target is a variable -
+# every request collapsed to a bare "/" regardless of the actual path
+# ("Route POST:/ not found" for POST /api/auth/login). Explicit
+# `rewrite ... break` first, then a bare `proxy_pass` (no trailing
+# URI at all, so nginx forwards the now-rewritten $uri as-is) is the
+# standard workaround for dynamic-upstream + prefix-stripping together.
+resolver 127.0.0.11 valid=10s;
+
 server {
     listen 80;
     server_name _;
@@ -11,7 +42,14 @@ server {
     # Reverse-proxy to the Devices API - keeps the browser same-origin (no
     # CORS) and independent of whatever host/port the api container maps to.
     location /api/ {
-        proxy_pass http://api:${API_PORT}/;
+        # `set` before `rewrite ... break` deliberately - break stops
+        # ALL further ngx_http_rewrite_module directives in this
+        # location, including a `set` that comes after it (found the
+        # hard way: reversed order left $api_upstream "uninitialized"
+        # at proxy_pass time, a 500 on every request).
+        set $api_upstream api:${API_PORT};
+        rewrite ^/api/(.*)$ /$1 break;
+        proxy_pass http://$api_upstream;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
     }
@@ -21,7 +59,8 @@ server {
     # Upgrade/Connection headers nginx needs to pass a WebSocket handshake
     # through instead of treating it as a plain HTTP request.
     location /ws {
-        proxy_pass http://messaging-gateway:${MESSAGING_GATEWAY_PORT}/ws;
+        set $messaging_upstream messaging-gateway:${MESSAGING_GATEWAY_PORT};
+        proxy_pass http://$messaging_upstream/ws;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
