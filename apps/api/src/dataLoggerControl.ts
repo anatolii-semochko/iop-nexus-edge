@@ -74,10 +74,17 @@ interface DeviceRow {
 /** The combined list the "Data Logger" process's UI panel reads - Devices
  * only (confirmed with the user: Nodes have no `value` of their own, a
  * Device is atomic - unlike Heartbeating Control's processes+devices+nodes
- * merge, there's nothing meaningful to log for a Node here). */
+ * merge, there's nothing meaningful to log for a Node here), and further
+ * narrowed to `readOnly` Devices only (confirmed with the user: a
+ * writable actuator like active-buzzer-01 doesn't "provide data" the way
+ * a sensor does - its value is a command this platform issued, not a
+ * measurement - so it's excluded from this list entirely, not merely
+ * left disabled). */
 export async function listDataLoggerControls(): Promise<DataLoggerControlEntry[]> {
   const { rows } = await pool.query<DeviceRow>(
-    `SELECT id, name, data_logger_control FROM devices ORDER BY name`,
+    `SELECT id, name, data_logger_control FROM devices
+     WHERE (capabilities->>'readOnly')::boolean IS TRUE
+     ORDER BY name`,
   );
   return Promise.all(
     rows.map(async (row) => ({

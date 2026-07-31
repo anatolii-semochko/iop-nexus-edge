@@ -109,7 +109,7 @@ const DataLoggerEditModal = ({ entry, onClose, onSaved }) => {
               type="number"
               min={0}
               step={0.01}
-              placeholder="11.50"
+              placeholder="60.00"
               value={periodSeconds ?? ''}
               onChange={(e) =>
                 setPeriodSeconds(e.target.value === '' ? null : Number(e.target.value))

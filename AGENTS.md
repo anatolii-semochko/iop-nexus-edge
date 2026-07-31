@@ -3038,7 +3038,12 @@ explicit architectural template, confirmed with the user before starting.
 Devices only, not Nodes - a Device is atomic (exactly one value, section
 30), a Node has none to log. This is the one structural place Data
 Logger's combined list differs from Heartbeating Control's three-way
-processes+devices+nodes merge.
+processes+devices+nodes merge. Further narrowed to `readOnly` Devices
+only (`listDataLoggerControls`'s `WHERE (capabilities->>'readOnly')::
+boolean IS TRUE`, added after the user caught `active-buzzer-01` - a
+writable actuator - showing up in the list): a device you command isn't
+"providing data" the way a sensor's reading is, so a non-`readOnly`
+Device is excluded from this list entirely, not merely shown disabled.
 
 ### Config vs runtime split
 
@@ -3139,7 +3144,7 @@ same convention as every other system process's panel), two `Switch`
 toggles at the top for the global settings, then the combined device
 list below reusing the standard filter/search/pagination toolkit
 (section 11): Name/Period/Warning/Error columns, a gear `IconButton`
-opening `DataLoggerEditModal.jsx` (period input - placeholder `11.50`,
+opening `DataLoggerEditModal.jsx` (period input - placeholder `60.00`,
 step `0.01` - plus the same paired `ThresholdRow` shape as
 `HeartbeatEditModal.jsx`, just `numberSkippedPeriods` instead of
 `numberSkippedTicks`) and a write/ignore `Switch`, disabled whenever

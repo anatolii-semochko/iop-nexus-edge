@@ -19,7 +19,7 @@ COPY devices devices
 # both src/projectName.js (import.meta.env) and index.html's
 # %VITE_PROJECT_NAME% placeholder - Vite sources both from this same
 # process.env var at build time.
-ARG VITE_PROJECT_NAME=NexusEdge
+ARG VITE_PROJECT_NAME="Nexus Edge"
 ENV VITE_PROJECT_NAME=$VITE_PROJECT_NAME
 RUN pnpm --filter @nexus-edge/ui build
 
