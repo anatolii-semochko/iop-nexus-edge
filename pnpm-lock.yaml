@@ -62,6 +62,9 @@ importers:
       pino:
         specifier: ^9.6.0
         version: 9.14.0
+      yaml:
+        specifier: ^2.6.0
+        version: 2.9.0
     devDependencies:
       '@types/amqplib':
         specifier: ^0.10.5
@@ -221,7 +224,7 @@ importers:
     devDependencies:
       '@vitejs/plugin-react':
         specifier: ^6.0.1
-        version: 6.0.3(vite@8.1.5(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.101.3)(tsx@4.23.1))
+        version: 6.0.3(vite@8.1.5(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.101.3)(tsx@4.23.1)(yaml@2.9.0))
       autoprefixer:
         specifier: ^10.4.27
         version: 10.5.4(postcss@8.5.21)
@@ -254,7 +257,7 @@ importers:
         version: 1.101.3
       vite:
         specifier: ^8.0.3
-        version: 8.1.5(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.101.3)(tsx@4.23.1)
+        version: 8.1.5(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.101.3)(tsx@4.23.1)(yaml@2.9.0)
 
 packages:
 
@@ -3013,6 +3016,11 @@ packages:
   yallist@3.1.1:
     resolution: {integrity: sha512-a4UGQaWPH59mOXUYnAG2ewncQS4i4F43Tv3JoAM+s2VDAmS9NsK8GpDMLrCHPksFT7h3K6TOoUNn2pb7RoXx4g==}
 
+  yaml@2.9.0:
+    resolution: {integrity: sha512-2AvhNX3mb8zd6Zy7INTtSpl1F15HW6Wnqj0srWlkKLcpYl/gMIMJiyuGq2KeI2YFxUPjdlB+3Lc10seMLtL4cA==}
+    engines: {node: '>= 14.6'}
+    hasBin: true
+
   yargs-parser@22.0.0:
     resolution: {integrity: sha512-rwu/ClNdSMpkSrUb+d6BRsSkLUq1fmfsY6TOpYzTwvwkg1/NRG85KBy3kq++A8LKQwX6lsu+aWad+2khvuXrqw==}
     engines: {node: ^20.19.0 || ^22.12.0 || >=23}
@@ -3821,10 +3829,10 @@ snapshots:
       '@typescript-eslint/types': 8.65.0
       eslint-visitor-keys: 5.0.1
 
-  '@vitejs/plugin-react@6.0.3(vite@8.1.5(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.101.3)(tsx@4.23.1))':
+  '@vitejs/plugin-react@6.0.3(vite@8.1.5(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.101.3)(tsx@4.23.1)(yaml@2.9.0))':
     dependencies:
       '@rolldown/pluginutils': 1.0.1
-      vite: 8.1.5(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.101.3)(tsx@4.23.1)
+      vite: 8.1.5(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.101.3)(tsx@4.23.1)(yaml@2.9.0)
 
   '@vitest/expect@2.1.9':
     dependencies:
@@ -5745,7 +5753,7 @@ snapshots:
       lightningcss: 1.33.0
       sass: 1.101.3
 
-  vite@8.1.5(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.101.3)(tsx@4.23.1):
+  vite@8.1.5(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.101.3)(tsx@4.23.1)(yaml@2.9.0):
     dependencies:
       lightningcss: 1.33.0
       picomatch: 4.0.5
@@ -5759,6 +5767,7 @@ snapshots:
       jiti: 2.7.0
       sass: 1.101.3
       tsx: 4.23.1
+      yaml: 2.9.0
 
   vitest@2.1.9(@types/node@22.20.1)(lightningcss@1.33.0)(sass@1.101.3):
     dependencies:
@@ -5862,6 +5871,8 @@ snapshots:
   y18n@5.0.8: {}
 
   yallist@3.1.1: {}
+
+  yaml@2.9.0: {}
 
   yargs-parser@22.0.0: {}
 

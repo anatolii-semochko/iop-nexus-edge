@@ -1,6 +1,6 @@
 # Switch
 
-Atomic manual-input device on `example-thermal-node` - a smoke-test/demo
+Atomic manual-input device, typically paired with `example-thermal-node` - a smoke-test/demo
 device type, not built for any real target project.
 
 ## Behavior

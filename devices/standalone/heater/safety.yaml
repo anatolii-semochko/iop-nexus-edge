@@ -1,0 +1,9 @@
+# Forbidden-state rules for this device type, consumed by the central
+# Model State Validator (apps/api/src/validator.ts) - see AGENTS.md
+# section 7/30/32. Always empty - the real Heater/Cooler interlock is
+# documented on the node TYPE that pairs them
+# (devices/nodes/example-thermal-node/safety.yaml), not here, since
+# Devices are independent library items that could in principle be paired
+# under more than one node type; this file exists anyway so every device
+# type has the same predictable shape.
+forbidden: []

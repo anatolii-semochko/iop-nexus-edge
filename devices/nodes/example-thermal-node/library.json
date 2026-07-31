@@ -1,0 +1,5 @@
+{
+  "id": "node-example-thermal-node",
+  "name": "Example Thermal Node",
+  "description": "Smoke-test/demo thermal node - pairs Temperature, Heater, Cooler, and Switch devices."
+}

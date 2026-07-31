@@ -209,6 +209,13 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ writeEnabled }),
     }),
+  // Library Catalog (AGENTS.md) - read-only browser over devices/'s
+  // design-time layout; categoryId omitted means the root of `kind`'s own
+  // tree (device and node are two independent trees).
+  browseLibrary: (kind, categoryId) =>
+    request(`/library/browse?kind=${kind}${categoryId ? `&categoryId=${categoryId}` : ''}`),
+  searchLibrary: (kind, q) => request(`/library/search?kind=${kind}&q=${encodeURIComponent(q)}`),
+  syncLibrary: () => request('/library/sync', { method: 'POST' }),
   // Auth (AGENTS.md section 13 - UI login only, not per-endpoint API
   // authorization).
   login: (username, password) =>

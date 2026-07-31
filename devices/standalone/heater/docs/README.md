@@ -1,6 +1,6 @@
 # Heater
 
-Atomic relay actuator on `example-thermal-node` - a smoke-test/demo device
+Atomic relay actuator, typically paired with `example-thermal-node` - a smoke-test/demo device
 type, not built for any real target project. Driven by the
 "temperature-control" process kind (AGENTS.md section 10) as its
 `heaterDeviceId`, and read directly by "temperature-monitor" as a

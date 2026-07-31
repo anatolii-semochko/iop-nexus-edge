@@ -1,6 +1,6 @@
 # Temperature
 
-Atomic sensor device on `example-thermal-node` - a smoke-test/demo device
+Atomic sensor device, typically paired with `example-thermal-node` - a smoke-test/demo device
 type, not built for any real target project. Read via `GET /devices/:id`
 and driven by the "temperature-control"/"temperature-monitor" process kinds
 (AGENTS.md section 10) as their `sensorDeviceId`.

@@ -29,7 +29,8 @@
     "ioredis": "^5.11.1",
     "node-pg-migrate": "^9.0.0",
     "pg": "^8.22.0",
-    "pino": "^9.6.0"
+    "pino": "^9.6.0",
+    "yaml": "^2.6.0"
   },
   "devDependencies": {
     "@types/amqplib": "^0.10.5",

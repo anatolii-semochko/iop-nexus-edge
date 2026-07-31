@@ -1,0 +1,5 @@
+{
+  "id": "device-heater",
+  "name": "Heater",
+  "description": "Example heater relay - single Bool actuator, typically paired with Cooler on a thermal node."
+}

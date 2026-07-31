@@ -1,0 +1,7 @@
+# Always empty (AGENTS.md section 30/32). Cooler's only forbidden-state
+# rule - "never on at the same time as heater" - is a cross-device rule
+# documented on the node TYPE that typically pairs them
+# (devices/nodes/example-thermal-node/safety.yaml/nodes.forbidden), not
+# here - Devices are independent library items now, not physically nested
+# under a node's own folder.
+forbidden: []

@@ -8,12 +8,14 @@ import Fastify, { type FastifyInstance } from "fastify";
 
 import { loadApiPlugins } from "./apiPlugins.js";
 import { config } from "./config.js";
+import { syncLibrary } from "./libraryCatalog.js";
 import { startProcessStateBroadcastLoop } from "./processBroadcast.js";
 import { initUnreadCounts } from "./processMessages.js";
 import { authRoutes } from "./routes/auth.js";
 import { dataLoggerControlRoutes } from "./routes/dataLoggerControls.js";
 import { deviceRoutes } from "./routes/devices.js";
 import { heartbeatControlRoutes } from "./routes/heartbeatControls.js";
+import { libraryRoutes } from "./routes/library.js";
 import { logRoutes } from "./routes/logs.js";
 import { messageGroupRoutes } from "./routes/messageGroups.js";
 import { messageLevelRoutes } from "./routes/messageLevels.js";
@@ -53,6 +55,22 @@ export async function startApiServer(): Promise<FastifyInstance> {
   // nginx at /api/uploads/... (AGENTS.md section 13), same as every other
   // apps/api route.
   await app.register(fastifyStatic, { root: config.uploads.avatarsDir, prefix: "/uploads/avatars/" });
+  // Library Catalog icons (AGENTS.md section 32) - library_items.icon_path
+  // values point directly at these mounts. `decorateReply: false` on every
+  // registration after the first avoids @fastify/static's "sendFile
+  // decorator already added" error when registering more than once.
+  await app.register(fastifyStatic, {
+    root: config.apiPlugins.builtinDevicesDir,
+    prefix: "/library-assets/library/",
+    decorateReply: false,
+  });
+  if (config.apiPlugins.extraDir) {
+    await app.register(fastifyStatic, {
+      root: config.apiPlugins.extraDir,
+      prefix: "/library-assets/private/",
+      decorateReply: false,
+    });
+  }
 
   await app.register(authRoutes);
   await app.register(userRoutes);
@@ -60,6 +78,7 @@ export async function startApiServer(): Promise<FastifyInstance> {
   await app.register(deviceRoutes);
   await app.register(heartbeatControlRoutes);
   await app.register(dataLoggerControlRoutes);
+  await app.register(libraryRoutes);
   await app.register(processGroupRoutes);
   await app.register(processRoutes);
   await app.register(tabGroupRoutes);
@@ -78,6 +97,19 @@ export async function startApiServer(): Promise<FastifyInstance> {
   // (or at zero) after a restart.
   await initUnreadCounts();
   startProcessStateBroadcastLoop();
+
+  // Library Catalog (AGENTS.md section 32) - rebuilt on every startup (the
+  // user's own explicit spec: "метод аналізу... повинен запускатися
+  // автоматично при билді проекту"), same idempotent-on-every-start
+  // convention as node-pg-migrate's own migrations. Also available on
+  // demand via POST /library/sync for a mid-session folder move. Logged,
+  // not fatal - a Library Catalog sync failure shouldn't block the whole
+  // API from starting.
+  try {
+    await syncLibrary();
+  } catch (err) {
+    app.log.error({ err }, "Library Catalog sync failed on startup");
+  }
 
   await app.listen({ port: config.port, host: config.host });
   return app;

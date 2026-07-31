@@ -363,70 +363,111 @@ row (id, location, current state) that references a type by name — same
 split already implied by the `Type`/`Driver` fields in the Device Registry
 example in `docs/PROJECT_MASTER-1.1.md` section 6.
 
-Layout:
+Layout (revised 2026-08-01, section 32's Library Catalog decision - see
+below for what changed and why):
 
 ```
 devices/
   nodes/
     <node-type>/                     e.g. aquarium-maintenance-node
-      node.yaml                      node identity schema, bus binding, defaults
-      safety.yaml                    CROSS-DEVICE forbidden-state/interlock rules for
-                                      this node's own devices (nodes.forbidden,
+      node.yaml                      node identity schema, bus binding,
+                                      defaults, and a `supports:` list of
+                                      device-type names this node type is
+                                      typically paired with (a reference,
+                                      not physical folder nesting)
+      safety.yaml                    CROSS-DEVICE forbidden-state/interlock
+                                      rules for this node type's typically-
+                                      paired devices (nodes.forbidden,
                                       Postgres) - see below, added 2026-07-28
-      firmware/                      shared STM32 project for the node (main, build);
-                                      includes the per-device driver modules below
-      devices/
-        <device-type>/                e.g. co-valve
-          contract.schema.ts          single capability/type contract (sensors,
+      firmware/                      shared STM32 project for the node (main,
+                                      build)
+      category.json / <icon>         optional - only if this node type also
+                                      acts as a Library Catalog category
+                                      (arbitrary nesting under nodes/ or
+                                      standalone/, section 32)
+      library.json                   Library Catalog descriptor for this
+                                      node type itself - {id, name,
+                                      description}, `id` developer-assigned
+                                      once, never changes (section 32)
+  standalone/
+    <device-type>/                    e.g. co-valve - every Device type
+                                       lives here now, independent of any
+                                       Node (section 32) - own bus binding
+                                       lives in contract.schema.ts, own
+                                       safety.yaml IS the final word for
+                                       any rule that's genuinely about this
+                                       device alone
+      contract.schema.ts              single capability/type contract (sensors,
                                        actuators, commands, units) — source of truth
                                        that the UI, Virtual Node Runtime and Devices
                                        API normalization are checked against
-          edgex-device-profile.yaml   EdgeX Device Profile (one resource - a Device
+      edgex-device-profile.yaml       EdgeX Device Profile (one resource - a Device
                                        is atomic, exactly one value)
-          safety.yaml                 always `forbidden: []` for a node-attached
-                                       device - cross-device rules live on the node
-                                       (above), not here; kept for shape consistency
-                                       with standalone/ below
-          runtime/                    Virtual Node Runtime module (Go), mirrors
-                                       the STM32 behavior
-          firmware/                   STM32 driver module for this device, included
-                                       by the node's firmware/
-          ui/
-            control/                  production control/visualization component,
+      safety.yaml                     this device type's OWN forbidden-state
+                                       rules, if any; a rule between this device
+                                       and another belongs on whichever node
+                                       type's safety.yaml documents that pairing
+                                       (nothing else reads this file across
+                                       device types)
+      runtime/                        Virtual Node Runtime module (Go), mirrors
+                                       the STM32 behavior (optional - absent
+                                       where nothing beyond the generic Virtual
+                                       Node Runtime is needed)
+      firmware/                       STM32 driver module for this device type
+                                       (every standalone device type needs its
+                                       own - there's no node-level project to
+                                       be included into)
+      ui/
+        control/                      production control/visualization component,
                                        integrated into the main UI
-            simulator/                 dev-mode panel: shows internal state, allows
+        simulator/                    dev-mode panel: shows internal state, allows
                                        overriding sensor values for testing
-          config/
-            default-state.yaml        initial virtual state + tunables (no hardcoded
+      config/
+        default-state.yaml            initial virtual state + tunables (no hardcoded
                                        values)
-          docs/
-            README.md
-            schematics/
-          tests/
-          CHANGELOG.md                 hardware/firmware revision history for this
+      docs/
+        README.md
+        schematics/
+      tests/
+      CHANGELOG.md                    hardware/firmware revision history for this
                                        type, since it will drift from the original
                                        definition over time
-  standalone/
-    <device-type>/                    same internal layout, no parent node — its
-                                       own bus binding lives in contract.schema.ts,
-                                       its own safety.yaml IS the final word (no
-                                       node to defer cross-device rules to)
+      category.json / <icon>          optional - only if this device type also
+                                       acts as a Library Catalog category
+      library.json                    Library Catalog descriptor - {id, name,
+                                       description}, `id` developer-assigned
+                                       once, never changes (section 32)
 ```
 
-A device type without a node (`standalone/`) still needs a `firmware/` of its
-own (it has no node-level project to be included into). `devices/standalone/
-light-regulator/` and `devices/standalone/active-buzzer/` are real device
-types built to this layout - `runtime/` and `firmware/` are deliberately
-absent for both (nothing for either to add over the generic Virtual Node
-Runtime yet, no hardware to target), everything else (`contract.schema.ts`,
-`edgex-device-profile.yaml`, `safety.yaml`, `config/default-state.yaml`,
-`docs/`, `tests/`, `ui/control`, `ui/simulator` where applicable,
-`CHANGELOG.md`) is present and real. `devices/nodes/example-thermal-node/`
-(added 2026-07-28, section 30) is the **first real use** of the node-
-attached half of this layout - four device types (`temperature`, `heater`,
-`cooler`, `switch`) sharing one node, with the actual Heater/Cooler
-interlock rule living in the node's own `safety.yaml`/`nodes.forbidden`,
-not duplicated into either device's.
+**2026-08-01 correction (section 32):** `devices/nodes/<node-type>/devices/`
+(a device type physically nested inside its node type's own folder) is
+gone - every Device type now lives under `devices/standalone/`
+unconditionally, whether or not it's typically used with a Node. A node
+type declares which device types it's typically paired with via a
+`supports:` list in its own `node.yaml` (a reference by name, checked by
+nothing at runtime - purely informational for the Library Catalog), not
+by owning a copy of that device type's folder. This was forced by the
+Library Catalog's own requirement that a Device and a Node be independently
+browsable/movable/categorizable (moving a Device into a new category
+folder must never require touching any Node's folder, and vice versa) -
+also the point that a device type in principle could be reused by more
+than one node type, which physical nesting under exactly one node
+couldn't represent anyway. `devices/nodes/example-thermal-node/` (added
+2026-07-28, section 30) - its four device types (`temperature`, `heater`,
+`cooler`, `switch`) moved to `devices/standalone/` accordingly, with the
+actual Heater/Cooler interlock rule staying on the node type's own
+`safety.yaml`/`nodes.forbidden` (unaffected - that was always about a
+physical assembly, section 30 already got this half right), not
+duplicated into either device type's.
+
+`devices/standalone/light-regulator/` and `devices/standalone/
+active-buzzer/` are real device types built to this layout - `runtime/`
+and `firmware/` are deliberately absent for both (nothing for either to
+add over the generic Virtual Node Runtime yet, no hardware to target),
+everything else (`contract.schema.ts`, `edgex-device-profile.yaml`,
+`safety.yaml`, `config/default-state.yaml`, `docs/`, `tests/`,
+`ui/control`, `ui/simulator` where applicable, `CHANGELOG.md`) is present
+and real.
 
 **Implementation status**: the Postgres side of the Device Registry exists
 now (`apps/api/migrations`, `node-pg-migrate`) - `nodes` and `devices`
@@ -3164,3 +3205,134 @@ back to `false`, message gone) within one period of restarting
 the per-device list, the edit popup (period placeholder renders exactly
 as specified), and the write/ignore switch's disabled-until-configured
 state all behave correctly; console clean.
+
+## 33. Library Catalog (browsable/searchable index over `devices/`)
+
+A read-only, breadcrumb-navigated browser over `devices/`'s design-time
+layout (section 7) - "nodes and libraries convenient to keep in one
+[searchable] table", per the user's own spec, 2026-08-01. Forced the
+section 7 restructuring documented there: a Device can no longer live
+inside a Node's own folder, since a category/browsable-item tree needs
+every node to be independently movable/categorizable without touching
+any other node's folder. Categories/items are managed by moving folders
+in git and editing their descriptor files - this feature has no
+create/edit/delete UI of its own, it's a cache of what the filesystem
+currently says, rebuilt by a sync.
+
+### Filesystem convention
+
+Any folder under `devices/standalone/` (kind `device`) or `devices/nodes/`
+(kind `node`) - two independent trees, never merged - is exactly one of:
+
+- **A leaf item** - has its own `library.json`:
+  `{id, name, description}`. `id` is developer-assigned once, when the
+  DN is created, and never changes afterward, even if the folder is
+  renamed or moved to a different category (AGENTS_TO_DO.md, 2026-08-01:
+  "генеруємо, коли створюємо DN... і він не змінюється потім") - this is
+  the catalog's real identity, not the folder path. Not recursed into
+  further - `config/`, `docs/`, `tests/`, etc. underneath are that DN's
+  own implementation detail, not catalog structure. An optional
+  `icon.svg`/`icon.png` alongside `library.json` is shown in the browser
+  if present, a generic fallback icon otherwise.
+- **A category** - has its own `category.json`: `{name, description}`,
+  plus the same optional icon convention. Recursed into - arbitrary
+  nesting depth, subcategories and leaf items mixed freely inside one
+  category.
+- **Neither** - a plain pass-through folder (e.g. `devices/standalone/`
+  itself has no descriptor of its own) - recursed into, contributing no
+  row, its children attach to whatever the *nearest actual category
+  ancestor* was (or the tree root, if none).
+
+Moving a DN to a different category is exactly `mv` the folder plus
+re-running the sync - there is no "rename" tracking, a folder that no
+longer exists at its old `folder_path` is just deleted and (if it still
+exists somewhere else) picked back up fresh under its new path, matched
+back to its existing catalog row purely by its own `id`.
+
+A Node type's `node.yaml` carries an additional `supports:` list (device-
+type names it's typically paired with, section 7) - read straight into
+`library_items.supports` for node items, purely informational, nothing
+at runtime enforces it.
+
+### Sync (`apps/api/src/libraryCatalog.ts`)
+
+`syncLibrary()` walks `devices/standalone/` and `devices/nodes/` under
+`config.apiPlugins.builtinDevicesDir` (reused as-is from the Command-API
+extension points config, section 31 - no new env var), plus, if
+`config.apiPlugins.extraDir` is set, a target project's own private
+`plugins/` (scanned flat, kind `device` only - there's no private-node
+equivalent of `devices/nodes/` today). Upserts `library_categories`/
+`library_items` (`ON CONFLICT (folder_path)`/`ON CONFLICT (id)` -
+category rows keep a stable numeric id across re-syncs, item rows keep
+their developer-assigned one), then deletes any row whose `folder_path`
+wasn't seen this pass - a full, cheap, idempotent rebuild, safe to run
+any time.
+
+Runs once automatically on every `apps/api` startup (the user's own
+spec: "метод аналізу... повинен запускатися автоматично при билді
+проекту" - same idempotent-on-every-start convention as
+node-pg-migrate's migrations; a sync failure is logged, not fatal, so it
+can never block the API from starting), and on demand via
+`POST /library/sync` (the page's own Sync button) for a same-session
+folder move.
+
+### API (`apps/api/src/routes/library.ts`)
+
+- `POST /library/sync`
+- `GET /library/browse?kind=device|node&categoryId=` - one folder
+  level's worth of children (subcategories and leaf items mixed, sorted
+  by name) plus the breadcrumb trail up to the root; `categoryId`
+  omitted means the root of `kind`'s own independent tree.
+- `GET /library/search?kind=device|node&q=` - flat, cross-category
+  `ILIKE` on name/description (the user's own explicit goal: "зручно
+  для пошуку").
+- Every item in both responses carries `usedInProject` - `type_name`
+  (the folder's own basename, tracked separately from the free-text
+  `name`) checked against this same running instance's own live
+  `devices`/`nodes` registry (`SELECT DISTINCT type`), confirmed with
+  the user as the intended scope ("Postgres DN-реєстр тієї ж запущеної
+  UI-інстанції") over a source-code-only "is this referenced anywhere"
+  check.
+
+Icons are served statically, not stored in Postgres - `library_items.
+icon_path`/`library_categories.icon_path` are pre-built URLs like
+`/library-assets/library/standalone/heater/icon.png`, matching two
+`@fastify/static` mounts registered in `server.ts` (`/library-assets/
+library/*` -> `builtinDevicesDir`, `/library-assets/private/*` ->
+`extraDir` when set) - `decorateReply: false` on every registration
+after the first avoids `@fastify/static`'s "sendFile decorator already
+added" error.
+
+### UI (`apps/ui/src/views/library/LibraryBrowser.jsx`)
+
+New top-level nav item "Library" (alongside Nodes/Devices/Dev Simulator).
+A Devices/Nodes button-group switch (two independent trees, never
+merged in one view) at the top, a Sync button, a search box, and below
+that either the breadcrumb-driven category browser or (while a search
+term is active) the flat search results. The breadcrumb strip is
+modeled directly on `sevenstime-backoffice`'s `web-interface/src/views/
+base-elements/Categories.js` - same "Root / Cat1 / Cat2" clickable path
+plus an up-arrow image, that exact `up.png` asset copied verbatim into
+`apps/ui/src/assets/images/` per the user's explicit preference over the
+equivalent already-in-use CoreUI `cilArrowTop` icon. Unlike that
+reference component, there is deliberately no add/edit/delete category
+UI here at all - only the browsing/table/breadcrumb half of it applies,
+since this catalog's data comes from git, not form submissions.
+
+### Verified live
+
+Not just the two demo items - a real throwaway category+item pair
+(`devices/standalone/_synctest/category.json` + a nested `dummy-item/
+library.json`) copied into the running `api` container, synced (`1
+category, 8 items` - 7 real + 1 dummy, across both kinds), confirmed via
+`GET /library/browse` that the category appeared at the tree root and
+the dummy item appeared correctly nested one level inside it with the
+right breadcrumb, then the folder was removed and re-synced - both rows
+disappeared (orphan cleanup), counts back to `0 categories, 7 items`
+(6 devices + 1 node). `usedInProject` cross-checked directly against
+`GET /devices`'s live `type` values (`active-buzzer`/`light-regulator`
+- the only two demo devices actually seeded in this instance - correctly
+`true`; the four relocated thermal device types, not seeded here right
+now, correctly `false`). UI verified in a real browser end to end: kind
+switch, breadcrumb navigation into and back out of a category, search,
+and the Sync button's own success message; console clean throughout.

@@ -1,10 +1,12 @@
 /**
- * Temperature - atomic sensor on the example-thermal-node (AGENTS.md
- * section 7/30). A single simulated temperature reading: reports its
- * current value, never accepts commands (see safety.yaml - there is
- * nothing to forbid on this device alone; the real interlock this node
- * cares about is between its sibling heater/cooler devices - see the
- * node's own safety.yaml).
+ * Temperature - atomic sensor, independent library Device type (AGENTS.md
+ * section 7/30/32), typically paired with `heater`/`cooler` under
+ * `devices/nodes/example-thermal-node/` (that node type's own
+ * `supports:` list in node.yaml, not a physical folder nesting). A single
+ * simulated temperature reading: reports its current value, never
+ * accepts commands (see safety.yaml - there is nothing to forbid on this
+ * device alone; the real interlock is between heater/cooler, documented
+ * on that node type's own safety.yaml).
  *
  * A Device is atomic (AGENTS.md section 30) - exactly one value, so this
  * contract has no `resources` map the way an older, since-corrected

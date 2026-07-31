@@ -18,6 +18,7 @@ import {
   cilDescription,
   cilDevices,
   cilHistory,
+  cilLibrary,
   cilPeople,
   cilSettings,
   cilSitemap,
@@ -63,6 +64,12 @@ const _nav = [
     name: 'Dev Simulator',
     to: '/dev-simulator',
     icon: <CIcon icon={cilBug} customClassName="nav-icon" />,
+  },
+  {
+    component: CNavItem,
+    name: 'Library',
+    to: '/library',
+    icon: <CIcon icon={cilLibrary} customClassName="nav-icon" />,
   },
   {
     component: CNavTitle,

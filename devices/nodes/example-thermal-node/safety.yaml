@@ -1,20 +1,20 @@
-# Cross-device forbidden-state/interlock rules for this node's own
-# devices, consumed by the central Model State Validator
+# Cross-device forbidden-state/interlock rules for this node type's
+# typically-paired devices, consumed by the central Model State Validator
 # (apps/api/src/validator.ts) - source of truth `nodes.forbidden`
 # (Postgres, apps/api/migrations/..._seed-example-thermal-node.ts) is
 # meant to agree with (AGENTS.md section 7/30).
 #
-# Lives on the NODE now, not on either device's own safety.yaml (see
-# devices/temperature/safety.yaml etc., all empty) - a rule like "heater
-# and cooler must never both be active" is a property of the physical
-# assembly they're both mounted on, not of either device in isolation.
-# Before the 2026-07-28 Device/Node correction (AGENTS.md section 30) this
-# exact rule lived per-device, comparing two "resources" of one bundled
-# device - it moved here the moment Heater/Cooler became the two separate
-# atomic devices they always physically were.
+# Documents the rule at the NODE TYPE level, not either device type's own
+# safety.yaml (devices/standalone/heater/safety.yaml etc., both empty) - a
+# rule like "heater and cooler must never both be active" is a property of
+# a physical assembly, not of either device type in isolation, and
+# Devices are independent library items now (AGENTS.md section 32) that
+# could in principle be paired under more than one node type - this file
+# documents the rule for THIS node type's own typical pairing, it isn't
+# the device types' own claim.
 #
-# `device` below is this node type's device-type name (matches the
-# `devices:` list in node.yaml), not a Postgres instance name - there is
+# `device` below is a device-type name (matches this node type's own
+# `supports:` list in node.yaml), not a Postgres instance name - there is
 # still no automated provisioning flow (AGENTS.md section 7's documented
 # gap) that would translate a type-level rule like this into a new node
 # instance's own `nodes.forbidden` row, so today the seeded

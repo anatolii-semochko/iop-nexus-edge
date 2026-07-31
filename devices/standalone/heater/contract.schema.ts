@@ -1,11 +1,13 @@
 /**
- * Heater - atomic relay actuator on the example-thermal-node (AGENTS.md
- * section 7/30). A single boolean output driving a physical heating
- * relay: `true` heats, `false` is idle. Paired with `../cooler` on the
- * same Node - the two must never both be active at once, a rule declared
- * on the NODE's own safety.yaml (../../safety.yaml), not this device's
- * (which is always empty - a cross-device rule can't live on one device
- * alone anymore, AGENTS.md section 30).
+ * Heater - atomic relay actuator, independent library Device type
+ * (AGENTS.md section 7/30/32), typically paired with `cooler` under
+ * `devices/nodes/example-thermal-node/` (that node type's own
+ * `supports:` list in node.yaml, not a physical folder nesting). A
+ * single boolean output driving a physical heating relay: `true` heats,
+ * `false` is idle. The two must never both be active at once, a rule
+ * declared on that node TYPE's own safety.yaml, not this device's (which
+ * is always empty - a cross-device rule can't live on one device alone,
+ * AGENTS.md section 30).
  *
  * A Device is atomic (AGENTS.md section 30) - exactly one value, so this
  * contract has no `resources` map the way an older, since-corrected
@@ -27,5 +29,5 @@ export const heaterContract = {
   // temperatureControl.ts) via PUT /devices/:id/auto.
   readOnly: false,
   valueType: 'Bool',
-  description: 'Example heater relay - must never be on at the same time as ../cooler',
+  description: 'Example heater relay - must never be on at the same time as cooler',
 }
