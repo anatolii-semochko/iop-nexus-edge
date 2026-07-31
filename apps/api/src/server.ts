@@ -11,6 +11,7 @@ import { config } from "./config.js";
 import { startProcessStateBroadcastLoop } from "./processBroadcast.js";
 import { initUnreadCounts } from "./processMessages.js";
 import { authRoutes } from "./routes/auth.js";
+import { dataLoggerControlRoutes } from "./routes/dataLoggerControls.js";
 import { deviceRoutes } from "./routes/devices.js";
 import { heartbeatControlRoutes } from "./routes/heartbeatControls.js";
 import { logRoutes } from "./routes/logs.js";
@@ -58,6 +59,7 @@ export async function startApiServer(): Promise<FastifyInstance> {
   await app.register(nodeRoutes);
   await app.register(deviceRoutes);
   await app.register(heartbeatControlRoutes);
+  await app.register(dataLoggerControlRoutes);
   await app.register(processGroupRoutes);
   await app.register(processRoutes);
   await app.register(tabGroupRoutes);

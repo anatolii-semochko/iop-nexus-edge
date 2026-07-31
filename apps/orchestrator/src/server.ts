@@ -5,6 +5,7 @@ import { config } from "./config.js";
 import { logger } from "./logger.js";
 import { loadProcessPlugins } from "./processPlugins.js";
 import { runActiveBuzzer } from "./processes/activeBuzzer.js";
+import { runDataLogger } from "./processes/dataLogger.js";
 import { runHeartbeatControl } from "./processes/heartbeatControl.js";
 import { runHeartbeatControlTest } from "./processes/heartbeatControlTest.js";
 import { runResourceMonitor } from "./processes/resourceMonitor.js";
@@ -23,6 +24,7 @@ function registerBuiltinProcessKinds(): void {
   processRegistry.register("active-buzzer", runActiveBuzzer);
   processRegistry.register("heartbeat-control", runHeartbeatControl);
   processRegistry.register("heartbeat-control-test", runHeartbeatControlTest);
+  processRegistry.register("data-logger", runDataLogger);
 }
 
 async function tick(): Promise<void> {

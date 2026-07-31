@@ -191,6 +191,24 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ simulate }),
     }),
+  // Data Logger (AGENTS.md) - Devices-only list (unlike Heartbeating
+  // Control's three-type merge, a Node has no value to log), plus the
+  // process's own two global switches (settings, singleton - not
+  // per-device).
+  listDataLoggerControls: () => request('/data-logger-controls'),
+  getDataLoggerSettings: () => request('/data-logger-controls/settings'),
+  updateDataLoggerSettings: (patch) =>
+    request('/data-logger-controls/settings', { method: 'PATCH', body: JSON.stringify(patch) }),
+  updateDataLoggerControl: (deviceId, { periodSeconds, warning, error }) =>
+    request(`/data-logger-controls/${deviceId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ periodSeconds, warning, error }),
+    }),
+  setDataLoggerWriteEnabled: (deviceId, writeEnabled) =>
+    request(`/data-logger-controls/${deviceId}/write-enabled`, {
+      method: 'PUT',
+      body: JSON.stringify({ writeEnabled }),
+    }),
   // Auth (AGENTS.md section 13 - UI login only, not per-endpoint API
   // authorization).
   login: (username, password) =>

@@ -27,6 +27,7 @@ import TableSearchInput from '../../components/table/TableSearchInput'
 import { useExpandableRows } from '../../hooks/useExpandableRows'
 import { usePagination } from '../../hooks/usePagination'
 import ActiveBuzzerPanel from './ActiveBuzzerPanel'
+import DataLoggerPanel from './DataLoggerPanel'
 import HeartbeatControlPanel from './HeartbeatControlPanel'
 import HeartbeatControlTestPanel from './HeartbeatControlTestPanel'
 import ProcessSettingsModal from './ProcessSettingsModal'
@@ -46,6 +47,7 @@ export const KIND_PANELS = {
   'heartbeat-control-test': HeartbeatControlTestPanel,
   'resource-monitor': ResourceMonitorPanel,
   'active-buzzer': ActiveBuzzerPanel,
+  'data-logger': DataLoggerPanel,
 }
 
 const statusColor = (status) => (status === 'on' ? 'success' : 'secondary')

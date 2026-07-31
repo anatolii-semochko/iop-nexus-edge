@@ -1,0 +1,135 @@
+import React, { useState } from 'react'
+import {
+  CAlert,
+  CButton,
+  CCol,
+  CFormInput,
+  CFormSelect,
+  CModal,
+  CModalBody,
+  CModalFooter,
+  CModalHeader,
+  CModalTitle,
+  CRow,
+} from '@coreui/react'
+import { api } from '../../api/client'
+
+const LEVEL_OPTIONS = [1, 2, 3, 4]
+
+// One threshold row (warning or error) - same shape as
+// HeartbeatEditModal's ThresholdRow, but counting *periods of this
+// device's own periodSeconds* (AGENTS.md's Data Logger section),
+// not raw system ticks.
+const ThresholdRow = ({ label, value, onChange }) => {
+  const enabled = value !== null
+  return (
+    <CRow className="align-items-center g-2 mb-2">
+      <CCol xs="3">
+        <div className="text-body-secondary small">{label}</div>
+      </CCol>
+      <CCol xs="4">
+        <CFormInput
+          size="sm"
+          type="number"
+          min={1}
+          disabled={!enabled}
+          value={enabled ? value.numberSkippedPeriods : ''}
+          onChange={(e) =>
+            onChange({ ...value, numberSkippedPeriods: Math.max(1, Number(e.target.value) || 1) })
+          }
+        />
+      </CCol>
+      <CCol xs="5">
+        <CFormSelect
+          size="sm"
+          value={enabled ? value.level : ''}
+          onChange={(e) =>
+            onChange(
+              e.target.value === ''
+                ? null
+                : {
+                    numberSkippedPeriods: value?.numberSkippedPeriods ?? 1,
+                    level: Number(e.target.value),
+                  },
+            )
+          }
+        >
+          <option value="">Off (not monitored)</option>
+          {LEVEL_OPTIONS.map((level) => (
+            <option key={level} value={level}>
+              Level {level}
+            </option>
+          ))}
+        </CFormSelect>
+      </CCol>
+    </CRow>
+  )
+}
+
+/**
+ * Edit popup for one device's logging period + warning/error thresholds
+ * (AGENTS.md's Data Logger section). Clearing the period entirely also
+ * clears `writeEnabled` server-side (routes/dataLoggerControls.ts) - the
+ * row's own write/ignore switch becomes disabled+off the moment this is
+ * saved with an empty period, per the user's own spec.
+ */
+const DataLoggerEditModal = ({ entry, onClose, onSaved }) => {
+  const [periodSeconds, setPeriodSeconds] = useState(entry.dataLoggerControl.periodSeconds)
+  const [warning, setWarning] = useState(entry.dataLoggerControl.warning)
+  const [error_, setError_] = useState(entry.dataLoggerControl.error)
+  const [saveError, setSaveError] = useState(null)
+  const [saving, setSaving] = useState(false)
+
+  const handleSave = async () => {
+    setSaving(true)
+    setSaveError(null)
+    try {
+      await api.updateDataLoggerControl(entry.id, { periodSeconds, warning, error: error_ })
+      onSaved()
+    } catch (err) {
+      setSaveError(err.message)
+      setSaving(false)
+    }
+  }
+
+  return (
+    <CModal visible onClose={onClose}>
+      <CModalHeader>
+        <CModalTitle>Data logging - {entry.name}</CModalTitle>
+      </CModalHeader>
+      <CModalBody>
+        {saveError && <CAlert color="danger">{saveError}</CAlert>}
+        <CRow className="align-items-center g-2 mb-3">
+          <CCol xs="3">
+            <div className="text-body-secondary small">Period (s)</div>
+          </CCol>
+          <CCol xs="9">
+            <CFormInput
+              size="sm"
+              type="number"
+              min={0}
+              step={0.01}
+              placeholder="11.50"
+              value={periodSeconds ?? ''}
+              onChange={(e) =>
+                setPeriodSeconds(e.target.value === '' ? null : Number(e.target.value))
+              }
+            />
+          </CCol>
+        </CRow>
+        <ThresholdRow label="Warning" value={warning} onChange={setWarning} />
+        <ThresholdRow label="Error" value={error_} onChange={setError_} />
+      </CModalBody>
+      <CModalFooter>
+        <CButton color="secondary" variant="outline" onClick={onClose} disabled={saving}>
+          Cancel
+        </CButton>
+        <CButton color="primary" onClick={handleSave} disabled={saving}>
+          Save
+        </CButton>
+      </CModalFooter>
+    </CModal>
+  )
+}
+
+export default DataLoggerEditModal

@@ -117,6 +117,33 @@ export interface MessageLevelRecord {
   period_deciseconds: number;
 }
 
+// Mirrors apps/api's dataLoggerControl.ts shape exactly (AGENTS.md's Data
+// Logger section) - same hand-kept-in-sync caveat as HeartbeatControlConfig
+// above.
+export interface DataLoggerThreshold {
+  numberSkippedPeriods: number;
+  level: number;
+}
+
+export interface DataLoggerControlConfig {
+  writeEnabled: boolean;
+  periodSeconds: number | null;
+  warning: DataLoggerThreshold | null;
+  error: DataLoggerThreshold | null;
+}
+
+export interface DataLoggerControlEntry {
+  id: number;
+  name: string;
+  dataLoggerControl: DataLoggerControlConfig;
+  lastLoggedAt: string | null;
+}
+
+export interface DataLoggerSettings {
+  errorWarningEnabled: boolean;
+  tickLoggingEnabled: boolean;
+}
+
 export const apiClient = {
   listProcesses: () => request<ProcessRecord[]>("/processes"),
   getDevice: (deviceId: number) => request<DeviceRecord>(`/devices/${deviceId}`),
@@ -186,4 +213,13 @@ export const apiClient = {
       method: "POST",
       body: JSON.stringify({ processIds }),
     }),
+  // Data Logger (AGENTS.md) - the combined Devices-only list + the
+  // process's own two global switches; see apps/api/src/dataLoggerControl.ts.
+  listDataLoggerControls: () => request<DataLoggerControlEntry[]>("/data-logger-controls"),
+  getDataLoggerSettings: () => request<DataLoggerSettings>("/data-logger-controls/settings"),
+  // Reads the device's own current live value server-side and writes it
+  // to log_device in one call - see routes/devices.ts's POST
+  // /devices/:id/log.
+  logDeviceReading: (deviceId: number) =>
+    request<{ status: string; value: unknown }>(`/devices/${deviceId}/log`, { method: "POST" }),
 };

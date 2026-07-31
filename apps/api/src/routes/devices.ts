@@ -3,6 +3,8 @@ import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import * as dualDevicesModel from "../dualDevicesModel.js";
 import { pool } from "../db.js";
 import { logCommand } from "../commandLog.js";
+import { logReading } from "../deviceLog.js";
+import * as dataLoggerControl from "../dataLoggerControl.js";
 import { EdgeXError, listEdgeXDevices, readValue, writeValue, type EdgeXDeviceStatus } from "../edgex.js";
 import { devicesNeededFor, validateWrite, type ForbiddenRule } from "../validator.js";
 
@@ -228,6 +230,29 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
       if (!(await writeOrReject(reply, device.edgex_device_name, device.capabilities.edgexResource, state.valueAuto))) return;
     }
     return { status: "ok", state };
+  });
+
+  // Called by apps/orchestrator's Data Logger runner (AGENTS.md's Data
+  // Logger section) once a device's configured period is actually due -
+  // reads the device's own current live value the same way GET
+  // /devices/:id does, writes it to `log_device`, and touches this
+  // device's `lastLoggedAt` in the same call so the orchestrator doesn't
+  // need a second round-trip. Best-effort (mirrors logCommand/logReading
+  // themselves) - a logging failure must never surface as a write error
+  // to a caller that's only trying to observe, not command, the device.
+  app.post<{ Params: { id: string } }>("/devices/:id/log", async (request, reply) => {
+    const device = await findDevice(request.params.id);
+    if (!device) {
+      return reply.code(404).send({ error: "device not found" });
+    }
+    if (!device.edgex_device_name || !device.capabilities.edgexResource) {
+      return reply.code(400).send({ error: `device '${device.name}' has no EdgeX resource to read` });
+    }
+
+    const reading = await readValue(device.edgex_device_name, device.capabilities.edgexResource);
+    await logReading({ deviceId: device.id, value: reading.value, source: "data-logger" });
+    await dataLoggerControl.touchLastLoggedAt(device.id);
+    return { status: "ok", value: reading.value };
   });
 
   // System-wide aggregate of every controllable device's mode (AGENTS.md

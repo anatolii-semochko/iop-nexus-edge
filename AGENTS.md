@@ -3024,3 +3024,138 @@ special-casing "official" vs "private" anywhere below.
   inevitable port collision with an already-running project by hand,
   `make up-all`): a fresh project shows its own custom name in the UI
   and has exactly the two base system processes, zero devices.
+
+## 32. Data Logger (`data-logger` process kind)
+
+A permanent System process deciding what/when to write to `log_device`,
+closing the gap the 2026-07-27 Device/Node correction (section 30) left
+open on purpose: the old unconditional per-tick write from
+`dualDevicesModel.publishReading` was removed outright, with a note that
+"a future configurable process will decide what/when to log" - this is
+that process. Built with Heartbeating Control (section 28) as the
+explicit architectural template, confirmed with the user before starting.
+
+Devices only, not Nodes - a Device is atomic (exactly one value, section
+30), a Node has none to log. This is the one structural place Data
+Logger's combined list differs from Heartbeating Control's three-way
+processes+devices+nodes merge.
+
+### Config vs runtime split
+
+`devices.data_logger_control` jsonb column:
+```ts
+{ writeEnabled: boolean,
+  periodSeconds: number | null,
+  warning: { numberSkippedPeriods: number, level: number } | null,
+  error:   { numberSkippedPeriods: number, level: number } | null }
+```
+`numberSkippedPeriods` counts overdue periods **of this device's own
+`periodSeconds`**, not raw system ticks - a deliberate difference from
+Heartbeating Control's `numberSkippedTicks`, confirmed with the user
+after they connected it to how live values already carry a
+timestamp in Redis (`state:{deviceId}`'s `updatedAt` -
+`dualDevicesModel.ts`) - that key has no TTL though, so Data Logger
+tracks its own last-write time independently (below) rather than reusing
+it; "is the cached live value fresh" and "is the historical log current"
+are different questions with different producers. `writeEnabled` is
+never accepted verbatim from a client - forced `false` server-side
+whenever `periodSeconds` is (or becomes) `null`
+(`apps/api/src/dataLoggerControl.ts`'s `updateDataLoggerControl`/
+`setWriteEnabled`), matching the user's own spec ("може бути порожнім -
+свічер OFF+disable") without relying on the UI to enforce it.
+
+The "Data Logger" process's own two global switches live in its
+`processes.config` instead of a new dedicated table (there are exactly
+two booleans, and they belong to this one process - same reasoning as
+temperature-control keeping `min`/`max` on its own row):
+```ts
+{ errorWarningEnabled: boolean, tickLoggingEnabled: boolean }
+```
+
+Live/runtime state is Redis, same "plain last-write-wins timestamp, not
+TTL" reasoning as Heartbeating Control's `lastSeen` (a threshold in
+"skipped periods" can't be represented by one fixed TTL):
+- `data-logger:{deviceId}:lastLoggedAt` - set by
+  `apps/api/src/dataLoggerControl.ts`'s `touchLastLoggedAt`, called from
+  `POST /devices/:id/log` right after a successful `log_device` write.
+
+### API
+
+- `GET /data-logger-controls` - every device, sorted by name
+  (`{id, name, dataLoggerControl, lastLoggedAt}`).
+- `PATCH /data-logger-controls/:deviceId` - body
+  `{periodSeconds, warning, error}`.
+- `PUT /data-logger-controls/:deviceId/write-enabled` - body
+  `{writeEnabled}`; 400s (`NoPeriodConfiguredError`) if `periodSeconds`
+  is `null` and the caller tries to enable it - enforced here, not just
+  a disabled switch in the UI, same pattern as Heartbeating Control's
+  `NotStoppableError`.
+- `GET`/`PATCH /data-logger-controls/settings` - the process's own two
+  global switches (registered before the `:deviceId` routes so
+  `"settings"` is never matched as a device id).
+- `POST /devices/:id/log` (`routes/devices.ts`) - reads the device's own
+  current live value the same way `GET /devices/:id` does, writes it via
+  the already-existing (previously unused) `deviceLog.logReading`, and
+  touches `lastLoggedAt` in the same call. `apps/orchestrator` calls this
+  once per due device per tick rather than duplicating the EdgeX read
+  itself - it never talks to EdgeX/Postgres/Redis directly (section 4).
+
+### Orchestrator (`apps/orchestrator/src/processes/dataLogger.ts`)
+
+Every tick, for each device with `writeEnabled` and a `periodSeconds`:
+1. **Tick-resolution guard**: if `periodSeconds` is at or below one tick
+   and `tickLoggingEnabled` is `false`, the device is skipped entirely
+   this tick - no write attempt, no staleness evaluation, deliberately
+   silent (not itself a warning). This is the direct answer to the user
+   recalling the old unconditional-write behavior producing "thousands of
+   records": tick-resolution logging now requires an explicit, global,
+   off-by-default opt-in, meant for a deliberately chosen few critical
+   devices, not a blanket setting.
+2. **Write if due**: compares elapsed time since `lastLoggedAt` (never
+   logged = always due) against `periodSeconds`; if due, calls
+   `POST /devices/:id/log` and treats `lastLoggedAt` as "now" for the
+   next step - a healthy device that just logged successfully always
+   evaluates as zero periods overdue immediately after, so routine
+   logging never produces a spurious one-tick warning blip. A failed
+   write (device unreachable etc.) leaves the old `lastLoggedAt`
+   in place, so the overdue check below picks it up honestly.
+3. **Overdue check** (only if `errorWarningEnabled`): skipped-periods
+   count vs. `warning`/`error` thresholds, error taking precedence over
+   warning - same mutual-exclusivity convention as
+   `resourceMonitor.ts`/`heartbeatControl.ts`. Raised under the **Data
+   Logger process's own id**, not the overdue device's - `log_messages`
+   has no FK for devices at all, same reasoning as Heartbeating Control's
+   watchdog-reports-under-its-own-id convention (section 28).
+
+Defaults seeded (migration `..._add-data-logger`): `warning` at 1 skipped
+period, `error` at 2 - the user's own explicit numbers, given directly
+rather than inferred.
+
+### UI
+
+`apps/ui/src/views/processes/DataLoggerPanel.jsx` - lives entirely
+inside "Data Logger"'s own expandable process row (no separate page,
+same convention as every other system process's panel), two `Switch`
+toggles at the top for the global settings, then the combined device
+list below reusing the standard filter/search/pagination toolkit
+(section 11): Name/Period/Warning/Error columns, a gear `IconButton`
+opening `DataLoggerEditModal.jsx` (period input - placeholder `11.50`,
+step `0.01` - plus the same paired `ThresholdRow` shape as
+`HeartbeatEditModal.jsx`, just `numberSkippedPeriods` instead of
+`numberSkippedTicks`) and a write/ignore `Switch`, disabled whenever
+`periodSeconds` is `null`.
+
+### Verified live
+
+Not just config wiring - a real fault-injection round trip: configured
+`light-regulator-01` at a 3s period, confirmed real `log_device` rows
+landing on schedule via `GET /logs/devices` (`source: "data-logger"`),
+confirmed zero false-positive warnings while healthy, then stopped
+`apps/device-service` outright - `critical` flipped `true` on the Data
+Logger process within two periods with an accurate
+`overdue_device_{id}` WEM entry, and cleanly auto-resolved (`critical`
+back to `false`, message gone) within one period of restarting
+`device-service`. UI verified in a real browser: both global switches,
+the per-device list, the edit popup (period placeholder renders exactly
+as specified), and the write/ignore switch's disabled-until-configured
+state all behave correctly; console clean.
