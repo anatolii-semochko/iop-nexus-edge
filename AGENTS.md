@@ -3959,3 +3959,123 @@ Verified live: rebuilt (`make up-all`), opened the Node Groups popup
 (the narrowest/most reproduction-prone context) - "Add Group" renders
 on one line, button height matches the adjacent input field. `eslint`
 clean, console clean.
+
+## 42. Message Levels redesign: beep count + repeat seconds + shared signal timing profile
+
+Section 22's original Message Levels design only had `mode` (off/
+constant/shortBeep/longBeep) and `period_deciseconds` (repeat cadence,
+tenths of a second); the beep's own on-duration was a hardcoded pair of
+constants in `activeBuzzer.ts` (`SHORT_BEEP_ON_DECISECONDS = 2`,
+`LONG_BEEP_ON_DECISECONDS = 8`, section 27) - "invented defaults since
+no real hardware/spec existed yet". This section replaces that with a
+richer, fully admin-configurable model:
+
+**Schema** (`message_levels`, migration
+`1690000000041_add-beep-count-and-repeat-seconds-to-message-levels.ts`):
+`period_deciseconds` renamed to `repeat_seconds` (`numeric(6,2)`, was
+integer tenths-of-a-second) and a new nullable `beep_count` column
+(1-4, `CHECK (beep_count IS NULL OR beep_count BETWEEN 1 AND 4)`) -
+null for `off`/`constant`, required for `shortBeep`/`longBeep`. New
+singleton table `message_signal_timing` (migration
+`1690000000042_create-message-signal-timing-table.ts`, `id` pinned to
+1 via `CHECK (id = 1)`) holds the beep-length/pause profile that used
+to be `activeBuzzer.ts`'s hardcoded constants: `short_beep_seconds`,
+`short_beep_pause_seconds`, `long_beep_seconds`,
+`long_beep_pause_seconds` - one shared profile for the whole system,
+not per level (confirmed with the user - the per-level choice is which
+pattern plays and how many beeps, not how long any individual beep
+lasts). Defaults (0.20/0.20/0.80/0.40s) preserve the old hardcoded
+on-durations exactly, so nothing already configured changes sound the
+moment the migration runs.
+
+Postgres returns `numeric` columns as strings by default (`pg`'s own
+precision-safety default) - these two migrations are the first
+`numeric` columns in this schema, so `apps/api/src/db.ts` now registers
+`types.setTypeParser(1700, parseFloat)` globally so every consumer
+(`alarmPolicy.ts`, `activeBuzzer.ts`, `apps/ui`'s number inputs) gets a
+real JS number, not a numeric string.
+
+**Semantics** (confirmed with the user via `AskUserQuestion` before
+implementing): `repeat_seconds = 0` means "play the burst once when the
+alarm activates, then stay silent until the condition clears and
+re-triggers" (edge-triggered) - not "repeat with no gap", which is what
+`period_deciseconds = 0` used to mean under the old model. `> 0` means
+the whole burst (all `beep_count` beeps) replays after that many
+seconds, for as long as the condition stays active.
+
+**Routes**: `routes/messageLevels.ts`'s PATCH body is now `{ mode,
+beepCount, repeatSeconds }` - server nulls `beepCount` itself for
+off/constant rather than trusting whatever the client sent, same
+"server owns the not-applicable case" convention as heartbeat/data-
+logger thresholds' own `level: null`. New `routes/
+messageSignalTiming.ts`: `GET`/`PATCH /message-signal-timing`,
+singleton row, partial-update PATCH (any subset of the four fields).
+
+**`alarmPolicy.ts`/`activeBuzzer.ts`** (orchestrator): `AlarmPlan` now
+carries `beepCount`/`repeatSeconds` instead of `periodDeciseconds`
+(absent entirely for `constant`, which still needs no burst state at
+all - held on directly, unchanged from before). `activeBuzzer.ts`
+replaced its single `setInterval`-based pulse with a burst engine: a
+`setTimeout` chain plays `beepCount` beeps (on for the style's
+`_seconds`, off for the style's `_pause_seconds` between beeps, no
+trailing pause after the last one), then either reschedules itself
+after `repeatSeconds` (> 0) or stops and leaves `bursts` empty (=== 0).
+Edge detection uses two maps: `bursts` (the live `setTimeout` handle,
+keyed by process id) and `lastSignature` (the signature - mode +
+beepCount + repeatSeconds + the four timing values - of the last burst
+*started*, kept even after a one-shot burst finishes). Without the
+second map, a finished one-shot burst would look identical to "never
+started" on the next tick (its `bursts` entry is gone once done) and
+would incorrectly replay every tick for as long as the condition
+stayed active. A tick only starts a new burst when the signature
+actually changes; an unchanged signature is left alone whether it's
+still mid-burst, mid-repeat-wait, or already finished playing once.
+
+**UI**: new shared helper `apps/ui/src/utils/messageLevel.js` -
+`SELECTOR_OPTIONS` (the 10-entry combined off/constant/1-4 short
+beeps/1-4 long beeps list, replacing the old separate mode dropdown +
+period field), `encodeSelectorValue`/`decodeSelectorValue` (mode +
+beepCount <-> one dropdown value), and `formatMessageLevel({ type,
+mode, beepCount, repeatSeconds })` -> e.g. `"Warning 3 short beeps
+(repeatable)"` / `"Error - Constant"` / `"Warning - Off"` (`once` when
+`repeatSeconds` is 0, `repeatable` otherwise - the exact two words the
+user specified). `MessageLevelsForm.jsx` rewritten around the combined
+selector plus a seconds-format repeat input (disabled for off/
+constant, same as the old period field) and a live preview column
+using the new helper. New `MessageSignalTimingForm.jsx` (four seconds
+inputs, commit-on-blur, same pattern as the repeat field) rendered to
+the right of Message Levels via a new two-column `CRow` in
+`SettingsTab.jsx` - Message Levels owns *which* pattern plays,
+Message Signal Timing (right) owns how long a beep/pause lasts.
+
+Per the user's own explicit ask, the helper is also used outside
+Settings: `HeartbeatEditModal.jsx` and `DataLoggerEditModal.jsx`'s
+"Level 1-4" pickers (previously bare `"Level N"`, no indication of
+what picking it would actually sound like) now fetch `message-levels`
+on mount and render `"Level N - {formatMessageLevel(...)}"` - e.g.
+`"Level 2 - Warning 3 short beeps (repeatable)"` - falling back to the
+bare label while `messageLevels` hasn't loaded yet or a row is
+missing.
+
+Verified live: rebuilt (`make up-all`), migrations ran clean, `numeric`
+columns confirmed returned as real JSON numbers (not strings) via
+direct `curl`. Configured warning/1 to "3 short beeps, repeat 2s" and
+error/1 to "2 long beeps, repeat 3s" via the API, then polled
+`/devices/3` (the Buzzer device) at 150ms resolution while the
+`heartbeat-control-test` process's `simulate: true` switch drove a real
+warning-then-error condition through `Heartbeating Control` - observed
+the exact expected on/off timing for both patterns, and confirmed
+error's `longBeep` correctly took priority over warning's `shortBeep`
+(section 27's existing priority rule, unaffected by this redesign).
+Separately confirmed the `repeatSeconds = 0` "once" semantics: switched
+error/1 to `repeatSeconds: 0` while the condition was still active -
+the burst played exactly once and then stayed silent for the remainder
+of the (still-active) condition, no orchestrator errors. In the
+browser: combined selector shows all 10 options correctly, live
+preview text updates immediately on selection/typing before commit,
+`HeartbeatEditModal`'s Level dropdown correctly shows the enriched
+"Level N - ..." labels reflecting live Message Levels config, console
+clean, `eslint`/`tsc --noEmit` clean on both `apps/api` and
+`apps/orchestrator`, `alarmPolicy.test.ts`'s 7 tests updated for the
+new shape and passing. Test config reset back to the original all-`off`
+baseline afterward.

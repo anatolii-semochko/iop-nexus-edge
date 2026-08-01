@@ -20,6 +20,7 @@ import { libraryRoutes } from "./routes/library.js";
 import { logRoutes } from "./routes/logs.js";
 import { messageGroupRoutes } from "./routes/messageGroups.js";
 import { messageLevelRoutes } from "./routes/messageLevels.js";
+import { messageSignalTimingRoutes } from "./routes/messageSignalTiming.js";
 import { nodeGroupRoutes } from "./routes/nodeGroups.js";
 import { nodeRoutes } from "./routes/nodes.js";
 import { processGroupRoutes } from "./routes/processGroups.js";
@@ -90,6 +91,7 @@ export async function startApiServer(): Promise<FastifyInstance> {
   await app.register(tabGroupRoutes);
   await app.register(messageGroupRoutes);
   await app.register(messageLevelRoutes);
+  await app.register(messageSignalTimingRoutes);
   await app.register(logRoutes);
   await app.register(systemTickRoutes);
 

@@ -108,13 +108,25 @@ export interface DeviceRecord {
 }
 
 // Mirrors apps/api's message_levels row shape (AGENTS.md's Active Zummer
-// section) - see apps/orchestrator/src/alarmPolicy.ts for what consumes
-// this.
+// section, beep-count/repeat-seconds redesign AGENTS_TO_DO.md 2026-08-01) -
+// see apps/orchestrator/src/alarmPolicy.ts for what consumes this.
 export interface MessageLevelRecord {
   type: "warning" | "error";
   level: number;
   mode: "off" | "constant" | "shortBeep" | "longBeep";
-  period_deciseconds: number;
+  beep_count: number | null;
+  repeat_seconds: number;
+}
+
+// Mirrors apps/api's message_signal_timing singleton row shape - the
+// beep-pattern timing profile shared by every level/type, admin-editable
+// in Settings -> Message Levels (right-hand form). See
+// apps/orchestrator/src/processes/activeBuzzer.ts for what consumes this.
+export interface MessageSignalTimingRecord {
+  short_beep_seconds: number;
+  short_beep_pause_seconds: number;
+  long_beep_seconds: number;
+  long_beep_pause_seconds: number;
 }
 
 // Mirrors apps/api's dataLoggerControl.ts shape exactly (AGENTS.md's Data
@@ -152,6 +164,8 @@ export const apiClient = {
   // admin edit in Settings -> Message Levels should take effect on the
   // very next tick, not require an orchestrator restart.
   getMessageLevels: () => request<MessageLevelRecord[]>("/message-levels"),
+  // Same "read fresh every tick" convention as getMessageLevels above.
+  getMessageSignalTiming: () => request<MessageSignalTimingRecord>("/message-signal-timing"),
   // Orchestrator-driven write - only reaches EdgeX while the device is
   // still AUTO (AGENTS.md section 6); always records the intended value
   // even while a human has it overridden MANUAL via the UI.

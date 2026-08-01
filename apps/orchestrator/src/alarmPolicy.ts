@@ -20,19 +20,23 @@ export const ALARM_TYPE_PRIORITY: AlarmLevelType[] = ["error", "warning"];
 export type AlarmMode = "off" | "constant" | "shortBeep" | "longBeep";
 
 // Mirrors apps/api's message_levels row shape exactly (snake_case
-// `period_deciseconds`, as `GET /message-levels` actually returns it - no
-// camelCase transform happens server-side for reads, only the PATCH body
-// accepts camelCase).
+// `beep_count`/`repeat_seconds`, as `GET /message-levels` actually returns
+// it - no camelCase transform happens server-side for reads, only the
+// PATCH body accepts camelCase). `beep_count` is null for off/constant
+// rows - not applicable outside the two beep modes.
 export interface MessageLevelConfig {
   type: AlarmLevelType;
   level: number;
   mode: AlarmMode;
-  period_deciseconds: number;
+  beep_count: number | null;
+  repeat_seconds: number;
 }
 
 export interface AlarmPlan {
   mode: "constant" | "shortBeep" | "longBeep";
-  periodDeciseconds: number;
+  // Not present for "constant" - a held tone has no beep count/repeat.
+  beepCount?: number;
+  repeatSeconds?: number;
 }
 
 /**
@@ -47,8 +51,9 @@ export interface AlarmPlan {
  *
  * Picks the highest-priority type (`ALARM_TYPE_PRIORITY`) that has at
  * least one active level, then the *highest* active level within it (most
- * severe), and looks up that exact (type, level)'s configured mode/period.
- * A configured `"off"` at the winning type/level stops here - it does
+ * severe), and looks up that exact (type, level)'s configured mode/beep-
+ * count/repeat. A configured `"off"` at the winning type/level stops here -
+ * it does
  * *not* fall through to a lower-priority type, since the higher-priority
  * condition is still genuinely active; the admin simply chose not to
  * sound for it. Returns `null` when nothing is active at all, the winning
@@ -65,7 +70,12 @@ export function determineAlarmPlan(
     const maxLevel = Math.max(...levels);
     const config = messageLevels.find((c) => c.type === type && c.level === maxLevel);
     if (!config || config.mode === "off") return null;
-    return { mode: config.mode, periodDeciseconds: config.period_deciseconds };
+    if (config.mode === "constant") return { mode: "constant" };
+    return {
+      mode: config.mode,
+      beepCount: config.beep_count ?? 1,
+      repeatSeconds: config.repeat_seconds,
+    };
   }
   return null;
 }

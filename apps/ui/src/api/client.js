@@ -201,14 +201,20 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ messageGroupIds }),
     }),
-  // Message Levels (AGENTS.md section 22) - fixed 8-row matrix, only
-  // mode/period are ever edited.
+  // Message Levels (AGENTS.md section 22, beep-count/repeat-seconds
+  // redesign AGENTS_TO_DO.md 2026-08-01) - fixed 8-row matrix, only
+  // mode/beepCount/repeatSeconds are ever edited.
   listMessageLevels: () => request('/message-levels'),
-  updateMessageLevel: (type, level, mode, periodDeciseconds) =>
+  updateMessageLevel: (type, level, mode, beepCount, repeatSeconds) =>
     request(`/message-levels/${type}/${level}`, {
       method: 'PATCH',
-      body: JSON.stringify({ mode, periodDeciseconds }),
+      body: JSON.stringify({ mode, beepCount, repeatSeconds }),
     }),
+  // The beep-pattern timing profile shared by every level/type (singleton
+  // row) - to the right of Message Levels in Settings.
+  getMessageSignalTiming: () => request('/message-signal-timing'),
+  updateMessageSignalTiming: (patch) =>
+    request('/message-signal-timing', { method: 'PATCH', body: JSON.stringify(patch) }),
   // Dashboard tab (AGENTS.md section 22) - clears the flag; the API 400s
   // if the process still has active WEM entries.
   clearDashboardFlag: (id) => request(`/processes/${id}/dashboard-flag`, { method: 'DELETE' }),

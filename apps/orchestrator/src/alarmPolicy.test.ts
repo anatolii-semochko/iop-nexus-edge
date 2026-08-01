@@ -9,10 +9,10 @@ import { describe, expect, it } from "vitest";
 import { determineAlarmPlan, type MessageLevelConfig } from "./alarmPolicy.js";
 
 const LEVELS: MessageLevelConfig[] = [
-  { type: "error", level: 1, mode: "constant", period_deciseconds: 0 },
-  { type: "error", level: 2, mode: "shortBeep", period_deciseconds: 5 },
-  { type: "error", level: 3, mode: "off", period_deciseconds: 0 },
-  { type: "warning", level: 1, mode: "longBeep", period_deciseconds: 200 },
+  { type: "error", level: 1, mode: "constant", beep_count: null, repeat_seconds: 0 },
+  { type: "error", level: 2, mode: "shortBeep", beep_count: 2, repeat_seconds: 0.5 },
+  { type: "error", level: 3, mode: "off", beep_count: null, repeat_seconds: 0 },
+  { type: "warning", level: 1, mode: "longBeep", beep_count: 3, repeat_seconds: 20 },
 ];
 
 describe("determineAlarmPlan", () => {
@@ -23,28 +23,28 @@ describe("determineAlarmPlan", () => {
   it("returns the warning config when only warning is active", () => {
     expect(determineAlarmPlan({ warning: [1] }, LEVELS)).toEqual({
       mode: "longBeep",
-      periodDeciseconds: 200,
+      beepCount: 3,
+      repeatSeconds: 20,
     });
   });
 
   it("returns the error config when only error is active", () => {
     expect(determineAlarmPlan({ error: [1] }, LEVELS)).toEqual({
       mode: "constant",
-      periodDeciseconds: 0,
     });
   });
 
   it("prefers error over warning when both are active", () => {
     expect(determineAlarmPlan({ error: [1], warning: [1] }, LEVELS)).toEqual({
       mode: "constant",
-      periodDeciseconds: 0,
     });
   });
 
   it("picks the highest active level within the winning type", () => {
     expect(determineAlarmPlan({ error: [1, 2] }, LEVELS)).toEqual({
       mode: "shortBeep",
-      periodDeciseconds: 5,
+      beepCount: 2,
+      repeatSeconds: 0.5,
     });
   });
 

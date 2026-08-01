@@ -1,8 +1,9 @@
 import React from 'react'
-import { CCard, CCardBody, CCardHeader } from '@coreui/react'
+import { CCard, CCardBody, CCardHeader, CCol, CRow } from '@coreui/react'
 import { api } from '../../api/client'
 import NamedListManager from '../../components/NamedListManager'
 import MessageLevelsForm from './MessageLevelsForm'
+import MessageSignalTimingForm from './MessageSignalTimingForm'
 
 /**
  * Settings tab (AGENTS.md section 22) - four admin-config forms. Process
@@ -122,12 +123,27 @@ const SettingsTab = ({
         </CCardBody>
       </CCard>
 
-      <CCard>
-        <CCardHeader>Message Levels</CCardHeader>
-        <CCardBody>
-          <MessageLevelsForm />
-        </CCardBody>
-      </CCard>
+      {/* Message Levels owns *which* pattern plays per (type, level);
+          Message Signal Timing (right) owns how long a beep/pause lasts -
+          one shared profile for the whole system, not per level. */}
+      <CRow className="g-4">
+        <CCol lg={7}>
+          <CCard className="h-100">
+            <CCardHeader>Message Levels</CCardHeader>
+            <CCardBody>
+              <MessageLevelsForm />
+            </CCardBody>
+          </CCard>
+        </CCol>
+        <CCol lg={5}>
+          <CCard className="h-100">
+            <CCardHeader>Message Signal Timing</CCardHeader>
+            <CCardBody>
+              <MessageSignalTimingForm />
+            </CCardBody>
+          </CCard>
+        </CCol>
+      </CRow>
     </div>
   )
 }

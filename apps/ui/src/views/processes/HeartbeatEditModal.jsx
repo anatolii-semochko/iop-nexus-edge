@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import {
   CAlert,
   CButton,
@@ -13,14 +13,30 @@ import {
   CRow,
 } from '@coreui/react'
 import { api } from '../../api/client'
+import { formatMessageLevel } from '../../utils/messageLevel'
 
 const LEVEL_OPTIONS = [1, 2, 3, 4]
+
+// "Level 2 - Warning 3 short beeps (repeatable)" instead of a bare "Level
+// 2" - shows what picking this level will actually sound like, sourced
+// from Processes -> Settings -> Message Levels. Falls back to the bare
+// label while messageLevels hasn't loaded yet, or if a row is missing.
+const levelOptionLabel = (type, level, messageLevels) => {
+  const row = messageLevels?.find((r) => r.type === type && r.level === level)
+  if (!row) return `Level ${level}`
+  return `Level ${level} - ${formatMessageLevel({
+    type,
+    mode: row.mode,
+    beepCount: row.beep_count,
+    repeatSeconds: row.repeat_seconds,
+  })}`
+}
 
 // One threshold row (warning or error) - a level select that also carries
 // "off" (null - not monitored at this severity at all, AGENTS.md's
 // Heartbeating Control section) plus a skipped-ticks number input, only
 // enabled once a level is actually picked.
-const ThresholdRow = ({ label, value, onChange }) => {
+const ThresholdRow = ({ type, label, value, onChange, messageLevels }) => {
   const enabled = value !== null
   return (
     <CRow className="align-items-center g-2 mb-2">
@@ -57,7 +73,7 @@ const ThresholdRow = ({ label, value, onChange }) => {
           <option value="">Off (not monitored)</option>
           {LEVEL_OPTIONS.map((level) => (
             <option key={level} value={level}>
-              Level {level}
+              {levelOptionLabel(type, level, messageLevels)}
             </option>
           ))}
         </CFormSelect>
@@ -77,6 +93,14 @@ const HeartbeatEditModal = ({ entry, onClose, onSaved }) => {
   const [error_, setError_] = useState(entry.heartbeatControl.error)
   const [saveError, setSaveError] = useState(null)
   const [saving, setSaving] = useState(false)
+  const [messageLevels, setMessageLevels] = useState(null)
+
+  useEffect(() => {
+    api
+      .listMessageLevels()
+      .then(setMessageLevels)
+      .catch(() => {})
+  }, [])
 
   const handleSave = async () => {
     setSaving(true)
@@ -97,8 +121,20 @@ const HeartbeatEditModal = ({ entry, onClose, onSaved }) => {
       </CModalHeader>
       <CModalBody>
         {saveError && <CAlert color="danger">{saveError}</CAlert>}
-        <ThresholdRow label="Warning" value={warning} onChange={setWarning} />
-        <ThresholdRow label="Error" value={error_} onChange={setError_} />
+        <ThresholdRow
+          type="warning"
+          label="Warning"
+          value={warning}
+          onChange={setWarning}
+          messageLevels={messageLevels}
+        />
+        <ThresholdRow
+          type="error"
+          label="Error"
+          value={error_}
+          onChange={setError_}
+          messageLevels={messageLevels}
+        />
       </CModalBody>
       <CModalFooter>
         <CButton color="secondary" variant="outline" onClick={onClose} disabled={saving}>
