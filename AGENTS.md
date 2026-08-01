@@ -4079,3 +4079,45 @@ clean, `eslint`/`tsc --noEmit` clean on both `apps/api` and
 `apps/orchestrator`, `alarmPolicy.test.ts`'s 7 tests updated for the
 new shape and passing. Test config reset back to the original all-`off`
 baseline afterward.
+
+## 43. Target-project README: fix nexus-edge link broken on GitHub (local path reused as a public URL)
+
+`templates/target-project/README.md`'s "built on nexus-edge" link and
+its `docs/CREATING_A_TARGET_PROJECT.md` reference both reused
+`NEXUS_EDGE_SOURCE_PATH` - a genuine local filesystem path
+(`scripts/new-project.sh`: `realpath --relative-to="$TARGET_DIR"
+"$NEXUS_EDGE_DIR"`, correctly needed for `.env`'s docker-compose build
+context and the Makefile's version-drift check). Reused as a markdown
+link target it breaks on GitHub in a non-obvious way: a target project
+lives in its own separate repo, so a relative link like `../nexus-edge`
+resolves against *that repo's own* blob URL - GitHub reads
+`.../iop-nexus-edge-aquarium/blob/main/README.md` + `../nexus-edge` as
+`.../iop-nexus-edge-aquarium/blob/nexus-edge`, i.e. "nexus-edge" gets
+interpreted as a *branch name inside the aquarium repo*, not a path to
+a different one. User caught this by the resulting broken URL showing
+up in the rendered README.
+
+Fixed by introducing a second, separate placeholder,
+`NEXUS_EDGE_REPO_URL` - a real cross-repo URL, derived from this
+checkout's own `origin` remote (`git remote get-url origin`, SSH form
+rewritten to `https://`, `.git` suffix stripped; falls back to the
+known public URL if there is no `origin`, e.g. a from-scratch tarball
+checkout) - substituted alongside `NEXUS_EDGE_SOURCE_PATH`, which is
+untouched everywhere else (docker-compose, `.env.example`, Makefile
+version check - all still need the real local path). The doc-link line
+now shows both: a `github.com/.../blob/main/...` link that works from
+anywhere, plus the local path in parens for whoever's on the machine
+that generated the project.
+
+Same fix applied by hand to the two already-generated target projects
+(`nexus-edge-aquarium/README.md`, `nexus-edge-smart-house/README.md`) -
+their `NEXUS_EDGE_SOURCE_PATH`-derived `../nexus-edge` links replaced
+with the same `https://github.com/anatolii-semochko/iop-nexus-edge`
+URL; regenerating them via `make new-project` wasn't an option (would
+discard real project state).
+
+Verified live: ran `scripts/new-project.sh` against a scratch target
+directory, confirmed the generated `README.md` carries the correct
+`https://github.com/anatolii-semochko/iop-nexus-edge` link and the
+`.../blob/main/docs/CREATING_A_TARGET_PROJECT.md` doc link, `sh -n`
+clean, scratch directory removed afterward.

@@ -63,6 +63,22 @@ fi
 
 NEXUS_EDGE_VERSION=$(grep -m1 '"version"' "$NEXUS_EDGE_DIR/package.json" | sed -E 's/.*"version": *"([^"]+)".*/\1/')
 NEXUS_EDGE_SOURCE_PATH=$(realpath --relative-to="$TARGET_DIR" "$NEXUS_EDGE_DIR" 2>/dev/null || echo "$NEXUS_EDGE_DIR")
+# A *local filesystem path* (NEXUS_EDGE_SOURCE_PATH above) only makes
+# sense in a docker-compose build context or in .env, on the machine
+# that generated this project - it is meaningless (and actively
+# misleading) as a link target in README.md, since a target project
+# lives in its own separate git repo. GitHub even mangles it: a
+# relative link like `../nexus-edge` from a repo's README resolves
+# against the *current repo's* blob URL, so `../nexus-edge` becomes
+# `.../<this-repo>/blob/nexus-edge` - GitHub then reads "nexus-edge" as
+# a branch name *in this repo*, not a path to a different one. README.md
+# needs a real, stable, cross-repo URL instead - derived from this
+# checkout's own `origin` remote (falls back to the known public URL if
+# there is no remote, e.g. a from-scratch tarball checkout).
+NEXUS_EDGE_REPO_URL=$(git -C "$NEXUS_EDGE_DIR" remote get-url origin 2>/dev/null | sed -E 's#^git@([^:]+):#https://\1/#; s#\.git$##')
+if [ -z "$NEXUS_EDGE_REPO_URL" ]; then
+  NEXUS_EDGE_REPO_URL="https://github.com/anatolii-semochko/iop-nexus-edge"
+fi
 
 echo "Generating '$PROJECT_NAME' (slug: $SLUG) at $TARGET_DIR ..."
 echo "  nexus-edge source: $NEXUS_EDGE_SOURCE_PATH (version $NEXUS_EDGE_VERSION)"
@@ -79,6 +95,7 @@ find "$TARGET_DIR" -type f -print0 | xargs -0 sed -i \
   -e "s|__PROJECT_NAME__|$PROJECT_NAME|g" \
   -e "s|__SLUG__|$SLUG|g" \
   -e "s|__NEXUS_EDGE_SOURCE_PATH__|$NEXUS_EDGE_SOURCE_PATH|g" \
+  -e "s|__NEXUS_EDGE_REPO_URL__|$NEXUS_EDGE_REPO_URL|g" \
   -e "s|__NEXUS_EDGE_VERSION__|$NEXUS_EDGE_VERSION|g"
 
 cp "$TARGET_DIR/.env.example" "$TARGET_DIR/.env"
