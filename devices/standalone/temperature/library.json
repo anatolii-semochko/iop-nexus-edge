@@ -1,0 +1,5 @@
+{
+  "id": "device-temperature",
+  "name": "Temperature",
+  "description": "Example simulated temperature sensor - single Float32 reading, read-only."
+}

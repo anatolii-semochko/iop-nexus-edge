@@ -23,7 +23,6 @@ const BuzzerIndicator = ({ active }) => (
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      margin: '0 auto',
     }}
   >
     <div

@@ -23,10 +23,16 @@ const NodesList = React.lazy(() => import('./views/devices/NodesList'))
 const DevicesList = React.lazy(() => import('./views/devices/DevicesList'))
 const DeviceDetail = React.lazy(() => import('./views/devices/DeviceDetail'))
 const DevSimulator = React.lazy(() => import('./views/devices/DevSimulator'))
-const LiveEvents = React.lazy(() => import('./views/devices/LiveEvents'))
+
+// Library
+const LibraryBrowser = React.lazy(() => import('./views/library/LibraryBrowser'))
 
 // Processes
 const ProcessesList = React.lazy(() => import('./views/processes/ProcessesList'))
+
+// Logs
+const LiveEvents = React.lazy(() => import('./views/logs/LiveEvents'))
+const LogsList = React.lazy(() => import('./views/logs/LogsList'))
 
 // Users
 const UsersList = React.lazy(() => import('./views/users/UsersList'))
@@ -56,8 +62,10 @@ export const routes = [
   { path: '/devices', name: 'Devices', element: DevicesList, exact: true },
   { path: '/devices/:id', name: 'Device Detail', element: DeviceDetail },
   { path: '/dev-simulator', name: 'Dev Simulator', element: DevSimulator },
-  { path: '/live-events', name: 'Live Events', element: LiveEvents },
+  { path: '/library', name: 'Library', element: LibraryBrowser },
   { path: '/processes', name: 'Processes', element: ProcessesList },
+  { path: '/live-events', name: 'Live Events', element: LiveEvents },
+  { path: '/logs', name: 'Logs', element: LogsList },
   { path: '/users', name: 'Users', element: UsersList },
 ]
 

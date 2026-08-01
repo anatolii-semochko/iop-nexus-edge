@@ -1,11 +1,54 @@
-# Smoke-test fixture only - proves the physical/virtual switch and the
-# Virtual Node Runtime work end-to-end. Remove once real device types exist
-# under devices/ (see AGENTS.md section 7) and are provisioned the intended
-# way (via the Device Registry, not a static file here).
+# Smoke-test/demo fixture only - proves the physical/virtual switch and the
+# Virtual Node Runtime work end-to-end. Four separate atomic devices now
+# (a temperature sensor + three independent relays), each its own EdgeX
+# device with its own protocols.backend.mode - previously bundled into one
+# EdgeX device with four resources, forcing them to share a single
+# physical/virtual mode (see AGENTS_TO_DO.md's 2026-07-27 Device/Node refactor,
+# and apps/device-service/internal/driver/backend.go's own doc comment on
+# why that coupling was wrong). Registered as devices in the Device
+# Registry attached to a single Node ("example-thermal-node-01" - see
+# apps/api's seed migration), not standalone.
 deviceList:
-  - name: "example-virtual-sensor-01"
-    profileName: "NexusEdge-Example-Virtual"
-    description: "Example virtual device (Virtual Node Runtime smoke test)"
+  - name: "example-temperature-01"
+    profileName: "NexusEdge-Example-Temperature"
+    description: "Example simulated temperature sensor (Virtual Node Runtime smoke test)"
+    labels:
+      - "example"
+    protocols:
+      backend:
+        mode: "virtual"
+      virtual:
+        "initial.Temperature": 21.5
+    autoEvents:
+      - interval: "10s"
+        onChange: false
+        sourceName: "Temperature"
+
+  - name: "example-heater-01"
+    profileName: "NexusEdge-Example-Heater"
+    description: "Example heater relay - must never be on at the same time as example-cooler-01"
+    labels:
+      - "example"
+    protocols:
+      backend:
+        mode: "virtual"
+      virtual:
+        "initial.Heater": false
+
+  - name: "example-cooler-01"
+    profileName: "NexusEdge-Example-Cooler"
+    description: "Example cooler relay - must never be on at the same time as example-heater-01"
+    labels:
+      - "example"
+    protocols:
+      backend:
+        mode: "virtual"
+      virtual:
+        "initial.Cooler": false
+
+  - name: "example-switch-01"
+    profileName: "NexusEdge-Example-Switch"
+    description: "Example actuated boolean state - not driven by any process"
     labels:
       - "example"
     protocols:
@@ -13,10 +56,3 @@ deviceList:
         mode: "virtual"
       virtual:
         "initial.Switch": false
-        "initial.Temperature": 21.5
-        "initial.Heater": false
-        "initial.Cooler": false
-    autoEvents:
-      - interval: "10s"
-        onChange: false
-        sourceName: "Temperature"

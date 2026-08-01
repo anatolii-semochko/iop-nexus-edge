@@ -1,0 +1,5 @@
+# Always empty for a node-attached device (AGENTS.md section 30). Switch
+# has no forbidden-state relationship with any other device on this Node -
+# it isn't read by either the temperature-control or temperature-monitor
+# process kinds.
+forbidden: []

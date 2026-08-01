@@ -26,7 +26,7 @@ import CIcon from '@coreui/icons-react'
 import { cilBell, cilCheckCircle, cilReload, cilX } from '@coreui/icons'
 import { api } from '../../api/client'
 import { useProcessesLiveState } from '../../api/useLiveProcess'
-import { formatSmartDateTime } from '../../utils/format'
+import { formatSmartDateTime, userInitials } from '../../utils/format'
 import IconButton from '../IconButton'
 import ResetFiltersButton from '../ResetFiltersButton'
 import TablePagination from '../table/TablePagination'
@@ -50,14 +50,6 @@ const TABS = [
 const PAGE_SIZE_OPTIONS = [20, 50, 100]
 const DEFAULT_PAGE_SIZE = 20
 
-const initials = (user) =>
-  (user.display_name ?? user.username)
-    .split(/\s+/)
-    .map((part) => part[0])
-    .slice(0, 2)
-    .join('')
-    .toUpperCase()
-
 /**
  * Notification center popup (AGENTS.md section 25) - opened from the
  * header icons (NotificationCenter.jsx), one per WEM type, or "All" via
@@ -74,7 +66,7 @@ const initials = (user) =>
  * `messages` array is already exactly "currently active, unhidden" per
  * process, so no REST call/pagination for it at all, just a client-side
  * flatten+filter/sort. "New"/"All" still hit the server-paginated
- * `GET /process-messages` (section 11's "client-side, tens of rows"
+ * `GET /log-messages` (section 11's "client-side, tens of rows"
  * doesn't hold for an append-only log). "Active" only makes UI sense for
  * warning/error (a `message` never resolves - section 22), hidden when
  * `type === 'message'`.
@@ -143,6 +135,28 @@ const NotificationCenterModal = ({ type, onTypeChange, onClose }) => {
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
   }, [live, processNameById, type, processFilter, search])
 
+  // Picks a useful starting tab for this type selection (AGENTS_TO_DO.md,
+  // 2026-08-01, corrected same day - the original fix defaulted to "All"
+  // when nothing was active; "New" is the right fallback, "All" was a
+  // mistake in the original spec). "Active" if it's visible for this type
+  // and currently has something in it, "New" otherwise - "All" is still
+  // manually selectable, just never the auto-picked default. Keyed only
+  // on `type` (opening or switching type), not on `activeItems` - this
+  // should decide where to land when the type selection changes, not keep
+  // yanking the user back to "Active" every time a new alarm arrives
+  // while they're already reading a different tab. This component never
+  // unmounts (only its rich content toggles on `type`), so `useState
+  // ('new')`'s initial value alone can't provide a fresh default on every
+  // open - an effect is the only way to react to `type` going from `null`
+  // to set, or from one type to another.
+  useEffect(() => {
+    if (!type) return
+    const activeVisible = type !== 'message'
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setTab(activeVisible && activeItems.length > 0 ? 'active' : 'new')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [type])
+
   // Every filter setter resets `page` to 1 (and the checkbox selection,
   // which belongs to whatever result set was on screen when it was made)
   // in the same event handler that changes the filter, not a separate
@@ -188,12 +202,27 @@ const NotificationCenterModal = ({ type, onTypeChange, onClose }) => {
   }
 
   useEffect(() => {
-    if (!type || effectiveTab === 'active') return
+    if (!type || effectiveTab === 'active') {
+      // Defensive reset, not just an early-out (2026-08-01 follow-up,
+      // found live): switching straight to "Active" - now possible
+      // programmatically (the default-tab effect above), not only via a
+      // user's own click on the New/All tab this effect was mid-fetch
+      // for - cancels that in-flight fetch below, but its own `.finally`
+      // skips `setLoading(false)` for a cancelled run (correctly, so a
+      // stale response can't clear a *newer* fetch's spinner) - leaving
+      // `loading` stuck `true` forever with nothing left to ever flip it
+      // back, since Active's own view never fetches at all. Reproduced
+      // live: Errors bell opened straight onto the now-empty Active tab
+      // stuck on an infinite spinner.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setLoading(false)
+      return
+    }
     let cancelled = false
     // setLoading/setError here are the effect's whole job, not incidental -
     // synchronizing "a fetch tied to these dependencies is in flight" with
     // the dependencies changing is exactly what this effect exists to do.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+
     setLoading(true)
     setError(null)
     api
@@ -410,7 +439,7 @@ const NotificationCenterModal = ({ type, onTypeChange, onClose }) => {
                                   />
                                 ) : (
                                   <CAvatar color="secondary" textColor="white" size="sm">
-                                    {initials(item.hidden_by_user)}
+                                    {userInitials(item.hidden_by_user)}
                                   </CAvatar>
                                 )}
                               </span>

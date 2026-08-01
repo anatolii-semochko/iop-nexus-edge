@@ -21,7 +21,13 @@ services:
     container_name: nexus-edge-redis
     restart: unless-stopped
     ports:
-      - "127.0.0.1:${REDIS_PORT}:6379"
+      # Distinct from REDIS_PORT (redis's own container-internal listen
+      # port, always 6379, used internally by api/orchestrator) - same
+      # separation POSTGRES_PORT/POSTGRES_HOST_PORT already have below.
+      # Host-side debug port only; reusing REDIS_PORT for both broke
+      # nexus-edge-smart-house's EdgeX connection the same way
+      # (AGENTS_TO_DO.md 2026-07-28).
+      - "127.0.0.1:${REDIS_HOST_PORT}:6379"
     volumes:
       - redis-data:/data
     networks:
@@ -35,8 +41,11 @@ services:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
     ports:
-      - "127.0.0.1:${RABBITMQ_PORT}:5672"
-      - "127.0.0.1:${RABBITMQ_MANAGEMENT_PORT}:15672"
+      # Distinct from RABBITMQ_PORT (internal AMQP connection port for
+      # api/orchestrator/messaging-gateway, always 5672) - same reasoning
+      # as REDIS_HOST_PORT above.
+      - "127.0.0.1:${RABBITMQ_HOST_PORT}:5672"
+      - "127.0.0.1:${RABBITMQ_MANAGEMENT_HOST_PORT}:15672"
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
     networks:

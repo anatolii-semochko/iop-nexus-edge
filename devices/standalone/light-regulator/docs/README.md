@@ -3,26 +3,27 @@
 Standalone virtual sensor - a universal 0-100 linear regulator, modeled on
 a physical rotary/linear dial (e.g. a potentiometer feeding an ADC). It is
 the platform's first real device type provisioned under `devices/`
-(AGENTS.md section 7), alongside `apps/device-service`'s
-`NexusEdge-Example-Virtual` smoke-test fixture (still present, not
-replaced by this).
+(AGENTS.md section 7), alongside `apps/device-service`'s own
+smoke-test fixture devices under `devices/nodes/example-thermal-node/`
+(section 30).
 
 ## Behavior
 
-- Single resource, `Level`: `Int32`, range `0-100`, step `1`.
+- Single value, `Level`: `Int32`, range `0-100`, step `1`. (A Device is
+  atomic - AGENTS.md section 30 - so there is no separate "resource"
+  dimension; the device itself *is* `Level`.)
 - Pure sensor - **read-only** from the platform's perspective
-  (`capabilities.resources[].readOnly: true`, see
-  `apps/api/src/routes/devices.ts`). It has no `AUTO`/`MANUAL` mode:
-  nothing ever commands it, it only reports its current position.
+  (`capabilities.readOnly: true`, see `apps/api/src/routes/devices.ts`).
+  It has no `AUTO`/`MANUAL` mode: nothing ever commands it, it only
+  reports its current position.
 - In production (`ui/control`) it renders as a disabled slider - a visual
   gauge of the dial's current position, not an interactive control.
 - In the Dev Simulator (`ui/simulator`) it renders as an interactive
-  slider: dragging it calls `PUT
-  /devices/:id/resources/Level/simulate`, simulating a person physically
-  turning the dial. This is the only place its value can be set at all -
-  even in dev mode it never goes through the normal MANUAL-override path
-  (`PUT /devices/:id/resources/Level`), which is reserved for
-  controllable (non-`readOnly`) resources.
+  slider: dragging it calls `PUT /devices/:id/simulate`, simulating a
+  person physically turning the dial. This is the only place its value
+  can be set at all - even in dev mode it never goes through the normal
+  MANUAL-override path (`PUT /devices/:id/auto`), which is reserved for
+  controllable (non-`readOnly`) devices.
 
 ## Physical mapping (future firmware)
 

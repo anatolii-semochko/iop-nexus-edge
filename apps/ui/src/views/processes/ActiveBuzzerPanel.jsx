@@ -26,7 +26,7 @@ const ActiveBuzzerPanel = ({ process }) => {
 
   if (!device) return null
 
-  const active = (live.Buzzer ? live.Buzzer.value : device.resources?.Buzzer?.value) === true
+  const active = (live.value !== undefined ? live.value : device.value) === true
 
   return (
     <div className="p-3 pt-0 d-flex align-items-center gap-3">

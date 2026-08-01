@@ -1,0 +1,5 @@
+{
+  "id": "device-active-buzzer",
+  "name": "Active Buzzer",
+  "description": "Sound-output actuator - single Bool device, driven by the Active Zummer alarm process."
+}

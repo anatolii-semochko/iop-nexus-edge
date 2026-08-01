@@ -6,7 +6,7 @@ generator, modeled on the platform's "first real device type" precedent
 
 ## Behavior
 
-- Single resource, `Buzzer`: `Bool`. `true` sounds the buzzer, `false` is
+- Single value, `Buzzer`: `Bool`. `true` sounds the buzzer, `false` is
   silent - no tone/frequency control, an active buzzer generates its own
   fixed tone internally.
 - Ordinary actuator (**not** read-only) - has a normal AUTO/MANUAL Dual

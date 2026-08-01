@@ -1,0 +1,17 @@
+name: "NexusEdge-Example-Switch"
+manufacturer: "NexusEdge"
+model: "example-switch"
+labels:
+  - "example"
+  - "thermal"
+description: "Example manual switch - atomic device, one Bool value, unused by any process"
+
+deviceResources:
+  - name: "Switch"
+    isHidden: false
+    description: "Switch state"
+    properties:
+      valueType: "Bool"
+      readWrite: "RW"
+
+deviceCommands: []

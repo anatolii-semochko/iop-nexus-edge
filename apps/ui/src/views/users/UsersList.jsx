@@ -21,7 +21,15 @@ import { api } from '../../api/client'
 import TablePagination from '../../components/table/TablePagination'
 import TableSearchInput from '../../components/table/TableSearchInput'
 import { usePagination } from '../../hooks/usePagination'
+import { usePersistedState } from '../../hooks/usePersistedState'
 import UserForm from './UserForm'
+
+// Registration for usePersistedState (AGENTS_TO_DO.md, 2026-08-01) - flat
+// variant, same shape as NodesList.jsx/DevicesList.jsx.
+const PERSISTED_DEFAULTS = {
+  search: '',
+  pageSize: 10,
+}
 
 const matchesSearch = (user, search) => {
   if (!search) return true
@@ -78,7 +86,9 @@ const DeleteButton = ({ user, onDeleted, onError }) => {
 const UsersList = () => {
   const [users, setUsers] = useState(null)
   const [error, setError] = useState(null)
-  const [search, setSearch] = useState('')
+  const [pageState, setPageState] = usePersistedState('nexusedge.usersPage', PERSISTED_DEFAULTS)
+  const { search } = pageState
+  const setSearch = (value) => setPageState({ search: value })
   const [editingUser, setEditingUser] = useState(null)
   const [creating, setCreating] = useState(false)
 
@@ -95,7 +105,10 @@ const UsersList = () => {
   useEffect(reload, [])
 
   const filtered = (users ?? []).filter((user) => matchesSearch(user, search))
-  const { page, pageSize, pageItems, totalItems, setPage, setPageSize } = usePagination(filtered)
+  const { page, pageSize, pageItems, totalItems, setPage, setPageSize } = usePagination(filtered, {
+    pageSize: pageState.pageSize,
+    onPageSizeChange: (size) => setPageState({ pageSize: size }),
+  })
 
   const handleToggleActive = async (user) => {
     try {

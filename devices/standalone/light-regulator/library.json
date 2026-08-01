@@ -1,0 +1,5 @@
+{
+  "id": "device-light-regulator",
+  "name": "Light Regulator",
+  "description": "Linear light dimmer - single Int32 level (0-100), read-only sensor-style device."
+}

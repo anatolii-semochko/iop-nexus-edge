@@ -4,76 +4,119 @@
 // platform's first sound-output process, others to follow later (some
 // controllable, some not, per the user's own stated direction). Runs once
 // per tick (1s, same as every other process kind) while "on"; while "off"
-// it forces the buzzer silent, same on->off edge handling as
-// temperatureControl.ts.
+// it forces the buzzer silent, same on->off edge handling the
+// temperature-control process plugin uses (moved to
+// nexus-edge-smart-house, AGENTS_TO_DO.md 2026-07-29).
 //
-// `constant` mode needs no timer at all - the buzzer is simply held true
-// for as long as the condition (and this process) stays on. `shortBeep`/
-// `longBeep` need sub-second on/off precision the shared 1s tick can't
-// give on its own, so this module starts a private per-process interval
-// (independent of the main RUNNERS loop in index.ts) that does the actual
-// pulsing - the 1s tick's job is only to decide *whether* that private
-// timer should be running, and with what period, not to drive it directly.
+// Beep-count/repeat-seconds redesign (AGENTS_TO_DO.md, 2026-08-01):
+// `constant` mode still needs no timer at all - the buzzer is simply held
+// true for as long as the condition (and this process) stays on.
+// `shortBeep`/`longBeep` now play a *burst* of the admin's configured
+// `beepCount` beeps (each on for `message_signal_timing`'s per-style
+// on-duration, separated by that style's own pause) - sub-second
+// precision the shared 1s tick can't give on its own, so this module
+// schedules the burst itself via a private per-process `setTimeout` chain
+// (independent of the main RUNNERS loop in index.ts). Once a burst
+// finishes: if `repeatSeconds` > 0, the whole burst replays after that
+// many seconds for as long as the condition stays active; if 0, it played
+// once for this activation and stays silent until the condition clears
+// and re-triggers (edge-triggered - confirmed with the user).
 
 import { apiClient, type ProcessRecord } from "../apiClient.js";
 import { determineAlarmPlan } from "../alarmPolicy.js";
 import { logger } from "../logger.js";
 
-// How long the buzzer stays *on* within each repeat period for shortBeep/
-// longBeep - the period itself (how often it repeats) is the admin's own
-// `period_deciseconds` (Processes -> Settings -> Message Levels, already
-// built); these two are fixed system constants for the tone's own
-// duration, not per-level configurable (confirmed with the user - the
-// per-level choice is *which* of these two patterns plays, via `mode`,
-// not how long either one lasts).
-const SHORT_BEEP_ON_DECISECONDS = 2; // 200ms chirp
-const LONG_BEEP_ON_DECISECONDS = 8; // 800ms tone
-
 const lastStatus = new Map<number, "on" | "off">();
 
-interface BuzzerTimer {
-  intervalHandle: ReturnType<typeof setInterval>;
-  timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-  mode: "shortBeep" | "longBeep";
-  periodDeciseconds: number;
+interface BurstState {
+  timeoutHandle: ReturnType<typeof setTimeout>;
+  // What this burst chain is currently playing - compared against a fresh
+  // tick's plan to decide whether to let it keep running (repeatSeconds >
+  // 0, still mid-cycle) or start over.
+  signature: string;
 }
 // Keyed by process id, not a single module-level timer - nothing stops a
 // second buzzer-kind process existing later (a different device, e.g. a
-// second sound output elsewhere), each needing its own independent pulse.
-const timers = new Map<number, BuzzerTimer>();
+// second sound output elsewhere), each needing its own independent burst.
+const bursts = new Map<number, BurstState>();
 
-function stopTimer(processId: number): void {
-  const timer = timers.get(processId);
-  if (!timer) return;
-  clearInterval(timer.intervalHandle);
-  if (timer.timeoutHandle) clearTimeout(timer.timeoutHandle);
-  timers.delete(processId);
+// The signature of the last burst *started* for this process, kept even
+// after a one-shot (repeatSeconds === 0) burst finishes playing - without
+// this, a finished one-shot burst would look identical to "never started"
+// on the next tick (its `bursts` entry is gone once done) and would
+// incorrectly replay every tick for as long as the condition stays active.
+const lastSignature = new Map<number, string>();
+
+function stopBurst(processId: number): void {
+  const burst = bursts.get(processId);
+  if (!burst) return;
+  clearTimeout(burst.timeoutHandle);
+  bursts.delete(processId);
 }
 
 function writeBuzzer(deviceId: number, value: boolean): void {
-  apiClient.setResourceAuto(deviceId, "Buzzer", value).catch((err) => {
-    logger.warn({ err, deviceId, value }, "active-buzzer: failed to write Buzzer resource");
+  apiClient.setDeviceAuto(deviceId, value).catch((err) => {
+    logger.warn({ err, deviceId, value }, "active-buzzer: failed to write Buzzer device");
   });
 }
 
-function startTimer(processId: number, deviceId: number, mode: "shortBeep" | "longBeep", periodDeciseconds: number): void {
-  const onDeciseconds = mode === "shortBeep" ? SHORT_BEEP_ON_DECISECONDS : LONG_BEEP_ON_DECISECONDS;
-  const periodMs = Math.max(periodDeciseconds, 1) * 100;
-  // The tone can never outlast its own repeat period - a misconfigured
-  // period shorter than the fixed on-duration just means "on the whole
-  // time", not an overlapping/negative off-window.
-  const onMs = Math.min(onDeciseconds * 100, periodMs);
+function planSignature(
+  mode: "shortBeep" | "longBeep",
+  beepCount: number,
+  repeatSeconds: number,
+  timing: Awaited<ReturnType<typeof apiClient.getMessageSignalTiming>>,
+): string {
+  return [
+    mode,
+    beepCount,
+    repeatSeconds,
+    timing.short_beep_seconds,
+    timing.short_beep_pause_seconds,
+    timing.long_beep_seconds,
+    timing.long_beep_pause_seconds,
+  ].join(":");
+}
 
-  const pulse = () => {
-    writeBuzzer(deviceId, true);
-    const timeoutHandle = setTimeout(() => writeBuzzer(deviceId, false), onMs);
-    const timer = timers.get(processId);
-    if (timer) timer.timeoutHandle = timeoutHandle;
+/**
+ * Schedules a burst of `beepCount` beeps (on for `onSeconds`, off for
+ * `pauseSeconds` between beeps, no trailing pause after the last one), then
+ * either reschedules itself after `repeatSeconds` (> 0) or stops and leaves
+ * `bursts` empty (=== 0 - `lastSignature` above is what remembers this
+ * activation already played once).
+ */
+function playBurst(
+  processId: number,
+  deviceId: number,
+  beepCount: number,
+  onSeconds: number,
+  pauseSeconds: number,
+  repeatSeconds: number,
+  signature: string,
+): void {
+  const schedule = (delayMs: number, fn: () => void): void => {
+    const timeoutHandle = setTimeout(fn, Math.max(delayMs, 0));
+    bursts.set(processId, { timeoutHandle, signature });
   };
 
-  const intervalHandle = setInterval(pulse, periodMs);
-  timers.set(processId, { intervalHandle, timeoutHandle: undefined, mode, periodDeciseconds });
-  pulse(); // fire immediately - don't make a fresh alarm wait a full period for its first sound
+  let beepsPlayed = 0;
+  const playOneBeep = (): void => {
+    writeBuzzer(deviceId, true);
+    schedule(onSeconds * 1000, () => {
+      writeBuzzer(deviceId, false);
+      beepsPlayed += 1;
+      if (beepsPlayed < beepCount) {
+        schedule(pauseSeconds * 1000, playOneBeep);
+      } else if (repeatSeconds > 0) {
+        schedule(repeatSeconds * 1000, () => {
+          beepsPlayed = 0;
+          playOneBeep();
+        });
+      } else {
+        bursts.delete(processId);
+      }
+    });
+  };
+  playOneBeep();
 }
 
 export async function runActiveBuzzer(process: ProcessRecord): Promise<void> {
@@ -88,7 +131,8 @@ export async function runActiveBuzzer(process: ProcessRecord): Promise<void> {
 
   if (status === "off") {
     if (previous === "on") {
-      stopTimer(process.id);
+      stopBurst(process.id);
+      lastSignature.delete(process.id);
       writeBuzzer(process.device_id, false);
     }
     return;
@@ -114,23 +158,40 @@ export async function runActiveBuzzer(process: ProcessRecord): Promise<void> {
   const plan = determineAlarmPlan(activeLevelsByType, messageLevels);
 
   if (!plan) {
-    stopTimer(process.id);
+    stopBurst(process.id);
+    lastSignature.delete(process.id);
     writeBuzzer(process.device_id, false);
     return;
   }
 
   if (plan.mode === "constant") {
     // Handled without a tick, per spec - held on directly, no pulsing.
-    stopTimer(process.id);
+    stopBurst(process.id);
+    lastSignature.delete(process.id);
     writeBuzzer(process.device_id, true);
     return;
   }
 
-  const existing = timers.get(process.id);
-  const modeOrPeriodChanged =
-    !existing || existing.mode !== plan.mode || existing.periodDeciseconds !== plan.periodDeciseconds;
-  if (modeOrPeriodChanged) {
-    stopTimer(process.id);
-    startTimer(process.id, process.device_id, plan.mode, plan.periodDeciseconds);
+  let timing: Awaited<ReturnType<typeof apiClient.getMessageSignalTiming>>;
+  try {
+    timing = await apiClient.getMessageSignalTiming();
+  } catch (err) {
+    logger.warn({ err }, "active-buzzer: failed to read signal timing config");
+    return;
   }
+
+  const beepCount = plan.beepCount ?? 1;
+  const repeatSeconds = plan.repeatSeconds ?? 0;
+  const signature = planSignature(plan.mode, beepCount, repeatSeconds, timing);
+
+  // Same signature already started (whether it's still mid-burst, mid-
+  // repeat-wait, or already finished a one-shot) - let it keep running
+  // undisturbed rather than restarting mid-pattern every tick.
+  if (lastSignature.get(process.id) === signature) return;
+
+  stopBurst(process.id);
+  lastSignature.set(process.id, signature);
+  const onSeconds = plan.mode === "shortBeep" ? timing.short_beep_seconds : timing.long_beep_seconds;
+  const pauseSeconds = plan.mode === "shortBeep" ? timing.short_beep_pause_seconds : timing.long_beep_pause_seconds;
+  playBurst(process.id, process.device_id, beepCount, onSeconds, pauseSeconds, repeatSeconds, signature);
 }

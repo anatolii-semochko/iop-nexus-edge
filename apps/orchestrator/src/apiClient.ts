@@ -33,6 +33,14 @@ export interface ProcessRecord {
     cpuWarnMax?: number;
     ramWarnMax?: number;
     diskWarnMax?: number;
+    // temperature-control/temperature-monitor role -> deviceId mapping
+    // (AGENTS_TO_DO.md's 2026-07-27 Device/Node refactor, roadmap Phase 4.1) - a
+    // single `device_id` above no longer says enough once the sensor and
+    // its two actuators are three separate atomic Devices, not one bundled
+    // one with three named resources.
+    sensorDeviceId?: number;
+    heaterDeviceId?: number;
+    coolerDeviceId?: number;
   };
   status?: "on" | "off";
   // Fleet-wide, unfiltered by any user's "hidden" dismissal (AGENTS.md's
@@ -43,6 +51,35 @@ export interface ProcessRecord {
   // still-active physical alarm).
   critical: boolean;
   warning: boolean;
+  // Heartbeating Control (AGENTS.md) - `heartbeat_control` is this
+  // process's own design-time config (Postgres); `heartbeatStopped`/
+  // `heartbeatLastSeenAt` are its live Redis counterparts, both already
+  // folded into this same GET /processes response so the heartbeat-control
+  // process kind needs no separate call.
+  heartbeat_control: HeartbeatControlConfig;
+  heartbeatStopped: boolean;
+  heartbeatLastSeenAt: string | null;
+  // "heartbeat-control-test" kind only - its own internal simulate-
+  // failure flag (Redis, set from its detail panel's switch, never the
+  // generic ON/OFF status mechanism - AGENTS.md's Heartbeating Control
+  // section explains why). Present on every process record regardless of
+  // kind, same as heartbeatStopped above.
+  heartbeatTestSimulateFailure: boolean;
+}
+
+// Mirrors apps/api's heartbeatControl.ts shape exactly (AGENTS.md's
+// Heartbeating Control section) - no shared types package exists yet
+// (AGENTS_TO_DO.md's refactoring notes, Etap 1/Phase 2) so this is hand-kept in
+// sync, same known risk as every other cross-service DTO in this app.
+export interface HeartbeatThreshold {
+  numberSkippedTicks: number;
+  level: number;
+}
+
+export interface HeartbeatControlConfig {
+  stoppable: boolean;
+  warning: HeartbeatThreshold | null;
+  error: HeartbeatThreshold | null;
 }
 
 export interface ProcessMetrics {
@@ -63,23 +100,60 @@ export interface MessageInput {
 // syncActiveMessages there for what each mode means.
 export type AutoResolveMode = "always" | "when-hidden" | "never";
 
-export interface DeviceReading {
+// A Device is atomic now (AGENTS_TO_DO.md's 2026-07-27 Device/Node refactor) -
+// exactly one value, not a map of named resources.
+export interface DeviceRecord {
+  id: number;
   value: unknown;
 }
 
-export interface DeviceRecord {
-  id: number;
-  resources: Record<string, DeviceReading | null>;
-}
-
 // Mirrors apps/api's message_levels row shape (AGENTS.md's Active Zummer
-// section) - see apps/orchestrator/src/alarmPolicy.ts for what consumes
-// this.
+// section, beep-count/repeat-seconds redesign AGENTS_TO_DO.md 2026-08-01) -
+// see apps/orchestrator/src/alarmPolicy.ts for what consumes this.
 export interface MessageLevelRecord {
   type: "warning" | "error";
   level: number;
   mode: "off" | "constant" | "shortBeep" | "longBeep";
-  period_deciseconds: number;
+  beep_count: number | null;
+  repeat_seconds: number;
+}
+
+// Mirrors apps/api's message_signal_timing singleton row shape - the
+// beep-pattern timing profile shared by every level/type, admin-editable
+// in Settings -> Message Levels (right-hand form). See
+// apps/orchestrator/src/processes/activeBuzzer.ts for what consumes this.
+export interface MessageSignalTimingRecord {
+  short_beep_seconds: number;
+  short_beep_pause_seconds: number;
+  long_beep_seconds: number;
+  long_beep_pause_seconds: number;
+}
+
+// Mirrors apps/api's dataLoggerControl.ts shape exactly (AGENTS.md's Data
+// Logger section) - same hand-kept-in-sync caveat as HeartbeatControlConfig
+// above.
+export interface DataLoggerThreshold {
+  numberSkippedPeriods: number;
+  level: number;
+}
+
+export interface DataLoggerControlConfig {
+  writeEnabled: boolean;
+  periodSeconds: number | null;
+  warning: DataLoggerThreshold | null;
+  error: DataLoggerThreshold | null;
+}
+
+export interface DataLoggerControlEntry {
+  id: number;
+  name: string;
+  dataLoggerControl: DataLoggerControlConfig;
+  lastLoggedAt: string | null;
+}
+
+export interface DataLoggerSettings {
+  errorWarningEnabled: boolean;
+  tickLoggingEnabled: boolean;
 }
 
 export const apiClient = {
@@ -90,11 +164,13 @@ export const apiClient = {
   // admin edit in Settings -> Message Levels should take effect on the
   // very next tick, not require an orchestrator restart.
   getMessageLevels: () => request<MessageLevelRecord[]>("/message-levels"),
-  // Orchestrator-driven write - only reaches EdgeX while the resource is
+  // Same "read fresh every tick" convention as getMessageLevels above.
+  getMessageSignalTiming: () => request<MessageSignalTimingRecord>("/message-signal-timing"),
+  // Orchestrator-driven write - only reaches EdgeX while the device is
   // still AUTO (AGENTS.md section 6); always records the intended value
   // even while a human has it overridden MANUAL via the UI.
-  setResourceAuto: (deviceId: number, resource: string, value: unknown) =>
-    request(`/devices/${deviceId}/resources/${resource}/auto`, {
+  setDeviceAuto: (deviceId: number, value: unknown) =>
+    request(`/devices/${deviceId}/auto`, {
       method: "PUT",
       body: JSON.stringify({ value }),
     }),
@@ -142,4 +218,29 @@ export const apiClient = {
       method: "POST",
       body: JSON.stringify({ reason }),
     }),
+  // System tick pulse (AGENTS_TO_DO.md, 2026-08-01) - the header's green
+  // "alive" indicator. No body at all (not even an empty one) - `request()`
+  // above only sets Content-Type when a body is present, so this stays a
+  // genuinely bodyless POST, the same problem forceStateBroadcast's comment
+  // describes solved from the other direction (always sending a body there
+  // instead of never sending one here).
+  tick: () => request("/system/tick", { method: "POST" }),
+  // Heartbeating Control (AGENTS.md) - one batched call per tick from
+  // index.ts's tick(), not one per process; see
+  // apps/api/src/heartbeatControl.ts's touchHeartbeats for what this
+  // actually writes.
+  touchHeartbeats: (processIds: number[]) =>
+    request("/processes/heartbeat", {
+      method: "POST",
+      body: JSON.stringify({ processIds }),
+    }),
+  // Data Logger (AGENTS.md) - the combined Devices-only list + the
+  // process's own two global switches; see apps/api/src/dataLoggerControl.ts.
+  listDataLoggerControls: () => request<DataLoggerControlEntry[]>("/data-logger-controls"),
+  getDataLoggerSettings: () => request<DataLoggerSettings>("/data-logger-controls/settings"),
+  // Reads the device's own current live value server-side and writes it
+  // to log_device in one call - see routes/devices.ts's POST
+  // /devices/:id/log.
+  logDeviceReading: (deviceId: number) =>
+    request<{ status: string; value: unknown }>(`/devices/${deviceId}/log`, { method: "POST" }),
 };

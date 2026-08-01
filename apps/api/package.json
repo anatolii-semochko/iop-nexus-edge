@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/server.js"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/index.ts",
@@ -26,15 +29,19 @@
     "ioredis": "^5.11.1",
     "node-pg-migrate": "^9.0.0",
     "pg": "^8.22.0",
-    "pino": "^9.6.0"
+    "pino": "^9.6.0",
+    "yaml": "^2.6.0"
   },
   "devDependencies": {
     "@types/amqplib": "^0.10.5",
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^22.10.0",
     "@types/pg": "^8.20.0",
+    "eslint": "^9.39.2",
+    "globals": "^16.5.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
+    "typescript-eslint": "^8.65.0",
     "vitest": "^2.1.0"
   }
 }

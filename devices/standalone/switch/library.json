@@ -1,0 +1,5 @@
+{
+  "id": "device-switch",
+  "name": "Switch",
+  "description": "Example manual switch - single Bool device, not wired to any process."
+}

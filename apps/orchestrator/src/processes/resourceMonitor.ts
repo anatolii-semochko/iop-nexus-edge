@@ -22,8 +22,10 @@ import { apiClient, type MessageInput, type ProcessRecord } from "../apiClient.j
 
 // os.cpus() reports cumulative tick counts since boot, not a point-in-time
 // load - CPU% needs the delta between two samples, kept in module scope
-// like temperatureControl's lastStatus map (in-memory only, resets cleanly
-// on restart; nothing here needs to survive one).
+// (in-memory only, resets cleanly on restart; nothing here needs to
+// survive one) - same pattern the temperature-control process plugin
+// uses for its own on->off edge tracking (nexus-edge-smart-house,
+// AGENTS_TO_DO.md 2026-07-29).
 let lastCpuSample: { idle: number; total: number } | undefined;
 
 function readCpuPercent(): number | undefined {

@@ -13,6 +13,14 @@ import { matchesAny } from "./topicMatch.js";
 // way it would filter out `device.*`.
 const PROCESS_STATE_ROUTING_KEY = "process.state.snapshot";
 
+// System tick pulse (AGENTS_TO_DO.md, 2026-08-01) - same synthetic-
+// routing-key idiom as PROCESS_STATE_ROUTING_KEY above, for the header's
+// green "alive" indicator. No initial-snapshot entry on connect (unlike
+// process state) - a tick is transient by nature, there is nothing
+// meaningful to hand a freshly-connected client before the next one fires.
+const SYSTEM_TICK_ROUTING_KEY = "system.tick";
+const SYSTEM_TICK_CHANNEL = "system:tick";
+
 interface Subscriber {
   patterns: string[];
   send: (payload: unknown) => void;
@@ -60,7 +68,7 @@ export function buildServer() {
       Promise.all([readStateSnapshot(), readProcessStateSnapshot()])
         .then(([deviceSnapshot, processSnapshot]) => {
           const deviceEntries = deviceSnapshot.map((entry) => ({
-            routingKey: `device.${entry.deviceId}.${entry.resource}.updated`,
+            routingKey: `device.${entry.deviceId}.updated`,
             // Reshaped to the exact envelope shape live "event" messages
             // carry (AGENTS.md section 9) - entityId/timestamp, not this
             // cache row's own deviceId/updatedAt column names - so a
@@ -69,7 +77,6 @@ export function buildServer() {
             event: {
               domain: "device",
               entityId: entry.deviceId,
-              resource: entry.resource,
               value: entry.value,
               mode: entry.mode,
               valueAuto: entry.valueAuto,
@@ -79,7 +86,7 @@ export function buildServer() {
             },
           }));
           // At most one entry (AGENTS.md section 24) - unlike device
-          // entries above (one per resource), the whole fleet's process
+          // entries above (one per device), the whole fleet's process
           // state is one pre-assembled object, not something to fan out
           // per-process here.
           const processEntries = processSnapshot ? [toProcessStateEntry(processSnapshot)] : [];
@@ -113,7 +120,18 @@ export function buildServer() {
   subscriberRedis.subscribe("process:state:updated", (err) => {
     if (err) app.log.warn({ err }, "failed to subscribe to process state updates");
   });
-  subscriberRedis.on("message", (channel, source) => {
+  // apps/api's routes/systemTick.ts notifies this channel once per
+  // apps/orchestrator tick - relayed straight through, no snapshot read
+  // (unlike process state above), since the message itself (a timestamp)
+  // is the entire payload.
+  subscriberRedis.subscribe(SYSTEM_TICK_CHANNEL, (err) => {
+    if (err) app.log.warn({ err }, "failed to subscribe to system tick");
+  });
+  subscriberRedis.on("message", (channel, message) => {
+    if (channel === SYSTEM_TICK_CHANNEL) {
+      broadcast({ routingKey: SYSTEM_TICK_ROUTING_KEY, envelope: { domain: "tick", timestamp: message } });
+      return;
+    }
     if (channel !== "process:state:updated") return;
     readProcessStateSnapshot()
       .then((snapshot) => {
@@ -122,7 +140,7 @@ export function buildServer() {
         broadcast({ routingKey: entry.routingKey, envelope: entry.event });
       })
       .catch((err: unknown) => {
-        app.log.warn({ err, source }, "failed to broadcast process state update");
+        app.log.warn({ err, source: message }, "failed to broadcast process state update");
       });
   });
 

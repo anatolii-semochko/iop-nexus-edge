@@ -1,0 +1,62 @@
+name: CI
+
+# Original requirement (AGENTS_TO_DO.md): "main стабільний, кожен merge проходить
+# CI" - never actually wired up until this refactor (AGENTS.md/AGENTS_TO_DO.md
+# Etap 1 audit). Two independent jobs since apps/device-service (Go) isn't
+# part of the pnpm workspace/turbo pipeline at all - it has its own go.mod,
+# nothing else here touches it.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable corepack (pnpm)
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Test
+        run: pnpm run test
+
+      - name: Build
+        run: pnpm run build
+
+  device-service:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/device-service
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/device-service/go.mod
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: go test ./...

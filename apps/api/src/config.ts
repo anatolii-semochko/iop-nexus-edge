@@ -57,4 +57,15 @@ export const config = {
   processState: {
     broadcastIntervalMs: Number(process.env.PROCESS_STATE_BROADCAST_INTERVAL_MS ?? 5000),
   },
+  // Command-API extension points (extension points design, AGENTS_TO_DO.md
+  // 2026-07-28) - both scanned for api.ts plugin files by apiPlugins.ts,
+  // Library first then private. builtinDevicesDir has no consumers yet
+  // (zero api.ts today) but is always scanned - see apiPlugins.ts.
+  // extraApiPluginsDir is unset by default (nothing to scan for this
+  // repo's own docker-compose); a target project sets it to its own
+  // plugins/ directory.
+  apiPlugins: {
+    builtinDevicesDir: process.env.BUILTIN_DEVICES_DIR ?? "/workspace/devices",
+    extraDir: process.env.EXTRA_API_PLUGINS_DIR,
+  },
 };

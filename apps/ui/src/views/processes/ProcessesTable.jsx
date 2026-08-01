@@ -27,6 +27,9 @@ import TableSearchInput from '../../components/table/TableSearchInput'
 import { useExpandableRows } from '../../hooks/useExpandableRows'
 import { usePagination } from '../../hooks/usePagination'
 import ActiveBuzzerPanel from './ActiveBuzzerPanel'
+import DataLoggerPanel from './DataLoggerPanel'
+import HeartbeatControlPanel from './HeartbeatControlPanel'
+import HeartbeatControlTestPanel from './HeartbeatControlTestPanel'
 import ProcessSettingsModal from './ProcessSettingsModal'
 import ResourceMonitorPanel from './ResourceMonitorPanel'
 import TemperatureProcessPanel from './TemperatureProcessPanel'
@@ -40,8 +43,11 @@ import WemRow from './WemRow'
 export const KIND_PANELS = {
   'temperature-control': TemperatureProcessPanel,
   'temperature-monitor': TemperatureProcessPanel,
+  'heartbeat-control': HeartbeatControlPanel,
+  'heartbeat-control-test': HeartbeatControlTestPanel,
   'resource-monitor': ResourceMonitorPanel,
   'active-buzzer': ActiveBuzzerPanel,
+  'data-logger': DataLoggerPanel,
 }
 
 const statusColor = (status) => (status === 'on' ? 'success' : 'secondary')
@@ -72,7 +78,26 @@ const ProcessRow = ({
   extraAction,
 }) => {
   const live = useProcessLiveState(process.id)
-  const status = live.status ?? process.status
+  // `status` is a deliberately non-urgent, timer-only broadcast field
+  // (AGENTS.md section 24) - `live.status` can lag the actual value by up
+  // to a whole broadcast interval, which made the ON/OFF switch below
+  // visibly snap back to its pre-click position right after every click.
+  // The API route now forces an immediate broadcast right after the
+  // action lands, so that lag is normally sub-second - but `status` below
+  // still prefers `live.status` over `process.status` (REST), so
+  // `optimisticStatus` MUST only be released once `live.status` itself
+  // confirms the new value, not merely `process.status` (the REST reload
+  // `onReload` triggers). Comparing against `process.status` too - an
+  // earlier version of this did - let a stale `live.status` show through
+  // for the remaining gap the instant the REST reload landed first,
+  // producing a visible optimistic -> stale -> correct double-flip instead
+  // of a single clean transition. Once released, an external change (a
+  // safety cutoff, another operator) still wins as soon as the live
+  // broadcast reports it, same as before.
+  const [optimisticStatus, setOptimisticStatus] = useState(null)
+  const pendingOptimisticStatus =
+    optimisticStatus !== null && live.status !== optimisticStatus ? optimisticStatus : null
+  const status = pendingOptimisticStatus ?? live.status ?? process.status
   const critical = live.critical ?? process.critical
   const warning = live.warning ?? process.warning
   // Error always wins over warning (AGENTS.md section 21) - a row is never
@@ -89,10 +114,14 @@ const ProcessRow = ({
 
   const handleAction = async (action) => {
     setBusyAction(action)
+    if (isOnOffActions(process.actions)) {
+      setOptimisticStatus(action.toLowerCase())
+    }
     try {
       await api.doProcessAction(process.id, action)
       onReload()
     } catch (err) {
+      setOptimisticStatus(null)
       onError(err.message)
     } finally {
       setBusyAction(null)

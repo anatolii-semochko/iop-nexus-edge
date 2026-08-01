@@ -1,0 +1,31 @@
+# Cross-device forbidden-state/interlock rules for this node type's
+# typically-paired devices, consumed by the central Model State Validator
+# (apps/api/src/validator.ts) - source of truth `nodes.forbidden`
+# (Postgres, apps/api/migrations/..._seed-example-thermal-node.ts) is
+# meant to agree with (AGENTS.md section 7/30).
+#
+# Documents the rule at the NODE TYPE level, not either device type's own
+# safety.yaml (devices/standalone/heater/safety.yaml etc., both empty) - a
+# rule like "heater and cooler must never both be active" is a property of
+# a physical assembly, not of either device type in isolation, and
+# Devices are independent library items now (AGENTS.md section 32) that
+# could in principle be paired under more than one node type - this file
+# documents the rule for THIS node type's own typical pairing, it isn't
+# the device types' own claim.
+#
+# `device` below is a device-type name (matches this node type's own
+# `supports:` list in node.yaml), not a Postgres instance name - there is
+# still no automated provisioning flow (AGENTS.md section 7's documented
+# gap) that would translate a type-level rule like this into a new node
+# instance's own `nodes.forbidden` row, so today the seeded
+# `example-thermal-node-01` instance's row was written by hand to name its
+# actual device instances (`example-heater-01`/`example-cooler-01`) -
+# kept in sync manually, same as every other design-time/runtime pair in
+# this repo.
+forbidden:
+  - when:
+      device: heater
+      equals: true
+    conflictsWith:
+      device: cooler
+      equals: true

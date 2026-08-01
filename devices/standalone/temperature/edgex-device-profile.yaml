@@ -1,0 +1,31 @@
+# Source of truth for this device type's EdgeX-facing shape. The copy
+# actually loaded by apps/device-service lives at
+# apps/device-service/res/profiles/NexusEdge-Example-Temperature.yaml -
+# there is no provisioning flow yet that reads this file directly
+# (AGENTS.md section 7), so the two must be kept in sync by hand.
+# Identical content.
+apiVersion: "v2"
+name: "NexusEdge-Example-Temperature"
+manufacturer: "NexusEdge"
+model: "example-virtual-01"
+labels:
+  - "example"
+description: "Example simulated temperature sensor"
+
+deviceResources:
+  - name: "Temperature"
+    isHidden: false
+    description: "Example simulated sensor reading"
+    properties:
+      valueType: "Float32"
+      # RW at the EdgeX/core-command level even though this is conceptually
+      # a read-only sensor - Devices API is what actually enforces "no
+      # ordinary command surface for this device" (capabilities.readOnly,
+      # apps/api/src/routes/devices.ts). Marking it "R" here would make it
+      # impossible for the Dev Simulator's .../simulate endpoint to ever
+      # push a new reading through core-command at all - EdgeX itself
+      # rejects writes to "R" resources outright (405).
+      readWrite: "RW"
+      units: "C"
+
+deviceCommands: []

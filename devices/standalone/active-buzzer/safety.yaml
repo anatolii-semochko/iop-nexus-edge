@@ -1,5 +1,5 @@
-# Forbidden-state rules for this device type, consumed by the central
-# Model State Validator (apps/api/src/validator.ts) - see AGENTS.md
-# section 7. Empty: a single actuator resource has nothing on this same
-# device to conflict with (unlike Heater/Cooler on the example device).
+# Always empty for a standalone device (AGENTS.md section 30) - it has no
+# forbidden-state rule with anything else since it doesn't share a Node
+# with any other device (unlike Heater/Cooler on example-thermal-node,
+# whose cross-device rule lives on the Node's own safety.yaml instead).
 forbidden: []

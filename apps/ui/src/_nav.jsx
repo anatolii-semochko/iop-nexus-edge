@@ -17,6 +17,8 @@ import {
   cilBug,
   cilDescription,
   cilDevices,
+  cilHistory,
+  cilLibrary,
   cilPeople,
   cilSettings,
   cilSitemap,
@@ -65,9 +67,9 @@ const _nav = [
   },
   {
     component: CNavItem,
-    name: 'Live Events',
-    to: '/live-events',
-    icon: <CIcon icon={cilBell} customClassName="nav-icon" />,
+    name: 'Library',
+    to: '/library',
+    icon: <CIcon icon={cilLibrary} customClassName="nav-icon" />,
   },
   {
     component: CNavTitle,
@@ -78,6 +80,22 @@ const _nav = [
     name: 'Processes',
     to: '/processes',
     icon: <CIcon icon={cilSettings} customClassName="nav-icon" />,
+  },
+  {
+    component: CNavTitle,
+    name: 'Logs',
+  },
+  {
+    component: CNavItem,
+    name: 'Live Events',
+    to: '/live-events',
+    icon: <CIcon icon={cilBell} customClassName="nav-icon" />,
+  },
+  {
+    component: CNavItem,
+    name: 'Logs',
+    to: '/logs',
+    icon: <CIcon icon={cilHistory} customClassName="nav-icon" />,
   },
   {
     component: CNavTitle,

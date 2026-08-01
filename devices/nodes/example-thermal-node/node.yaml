@@ -1,0 +1,40 @@
+# Node identity schema, bus binding, and defaults (AGENTS.md section 7) -
+# source of truth the Postgres `nodes` table seed migration
+# (apps/api/migrations/..._seed-example-thermal-node.ts) is meant to agree
+# with.
+#
+# Smoke-test / demo node, not a real target-project node type - four
+# atomic devices that used to be incorrectly bundled as "resources" of one
+# EdgeX device (apps/device-service's old NexusEdge-Example-Virtual
+# profile) before the 2026-07-28 correction (AGENTS.md section 30). See
+# that section for the full story of what was wrong and why.
+nodeType: example-thermal-node
+description: >
+  Example thermal control node (Virtual Node Runtime smoke test) - a
+  temperature sensor plus two relay actuators (heater, cooler) sharing one
+  physical assembly, plus a fourth unused boolean device (switch) kept
+  around from the original fixture. Proves the physical/virtual switch and
+  the Virtual Node Runtime end-to-end - not built for any real target
+  project.
+bus:
+  # No real physical bus yet - every device below is backend: virtual
+  # (apps/device-service's Virtual Node Runtime). A real node type would
+  # name its transport here (e.g. "can") plus that transport's own
+  # properties (e.g. CAN bus id) - see AGENTS.md section 6's
+  # PhysicalTransport interface.
+  type: null
+# Which standalone Device types this Node type is typically paired with -
+# a reference by device-type name, not physical folder nesting (AGENTS.md
+# section 32's Library Catalog decision, 2026-08-01: Devices no longer
+# live inside a Node's own folder - devices/nodes/<type>/devices/ was
+# removed - every Device is independent under devices/standalone/, and a
+# Node just declares support instead). Read by the Library Catalog sync
+# (apps/api/src/libraryCatalog.ts) into `library_items.supports` for the
+# catalog UI - purely informational, no runtime code enforces this list;
+# an actual node instance's own device wiring still happens at
+# provisioning time (Postgres seed migration), same as always.
+supports:
+  - temperature
+  - heater
+  - cooler
+  - switch

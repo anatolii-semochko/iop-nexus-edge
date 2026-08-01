@@ -68,3 +68,26 @@ export function formatSmartDateTime(iso) {
   })
   return `${datePart}, ${time}`
 }
+
+// Converts a native <input type="datetime-local"> value (local time, no
+// timezone in the string itself - the browser gives e.g.
+// "2026-07-27T14:30") to a UTC ISO string for the Logs page's `from`/`to`
+// query params (AGENTS.md section 29). `undefined` when the field is
+// empty, so callers can spread the result straight into params without an
+// extra guard.
+export function localDateTimeToIso(value) {
+  return value ? new Date(value).toISOString() : undefined
+}
+
+// Two-letter initials for an avatar fallback (notification center, AGENTS.md
+// section 25, and the Logs page's processes tab, section 29) - `user` is
+// `{display_name, username}`, falling back to username when no display
+// name is set.
+export function userInitials(user) {
+  return (user.display_name ?? user.username)
+    .split(/\s+/)
+    .map((part) => part[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase()
+}

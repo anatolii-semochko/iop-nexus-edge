@@ -19,14 +19,16 @@ deviceResources:
     properties:
       valueType: "Int32"
       # RW at the EdgeX/core-command level even though this is a read-only
-      # sensor from the platform's perspective - Devices API is what
-      # actually enforces "no ordinary command surface for this resource"
-      # (capabilities.resources readOnly: true, apps/api/src/routes/
-      # devices.ts). An EdgeX-level "R" would make it impossible for the
-      # Dev Simulator's .../simulate endpoint to ever push a new reading
-      # through core-command at all (EdgeX itself rejects writes to "R"
-      # resources with a 405 - see the note on NexusEdge-Example-Virtual's
-      # Temperature resource, which hit exactly this).
+      # sensor from the platform's perspective - the Devices API is what
+      # actually enforces "no ordinary command surface for this device"
+      # (capabilities.readOnly: true, apps/api/src/routes/devices.ts). An
+      # EdgeX-level "R" would make it impossible for the Dev Simulator's
+      # .../simulate endpoint to ever push a new reading through
+      # core-command at all (EdgeX itself rejects writes to "R" resources
+      # with a 405 - see the note on the old bundled
+      # NexusEdge-Example-Virtual profile's Temperature deviceResource,
+      # which hit exactly this, before the 2026-07-28 Device/Node
+      # correction split it out - AGENTS.md section 30).
       readWrite: "RW"
       minimum: 0
       maximum: 100

@@ -47,7 +47,7 @@ export async function listEdgeXDevices(): Promise<EdgeXDeviceStatus[]> {
 
 export interface EdgeXReading {
   resourceName: string;
-  value: string | number;
+  value: string | number | boolean;
   valueType: string;
   units?: string;
   origin: number;
@@ -61,10 +61,16 @@ interface CoreCommandReadResponse {
 // strings ("2.15e+01") - there is no config knob to change this server-side
 // (the old Writable.Reading.FloatEncoding option was removed after v1).
 // Every integer/float valueType also comes back as a JSON string, not a
-// number. Parsing these into real JS numbers here, once, means every
-// consumer (UI tables, the live WebSocket overlay, a future slider control)
-// gets an actual number instead of having to re-parse an EdgeX-specific
-// string format itself.
+// number, and Bool comes back as the literal string "true"/"false", not a
+// JSON boolean either. Parsing these into real JS values here, once, means
+// every consumer (UI tables, the live WebSocket overlay, a future slider
+// control) gets an actual number/boolean instead of having to re-parse an
+// EdgeX-specific string format itself - a raw `reading.value === true`
+// check would otherwise silently always be false for a device that's never
+// been written through the Dual Devices Model yet (dualDevicesModel.ts's
+// own cached `active` value round-trips through JSON.stringify of the
+// original write, so it was never affected by this - only a fresh,
+// never-written device's live EdgeX read was).
 const NUMERIC_VALUE_TYPES = new Set([
   "Int8",
   "Int16",
@@ -79,39 +85,55 @@ const NUMERIC_VALUE_TYPES = new Set([
 ]);
 
 function normalizeReading(reading: EdgeXReading): EdgeXReading {
-  if (!NUMERIC_VALUE_TYPES.has(reading.valueType) || typeof reading.value !== "string") {
+  if (typeof reading.value !== "string") {
     return reading;
   }
-  return { ...reading, value: Number(reading.value) };
+  if (NUMERIC_VALUE_TYPES.has(reading.valueType)) {
+    return { ...reading, value: Number(reading.value) };
+  }
+  if (reading.valueType === "Bool") {
+    return { ...reading, value: reading.value === "true" };
+  }
+  return reading;
 }
 
-/** Live value of one resource - used for the device detail view. */
-export async function readResource(deviceName: string, resource: string): Promise<EdgeXReading> {
-  const url = `${config.edgex.coreCommandUrl}/api/v3/device/name/${encodeURIComponent(deviceName)}/${encodeURIComponent(resource)}`;
+/**
+ * Live value of one Device - used for the device detail view. `commandName`
+ * is `device.capabilities.edgexResource` (Postgres) - which EdgeX
+ * deviceResource/command this atomic Device's single value is called under.
+ * This is purely an internal EdgeX-protocol detail the caller resolves
+ * before getting here, not a re-introduction of "resource" as something a
+ * client addresses directly (AGENTS_TO_DO.md's 2026-07-27 Device/Node refactor -
+ * every Device has exactly one value, there is no per-resource URL/state/
+ * log dimension left anywhere above this module).
+ */
+export async function readValue(deviceName: string, commandName: string): Promise<EdgeXReading> {
+  const url = `${config.edgex.coreCommandUrl}/api/v3/device/name/${encodeURIComponent(deviceName)}/${encodeURIComponent(commandName)}`;
   const res = await fetch(url);
   if (!res.ok) {
-    throw new EdgeXError(`core-command GET ${deviceName}/${resource} failed: ${res.status}`, res.status);
+    throw new EdgeXError(`core-command GET ${deviceName}/${commandName} failed: ${res.status}`, res.status);
   }
   const body = (await res.json()) as CoreCommandReadResponse;
-  const reading = body.event.readings.find((r) => r.resourceName === resource) ?? body.event.readings[0];
+  const reading = body.event.readings.find((r) => r.resourceName === commandName) ?? body.event.readings[0];
   if (!reading) {
-    throw new Error(`core-command GET ${deviceName}/${resource} returned no reading`);
+    throw new Error(`core-command GET ${deviceName}/${commandName} returned no reading`);
   }
   return normalizeReading(reading);
 }
 
-/** Writes one resource - used by the dev simulator page to override a
- * virtual device's sensor values, and eventually by real actuator commands. */
-export async function writeResource(deviceName: string, resource: string, value: unknown): Promise<void> {
-  const url = `${config.edgex.coreCommandUrl}/api/v3/device/name/${encodeURIComponent(deviceName)}/${encodeURIComponent(resource)}`;
+/** Writes one Device's value - used by the dev simulator page to override a
+ * virtual device's sensor values, and eventually by real actuator commands.
+ * See readValue above for what `commandName` is. */
+export async function writeValue(deviceName: string, commandName: string, value: unknown): Promise<void> {
+  const url = `${config.edgex.coreCommandUrl}/api/v3/device/name/${encodeURIComponent(deviceName)}/${encodeURIComponent(commandName)}`;
   const res = await fetch(url, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ [resource]: value }),
+    body: JSON.stringify({ [commandName]: value }),
   });
   if (!res.ok) {
     const text = await res.text();
-    let message = `core-command PUT ${deviceName}/${resource} failed: ${res.status} ${text}`;
+    let message = `core-command PUT ${deviceName}/${commandName} failed: ${res.status} ${text}`;
     try {
       const body = JSON.parse(text) as { message?: string };
       if (body.message) {
