@@ -1,0 +1,82 @@
+import React, { useEffect, useState } from 'react'
+import {
+  CAlert,
+  CButton,
+  CFormLabel,
+  CFormSelect,
+  CModal,
+  CModalBody,
+  CModalFooter,
+  CModalHeader,
+  CModalTitle,
+  CSpinner,
+} from '@coreui/react'
+import { api } from '../../api/client'
+
+/**
+ * Per-node Settings popup (AGENTS_TO_DO.md, 2026-08-01) - a Node is a
+ * physical workplace served locally by exactly one group of Nodes, so
+ * this is a single dropdown, not the checkbox-multiselect shape
+ * ProcessSettingsModal/DeviceSettingsModal use for many-to-many
+ * memberships. `node.group_id` already comes back from GET /nodes (see
+ * routes/nodes.ts's SELECT_NODE join), so no separate fetch-on-open is
+ * needed here.
+ */
+const NodeSettingsModal = ({ visible, onClose, node, nodeGroups, onSaved }) => {
+  const [groupId, setGroupId] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    if (visible && node) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setGroupId(node.group_id ?? '')
+
+      setError(null)
+    }
+  }, [visible, node])
+
+  const handleSave = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      await api.setNodeGroup(node.id, groupId === '' ? null : Number(groupId))
+      onSaved?.()
+      onClose()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <CModal visible={visible} onClose={onClose}>
+      <CModalHeader>
+        <CModalTitle>{node?.name} settings</CModalTitle>
+      </CModalHeader>
+      <CModalBody>
+        {error && <CAlert color="danger">{error}</CAlert>}
+        <CFormLabel>Node Group</CFormLabel>
+        <CFormSelect value={groupId} onChange={(e) => setGroupId(e.target.value)} disabled={busy}>
+          <option value="">No group</option>
+          {nodeGroups.map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.name}
+            </option>
+          ))}
+        </CFormSelect>
+      </CModalBody>
+      <CModalFooter>
+        <CButton color="secondary" variant="outline" onClick={onClose} disabled={busy}>
+          Cancel
+        </CButton>
+        <CButton color="success" onClick={handleSave} disabled={busy}>
+          {busy ? <CSpinner size="sm" /> : 'Save'}
+        </CButton>
+      </CModalFooter>
+    </CModal>
+  )
+}
+
+export default NodeSettingsModal

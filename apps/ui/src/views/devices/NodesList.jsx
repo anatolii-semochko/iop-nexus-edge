@@ -5,6 +5,9 @@ import {
   CCard,
   CCardBody,
   CCardHeader,
+  CCol,
+  CFormSelect,
+  CRow,
   CSpinner,
   CTable,
   CTableBody,
@@ -13,11 +16,16 @@ import {
   CTableHeaderCell,
   CTableRow,
 } from '@coreui/react'
+import { cilSettings } from '@coreui/icons'
 import { api } from '../../api/client'
+import GroupsConfigModal from '../../components/GroupsConfigModal'
+import IconButton from '../../components/IconButton'
+import ResetFiltersButton from '../../components/ResetFiltersButton'
 import TablePagination from '../../components/table/TablePagination'
 import TableSearchInput from '../../components/table/TableSearchInput'
 import { usePagination } from '../../hooks/usePagination'
 import { formatRelativeTime } from '../../utils/format'
+import NodeSettingsModal from './NodeSettingsModal'
 
 const healthColor = (health) => {
   switch (health) {
@@ -38,20 +46,51 @@ const matchesSearch = (node, search) => {
   )
 }
 
+/**
+ * Nodes list (AGENTS_TO_DO.md, 2026-08-01) - now with a Node Group filter
+ * and a page-level Config button (left of Clear Filters) that manages the
+ * Node Group list itself, plus a per-row Settings popup that assigns
+ * *this* node's single group. A Node is a physical workplace served
+ * locally by exactly one group of Nodes - single assignment, unlike
+ * Devices' many-to-many Device Groups (DevicesList.jsx).
+ */
 const NodesList = () => {
   const [nodes, setNodes] = useState(null)
+  const [nodeGroups, setNodeGroups] = useState([])
   const [error, setError] = useState(null)
   const [search, setSearch] = useState('')
+  const [groupFilter, setGroupFilter] = useState('')
+  const [searchResetToken, setSearchResetToken] = useState(0)
+  const [configVisible, setConfigVisible] = useState(false)
+  const [settingsNode, setSettingsNode] = useState(null)
 
-  useEffect(() => {
+  const reloadNodes = () =>
     api
       .listNodes()
       .then(setNodes)
       .catch((err) => setError(err.message))
+  const reloadNodeGroups = () =>
+    api
+      .listNodeGroups()
+      .then(setNodeGroups)
+      .catch((err) => setError(err.message))
+
+  useEffect(() => {
+    reloadNodes()
+    reloadNodeGroups()
   }, [])
 
-  const filtered = (nodes ?? []).filter((node) => matchesSearch(node, search))
+  const filtered = (nodes ?? [])
+    .filter((node) => matchesSearch(node, search))
+    .filter((node) => !groupFilter || String(node.group_id) === groupFilter)
   const { page, pageSize, pageItems, totalItems, setPage, setPageSize } = usePagination(filtered)
+
+  const hasActiveFilters = Boolean(search) || Boolean(groupFilter)
+  const handleResetFilters = () => {
+    setSearch('')
+    setGroupFilter('')
+    setSearchResetToken((token) => token + 1)
+  }
 
   return (
     <CCard className="mb-4">
@@ -63,16 +102,45 @@ const NodesList = () => {
         {!error && !nodes && <CSpinner color="primary" />}
         {!error && nodes && (
           <>
-            <div className="mb-3">
-              <TableSearchInput
-                value={search}
-                onSearch={setSearch}
-                placeholder="Search by name, type, location..."
-              />
-            </div>
+            <CRow className="mb-3 g-2 align-items-center">
+              <CCol xs="auto">
+                <IconButton
+                  icon={cilSettings}
+                  size="sm"
+                  center
+                  onClick={() => setConfigVisible(true)}
+                  ariaLabel="Configure Node Groups"
+                />
+              </CCol>
+              <CCol xs="auto">
+                <CFormSelect
+                  size="sm"
+                  value={groupFilter}
+                  onChange={(e) => setGroupFilter(e.target.value)}
+                >
+                  <option value="">All groups</option>
+                  {nodeGroups.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name}
+                    </option>
+                  ))}
+                </CFormSelect>
+              </CCol>
+              <CCol xs="auto">
+                <TableSearchInput
+                  key={searchResetToken}
+                  value={search}
+                  onSearch={setSearch}
+                  placeholder="Search by name, type, location..."
+                />
+              </CCol>
+              <CCol className="d-flex justify-content-end">
+                <ResetFiltersButton active={hasActiveFilters} onClick={handleResetFilters} />
+              </CCol>
+            </CRow>
             {filtered.length === 0 ? (
               <CAlert color="info">
-                {nodes.length === 0 ? 'No nodes registered yet.' : 'No nodes match this search.'}
+                {nodes.length === 0 ? 'No nodes registered yet.' : 'No nodes match these filters.'}
               </CAlert>
             ) : (
               <>
@@ -82,8 +150,10 @@ const NodesList = () => {
                       <CTableHeaderCell scope="col">Name</CTableHeaderCell>
                       <CTableHeaderCell scope="col">Type</CTableHeaderCell>
                       <CTableHeaderCell scope="col">Location</CTableHeaderCell>
+                      <CTableHeaderCell scope="col">Group</CTableHeaderCell>
                       <CTableHeaderCell scope="col">Health</CTableHeaderCell>
                       <CTableHeaderCell scope="col">Last heartbeat</CTableHeaderCell>
+                      <CTableHeaderCell scope="col">Actions</CTableHeaderCell>
                     </CTableRow>
                   </CTableHead>
                   <CTableBody>
@@ -92,11 +162,21 @@ const NodesList = () => {
                         <CTableDataCell>{node.name}</CTableDataCell>
                         <CTableDataCell>{node.type}</CTableDataCell>
                         <CTableDataCell>{node.location ?? '-'}</CTableDataCell>
+                        <CTableDataCell>{node.group_name ?? '-'}</CTableDataCell>
                         <CTableDataCell>
                           <CBadge color={healthColor(node.health)}>{node.health}</CBadge>
                         </CTableDataCell>
                         <CTableDataCell>
                           {formatRelativeTime(node.last_heartbeat_at)}
+                        </CTableDataCell>
+                        <CTableDataCell>
+                          <IconButton
+                            icon={cilSettings}
+                            size="sm"
+                            center
+                            onClick={() => setSettingsNode(node)}
+                            ariaLabel={`${node.name} settings`}
+                          />
                         </CTableDataCell>
                       </CTableRow>
                     ))}
@@ -114,6 +194,34 @@ const NodesList = () => {
           </>
         )}
       </CCardBody>
+      <GroupsConfigModal
+        visible={configVisible}
+        onClose={() => setConfigVisible(false)}
+        title="Node Groups"
+        addLabel="Add Group"
+        namePlaceholder="Group name"
+        items={nodeGroups}
+        onAdd={async (name) => {
+          await api.createNodeGroup(name)
+          reloadNodeGroups()
+        }}
+        onRename={async (id, name) => {
+          await api.renameNodeGroup(id, name)
+          reloadNodeGroups()
+          reloadNodes()
+        }}
+        onDelete={async (id) => {
+          await api.deleteNodeGroup(id)
+          reloadNodeGroups()
+        }}
+      />
+      <NodeSettingsModal
+        visible={Boolean(settingsNode)}
+        onClose={() => setSettingsNode(null)}
+        node={settingsNode}
+        nodeGroups={nodeGroups}
+        onSaved={reloadNodes}
+      />
     </CCard>
   )
 }

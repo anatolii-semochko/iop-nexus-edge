@@ -49,11 +49,30 @@ interface NodeRow {
   forbidden: ForbiddenRule[];
 }
 
+interface DeviceListRow extends DeviceRow {
+  node_name: string | null;
+  device_group_ids: number[];
+}
+
+// Resolved node name plus every Device Group this device belongs to
+// (AGENTS_TO_DO.md, 2026-08-01), joined/aggregated in one query rather
+// than the per-row N+1 idiom used elsewhere (withDeletable/withProcessIds)
+// - this powers the Devices list page's node-name column and group
+// filter for every row on every load, a hotter path than an admin
+// group-list screen's tens-of-rows fetch.
+const SELECT_DEVICE_LIST_BASE = `
+  SELECT d.*, n.name AS node_name,
+    COALESCE(array_agg(dg.device_group_id) FILTER (WHERE dg.device_group_id IS NOT NULL), '{}') AS device_group_ids
+  FROM devices d
+  LEFT JOIN nodes n ON n.id = d.node_id
+  LEFT JOIN device_device_groups dg ON dg.device_id = d.id
+`;
+
 export async function deviceRoutes(app: FastifyInstance): Promise<void> {
   // List view: registry metadata plus EdgeX admin/operating state, fetched
   // once for every device.
   app.get("/devices", async () => {
-    const result = await pool.query<DeviceRow>("SELECT * FROM devices ORDER BY name");
+    const result = await pool.query<DeviceListRow>(`${SELECT_DEVICE_LIST_BASE} GROUP BY d.id, n.name ORDER BY d.name`);
 
     let edgexByName = new Map<string, EdgeXDeviceStatus>();
     try {
@@ -73,7 +92,7 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
   // MANUAL, valueAuto/valueManual) - singular now, not one entry per
   // resource, since a Device is atomic.
   app.get<{ Params: { id: string } }>("/devices/:id", async (request, reply) => {
-    const device = await findDevice(request.params.id);
+    const device = await findDeviceListRow(request.params.id);
     if (!device) {
       return reply.code(404).send({ error: "device not found" });
     }
@@ -255,6 +274,75 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
     return { status: "ok", value: reading.value };
   });
 
+  // UI-driven - which Device Groups (routes/deviceGroups.ts) this device
+  // currently belongs to (AGENTS_TO_DO.md, 2026-08-01) - a device is a
+  // logical workplace and can be in several groups at once (shared
+  // devices, e.g. a siren in both a "fire" and "intrusion" group).
+  // Fetched on-demand only when the per-device Settings popup opens, same
+  // shape as processes.ts's tab-groups/message-groups endpoints.
+  app.get<{ Params: { id: string } }>("/devices/:id/device-groups", async (request, reply) => {
+    const device = await findDevice(request.params.id);
+    if (!device) {
+      return reply.code(404).send({ error: "device not found" });
+    }
+
+    const result = await pool.query<{ device_group_id: number }>(
+      "SELECT device_group_id FROM device_device_groups WHERE device_id = $1",
+      [device.id],
+    );
+    return result.rows.map((row) => row.device_group_id);
+  });
+
+  // Replaces the full membership set in one transaction (not incremental
+  // add/remove) - matches the checkbox-multiselect popup that's this
+  // route's only caller, which always submits the complete new set.
+  app.put<{ Params: { id: string }; Body: { deviceGroupIds: number[] } }>(
+    "/devices/:id/device-groups",
+    async (request, reply) => {
+      const device = await findDevice(request.params.id);
+      if (!device) {
+        return reply.code(404).send({ error: "device not found" });
+      }
+
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("DELETE FROM device_device_groups WHERE device_id = $1", [device.id]);
+        for (const deviceGroupId of request.body.deviceGroupIds) {
+          await client.query(
+            "INSERT INTO device_device_groups (device_id, device_group_id) VALUES ($1, $2)",
+            [device.id, deviceGroupId],
+          );
+        }
+        await client.query("COMMIT");
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
+      }
+
+      return { status: "ok" };
+    },
+  );
+
+  // A device may or may not belong to a Node (single, nullable - unchanged
+  // from the 2026-07-27 Device/Node refactor); reassigned here from the
+  // same per-device Settings popup that edits this device's Device Group
+  // memberships above (AGENTS_TO_DO.md, 2026-08-01: "Маппінг груп і нод
+  // пристрою відбувається в Config попапі кожного елемента DN").
+  app.patch<{ Params: { id: string }; Body: { nodeId: number | null } }>(
+    "/devices/:id/node",
+    async (request, reply) => {
+      const result = await pool.query<{ id: number }>(
+        "UPDATE devices SET node_id = $1, updated_at = now() WHERE id = $2 RETURNING id",
+        [request.body.nodeId, request.params.id],
+      );
+      if (!result.rows[0]) return reply.code(404).send({ error: "device not found" });
+      return findDeviceListRow(request.params.id);
+    },
+  );
+
   // System-wide aggregate of every controllable device's mode (AGENTS.md
   // section 6). The full device list comes from Postgres (the source of
   // truth for what devices exist) - a device untouched in Redis is
@@ -268,6 +356,14 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
 
 async function findDevice(id: string): Promise<DeviceRow | undefined> {
   const result = await pool.query<DeviceRow>("SELECT * FROM devices WHERE id = $1", [id]);
+  return result.rows[0];
+}
+
+async function findDeviceListRow(id: string): Promise<DeviceListRow | undefined> {
+  const result = await pool.query<DeviceListRow>(
+    `${SELECT_DEVICE_LIST_BASE} WHERE d.id = $1 GROUP BY d.id, n.name`,
+    [id],
+  );
   return result.rows[0];
 }
 

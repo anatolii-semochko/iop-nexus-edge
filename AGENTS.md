@@ -3336,3 +3336,115 @@ disappeared (orphan cleanup), counts back to `0 categories, 7 items`
 now, correctly `false`). UI verified in a real browser end to end: kind
 switch, breadcrumb navigation into and back out of a category, search,
 and the Sync button's own success message; console clean throughout.
+
+## 34. Node Groups and Device Groups (logical/business groups, distinct from Library categories)
+
+Two new group entities (AGENTS_TO_DO.md, 2026-08-01), unrelated to the
+Library Catalog's filesystem-driven categories (section 33) or the
+Processes page's three group entities (section 23) - these group
+*registry* rows (`nodes`/`devices`), not library items or processes, and
+are entirely admin-managed through the UI, not derived from disk or from
+process membership.
+
+The two shapes intentionally differ, mirroring section 23's own finding
+that "group of X" isn't one relationship shape:
+
+- **Node Groups** (`node_groups` + `nodes.group_id`,
+  `routes/nodeGroups.ts`) - single-FK, exactly like Process Groups
+  (section 19). A Node models one physical workplace served locally by
+  one group of Nodes, so it belongs to at most one Node Group at a time.
+  `group_id` is nullable (unlike `processes.group_id`, which is `NOT
+  NULL` with a backfill) - existing Nodes predate this feature and have
+  nothing to backfill from; `ON DELETE RESTRICT` plus a pre-check in
+  `routes/nodeGroups.ts`'s `DELETE` (mirroring `processGroups.ts`'s
+  `withDeletable()`/"group is not empty" idiom exactly) keeps a
+  non-empty Node Group from being deleted.
+- **Device Groups** (`device_groups` + `device_device_groups`,
+  `routes/deviceGroups.ts`) - many-to-many, like Tab/Message Groups
+  (section 23). A Device models a logical workplace and can be in
+  several Device Groups at once - the user's own examples: a siren
+  shared between a "fire" and "intrusion" group, or lighting and
+  indication grouped together. Freely deletable via `ON DELETE CASCADE`,
+  no emptiness rule, no ordering.
+
+A Device's Node assignment (`devices.node_id`, single/nullable) is
+unchanged from the 2026-07-27 Device/Node refactor (section 30) - a
+device may or may not belong to a node, independent of which Device
+Groups it's in.
+
+### Two different "Config" concepts, per the user's own clarification
+
+> "Маппінг груп і нод пристрою відбувається в Config попапі кожного
+> елемента DN. Редактор груп - на сторінці в Config."
+
+- **Page-level Config button** (`NodesList.jsx`/`DevicesList.jsx`, left
+  of the filter row's Reset Filters button, same `cilSettings` icon as
+  every other Settings/Config trigger in this app) opens
+  `GroupsConfigModal` - a new, thin `CModal` wrapper around the existing
+  `NamedListManager` (unmodified, reused as-is). This is the group
+  *list* editor: add/rename/delete Node Groups or Device Groups. Popup
+  form, not a Settings tab - Nodes/Devices have no Settings tab of their
+  own the way the Processes page does (section 19's `SettingsTab.jsx`),
+  so `GroupsConfigModal` is the popup-chrome equivalent of that inline
+  `CCard` usage.
+- **Per-row Settings button** (Actions column, same position/icon as
+  `ProcessesTable.jsx`'s per-process Settings button) opens a per-item
+  popup that assigns *this* item's own group membership:
+  `NodeSettingsModal` (single group `CFormSelect`, since a Node has at
+  most one) or `DeviceSettingsModal` (group `CFormCheck` multiselect,
+  modeled on `ProcessSettingsModal.jsx`'s `GroupCheckboxSection`, plus a
+  Node `CFormSelect` saved together in the same `Promise.all` - the
+  user's explicit requirement that a device's group memberships and node
+  assignment are edited from the same popup, not two).
+
+Both per-row modals skip `ProcessSettingsModal`'s fetch-on-open dance
+(`GroupCheckboxSection`'s mount-only effect with its own cancellation
+guard) - `group_id`/`device_group_ids`/`node_id` already arrive on every
+row from `GET /nodes`/`GET /devices` (see below), so there is nothing
+left to fetch when a popup opens; a `useEffect` keyed on `[visible,
+node|device]` just seeds local state from the already-loaded row,
+`eslint-disable-next-line react-hooks/set-state-in-effect` per row like
+`LibraryBrowser.jsx`'s precedent (section 33).
+
+### API
+
+- `routes/nodeGroups.ts` / `routes/deviceGroups.ts` - CRUD, copied
+  structurally from `processGroups.ts`/`tabGroups.ts` respectively (see
+  above for which).
+- `routes/nodes.ts` - `GET /nodes`/`GET /nodes/:id` now `LEFT JOIN
+  node_groups` for `group_name` (the list page needs it on every row, not
+  fetched separately); new `PATCH /nodes/:id/group {groupId}`.
+- `routes/devices.ts` - `GET /devices`/`GET /devices/:id` now join
+  `nodes` for `node_name` (**fixes a pre-existing UI bug**: `DevicesList.
+  jsx`'s Node column was rendering the raw `node_id` FK, not a name) and
+  `array_agg` over `device_device_groups` for `device_group_ids`, one
+  query rather than the per-row N+1 `withDeletable()`/`withProcessIds()`
+  idiom used for admin group-list screens - this is the hot per-row list
+  path, not an occasional Settings-tab fetch. New `GET`/`PUT
+  /devices/:id/device-groups` (full-replace-in-transaction, exact shape
+  of `processes.ts`'s `/tab-groups` endpoints) and `PATCH
+  /devices/:id/node {nodeId}`.
+
+### Verified live
+
+Rebuilt (`make up-all`), migration `1690000000038` ran clean (`GET
+/nodes`/`GET /devices` both returned successfully with the new joined
+fields, no nodes registered in this instance so `[]`/populated-but-
+nodeless respectively). Via `curl`: created a Node Group and a Device
+Group, assigned a temporary directly-inserted test Node to the Node
+Group, confirmed `DELETE /node-groups/:id` correctly 400s ("group is not
+empty") while occupied and 204s once cleared - RESTRICT-then-precheck
+behaving exactly like `process_groups`; assigned a real device
+(`active-buzzer-01`) to a Device Group via `PUT .../device-groups` and
+confirmed `DELETE /device-groups/:id` succeeds immediately even while
+occupied (CASCADE, no precheck) - the two group shapes actually behaving
+differently, not just differently coded. Test Node removed after.
+
+Browser-verified end to end on both pages (real UI, not just API): the
+page-level Config button opens `GroupsConfigModal`, added "Heating" (Node
+Groups) and "Lighting" (Device Groups) through the actual add form; the
+filter row's group dropdown correctly narrowed the Devices list to just
+the one device in "Lighting" after assigning it via the per-row Settings
+popup, and Reset Filters correctly cleared it back to both rows; the
+Devices list's Node column showed `-` for an unassigned device instead of
+a raw id, confirming the bug fix. Console clean throughout.

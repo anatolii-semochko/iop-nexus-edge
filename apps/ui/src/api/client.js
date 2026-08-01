@@ -43,8 +43,25 @@ async function request(path, options = {}) {
 export const api = {
   listNodes: () => request('/nodes'),
   getNode: (id) => request(`/nodes/${id}`),
+  // A Node is a physical workplace served by exactly one group of Nodes
+  // (AGENTS_TO_DO.md, 2026-08-01) - single assignment, from this Node's
+  // own per-row Settings popup.
+  setNodeGroup: (id, groupId) =>
+    request(`/nodes/${id}/group`, { method: 'PATCH', body: JSON.stringify({ groupId }) }),
   listDevices: () => request('/devices'),
   getDevice: (id) => request(`/devices/${id}`),
+  // Per-device Device Group membership (multiple at once - shared devices
+  // like a siren in both a "fire" and "intrusion" group) plus this
+  // device's Node assignment (single, nullable) - both edited together
+  // from the same per-device Settings popup (AGENTS_TO_DO.md, 2026-08-01).
+  getDeviceGroups: (id) => request(`/devices/${id}/device-groups`),
+  setDeviceGroups: (id, deviceGroupIds) =>
+    request(`/devices/${id}/device-groups`, {
+      method: 'PUT',
+      body: JSON.stringify({ deviceGroupIds }),
+    }),
+  setDeviceNode: (id, nodeId) =>
+    request(`/devices/${id}/node`, { method: 'PATCH', body: JSON.stringify({ nodeId }) }),
   // A UI write is always a manual override (Dual Devices Model MANUAL mode
   // - see AGENTS.md section 6). No `resource` param anymore (AGENTS_TO_DO.md's
   // 2026-07-27 Device/Node refactor) - a Device is atomic, exactly one value.
@@ -116,6 +133,25 @@ export const api = {
     if (to) params.set('to', to)
     return request(`/logs/devices?${params}`)
   },
+  // Node Groups (AGENTS_TO_DO.md, 2026-08-01) - logical/business groups
+  // for Nodes (heating, ventilation, lighting, garage...); single-FK, like
+  // Process Groups below - a Node belongs to at most one at a time.
+  listNodeGroups: () => request('/node-groups'),
+  createNodeGroup: (name) =>
+    request('/node-groups', { method: 'POST', body: JSON.stringify({ name }) }),
+  renameNodeGroup: (id, name) =>
+    request(`/node-groups/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+  deleteNodeGroup: (id) => request(`/node-groups/${id}`, { method: 'DELETE' }),
+  // Device Groups (AGENTS_TO_DO.md, 2026-08-01) - logical/business groups
+  // for Devices (entrance guard panel, boiler room boiler...); many-to-
+  // many, like Tab/Message Groups below - a Device can be in several at
+  // once.
+  listDeviceGroups: () => request('/device-groups'),
+  createDeviceGroup: (name) =>
+    request('/device-groups', { method: 'POST', body: JSON.stringify({ name }) }),
+  renameDeviceGroup: (id, name) =>
+    request(`/device-groups/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+  deleteDeviceGroup: (id) => request(`/device-groups/${id}`, { method: 'DELETE' }),
   // Process groups (AGENTS.md section 10/17 - a real, admin-managed entity).
   listProcessGroups: () => request('/process-groups'),
   createProcessGroup: (name) =>
