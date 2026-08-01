@@ -19,6 +19,7 @@ import {
 import { subscribeToLiveEvents } from '../../api/liveSocket'
 import ResetFiltersButton from '../../components/ResetFiltersButton'
 import TableSearchInput from '../../components/table/TableSearchInput'
+import { usePersistedState } from '../../hooks/usePersistedState'
 import LiveBadge from '../devices/LiveBadge'
 
 // How many recent messages to keep in the buffer - client-side only (no
@@ -27,6 +28,20 @@ import LiveBadge from '../devices/LiveBadge'
 // "how much history" is a tradeoff the user watching the feed should make.
 const LIMIT_OPTIONS = [100, 200, 500, 1000]
 const DEFAULT_LIMIT = 500
+
+// Registration for usePersistedState (AGENTS_TO_DO.md, 2026-08-01) - flat
+// variant. `limit` rides along here too even though it's deliberately
+// excluded from hasActiveFilters/resetFilters below (it changes what's
+// buffered, not just what's shown) - it's still a UI preference worth
+// restoring, the same role `pageSize` plays on every other persisted page.
+const PERSISTED_DEFAULTS = {
+  domainFilter: '',
+  entityFilter: '',
+  modeFilter: '',
+  sourceFilter: '',
+  search: '',
+  limit: DEFAULT_LIMIT,
+}
 
 const modeColor = (mode) => (mode === 'MANUAL' ? 'warning' : 'success')
 
@@ -75,20 +90,28 @@ const entityKey = (event) => `${event.domain}.${event.entityId}`
  */
 const LiveEvents = () => {
   const [rows, setRows] = useState([])
-  const [limit, setLimit] = useState(DEFAULT_LIMIT)
+  const [pageState, setPageState] = usePersistedState(
+    'nexusedge.liveEventsPage',
+    PERSISTED_DEFAULTS,
+  )
+  const { domainFilter, entityFilter, modeFilter, sourceFilter, search, limit } = pageState
+  const setDomainFilter = (value) => setPageState({ domainFilter: value })
+  const setEntityFilter = (value) => setPageState({ entityFilter: value })
+  const setModeFilter = (value) => setPageState({ modeFilter: value })
+  const setSourceFilter = (value) => setPageState({ sourceFilter: value })
+  const setSearch = (value) => setPageState({ search: value })
   // The subscription effect below reads this instead of `limit` directly
   // so changing the limit doesn't need to unsubscribe/resubscribe from the
   // socket - only `changeLimit` (a plain event handler, not an effect)
   // needs to react to the change, by trimming the buffer immediately.
-  const limitRef = useRef(DEFAULT_LIMIT)
-  const [domainFilter, setDomainFilter] = useState('')
-  const [entityFilter, setEntityFilter] = useState('')
-  const [modeFilter, setModeFilter] = useState('')
-  const [sourceFilter, setSourceFilter] = useState('')
-  const [search, setSearch] = useState('')
+  // Seeded from the persisted value, not the module default, so a
+  // restored buffer-size preference applies from the very first live
+  // event, not only after the next manual change.
+  const limitRef = useRef(limit)
   // Bumped on reset to force TableSearchInput to remount with a blank
   // value - same pattern already established elsewhere (it owns its own
   // typing state after mount and never resyncs from a changed `value` prop).
+  // Not itself persisted - a remount trigger, not meaningful state.
   const [searchResetToken, setSearchResetToken] = useState(0)
 
   useEffect(
@@ -108,7 +131,7 @@ const LiveEvents = () => {
   // immediate, visible effect.
   const changeLimit = (nextLimit) => {
     limitRef.current = nextLimit
-    setLimit(nextLimit)
+    setPageState({ limit: nextLimit })
     setRows((prev) => prev.slice(0, nextLimit))
   }
 
@@ -156,11 +179,13 @@ const LiveEvents = () => {
     domainFilter || entityFilter || modeFilter || sourceFilter || search,
   )
   const resetFilters = () => {
-    setDomainFilter('')
-    setEntityFilter('')
-    setModeFilter('')
-    setSourceFilter('')
-    setSearch('')
+    setPageState({
+      domainFilter: '',
+      entityFilter: '',
+      modeFilter: '',
+      sourceFilter: '',
+      search: '',
+    })
     setSearchResetToken((t) => t + 1)
   }
 

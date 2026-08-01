@@ -3836,3 +3836,77 @@ separately (Warnings bell with nothing currently active correctly
 opens on "All", tested twice under two different type selections).
 Reverted the forced test failure afterward. Console clean, `tsc`/
 `eslint` clean on `apps/api` and `apps/ui`.
+
+## 39. Persisted page state rolled out to Nodes, Devices, Live Events, Logs, Users
+
+Section 17's `usePersistedState`/`utils/cookies.js` mechanism had
+exactly one adopter since it was built (`ProcessesList.jsx`) - its own
+doc comment invited "the next page that wants either adopts the hook/
+component directly." This is that adoption (AGENTS_TO_DO.md,
+2026-08-01), across five pages at once, in the two shapes the section
+already described:
+
+- **Flat variant** (no tabs) - `NodesList.jsx`, `DevicesList.jsx`,
+  `UsersList.jsx`, `LiveEvents.jsx`. Each gets its own `PERSISTED_
+  DEFAULTS` (flat `{ filterA, filterB, ..., pageSize }`) and cookie name
+  (`nexusedge.nodesPage`, `.devicesPage`, `.usersPage`,
+  `.liveEventsPage`) - AGENTS.md's own section 17 flat example was
+  historical/unused until now; these are its first real instances.
+  `search` stays wired through a local, unpersisted `searchResetToken`
+  exactly as before (a remount trigger for `TableSearchInput`, not
+  meaningful state). `LiveEvents.jsx`'s `limit` (buffer size) persists
+  too even though it's deliberately excluded from that page's own
+  `hasActiveFilters`/`resetFilters` (it changes what's buffered, not
+  just what's shown) - same preference role `pageSize` plays everywhere
+  else; its `limitRef` (read by the WS subscription effect so changing
+  the limit doesn't require resubscribing) now seeds from the restored
+  value, not the module constant, so a restored preference applies from
+  the very first live event after a reload, not only after the next
+  manual change.
+- **Tabbed variant** - `LogsList.jsx` (Commands/Devices/Messages).
+  Structurally different from `ProcessesList.jsx`'s own tabbed
+  registration in one way worth calling out: `ProcessesList.jsx`'s three
+  listing tabs all share one `DEFAULT_TAB_STATE` shape (every tab has a
+  search/group/type/status filter). Logs' three tabs do NOT - Commands
+  has device/action/actor/date-range, Devices has just device/date-
+  range, Messages has type/process/date-range - so `LogsList.jsx` keyed
+  `TAB_DEFAULTS` by tab key instead of one shared shape, and each tab's
+  own `tabState(key)` fallback (`{ ...TAB_DEFAULTS[key], ...pageState.
+  perTab[key] }`) resolves against its own key's shape, not a single
+  common one. This forced a real structural change the flat pages
+  didn't need: `CommandLogsTab.jsx`/`DeviceLogsTab.jsx`/
+  `ProcessMessageLogsTab.jsx` previously owned their filter/pageSize
+  state locally (`useState` inside the tab component itself) - state
+  that must live in the *parent* to be persisted across a tab switch
+  (each tab component genuinely unmounts when its tab isn't active, per
+  section 29's own design). All three were converted to fully controlled
+  components - every filter value plus its `onXChange` setter is now a
+  prop, spread down from `LogsList.jsx`'s `{...tabState(key)}` plus the
+  matching callbacks, the same one-prop-per-field convention
+  `ProcessesTable.jsx` already established rather than a bundled
+  `filters`/`onFilterChange` object.
+
+`hooks/useServerPaginatedList.js` (the Logs tabs' server-pagination
+hook, distinct from client-side `usePagination`) gained the same
+`onPageSizeChange` callback `usePagination` already had - it previously
+owned `pageSize` with no way to notify a caller when `setPageSize` ran,
+which the flat pages' pattern already depended on. Small, backward-
+compatible addition (an optional param, ignored if omitted).
+
+### Verified live
+
+For each of the five pages: set a filter/search/tab/page-size value in
+the browser, confirmed via a genuine hard reload (not a soft re-render)
+that the value survived - `NodesList`/`DevicesList` (search term),
+`UsersList` (search term), `LiveEvents` (buffer size dropdown + search,
+confirmed the restored buffer size took effect immediately on the very
+first post-reload live event, not just visually in the dropdown),
+`LogsList` (switched to the Devices tab, set its search filter,
+reloaded - both the active tab selection AND that tab's own filter
+survived; switched back to Commands and confirmed its filters were
+untouched, proving per-tab isolation - Reset Filters on one tab doesn't
+touch another tab's persisted slice). Console clean throughout (one
+stale-chunk fetch error from the exact rebuild moment on the Logs page,
+gone on a second reload - the same benign artifact sections 36/37
+already documented, unrelated to this change). `eslint` clean across
+the entire `apps/ui/src` tree, not just the touched files.

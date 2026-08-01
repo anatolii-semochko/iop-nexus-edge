@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React from 'react'
 import {
   CAlert,
   CAvatar,
@@ -32,21 +32,34 @@ const TYPE_OPTIONS = [
 const PAGE_SIZE_OPTIONS = [20, 50, 100]
 
 /**
- * Logs page (AGENTS.md section 29) - processes tab. Read-only historical
+ * Logs page (AGENTS.md section 29) - Messages tab. Read-only historical
  * view of process_messages (every WEM entry ever raised, including
  * resolved/hidden ones) - unlike the header notification center popup
  * (section 25), there's no mark-as-read action here; this is a full audit
  * trail, not an inbox. Reuses GET /log-messages (`scope: 'all'`)
  * rather than a separate endpoint, since that's already exactly this data.
+ *
+ * Filter/search/date-range/pageSize values and their setters are
+ * controlled props (2026-08-01) - see CommandLogsTab.jsx's identical doc
+ * comment for why.
  */
-const ProcessMessageLogsTab = ({ processes }) => {
-  const [type, setType] = useState('all')
-  const [processId, setProcessId] = useState('')
-  const [search, setSearch] = useState('')
-  const [from, setFrom] = useState('')
-  const [to, setTo] = useState('')
-  const [searchResetToken, setSearchResetToken] = useState(0)
-
+const ProcessMessageLogsTab = ({
+  processes,
+  type,
+  processId,
+  search,
+  from,
+  to,
+  pageSize: initialPageSize,
+  onTypeChange,
+  onProcessIdChange,
+  onSearchChange,
+  onFromChange,
+  onToChange,
+  onPageSizeChange,
+  searchResetToken,
+  onResetFilters,
+}) => {
   const { items, total, loading, error, page, pageSize, setPage, setPageSize, reload } =
     useServerPaginatedList(
       (pageArg, pageSizeArg) =>
@@ -61,24 +74,16 @@ const ProcessMessageLogsTab = ({ processes }) => {
           pageSize: pageSizeArg,
         }),
       [type, processId, search, from, to],
-      { pageSize: PAGE_SIZE_OPTIONS[0] },
+      { pageSize: initialPageSize, onPageSizeChange },
     )
 
   const hasActiveFilters = Boolean(type !== 'all' || processId || search || from || to)
-  const resetFilters = () => {
-    setType('all')
-    setProcessId('')
-    setSearch('')
-    setFrom('')
-    setTo('')
-    setSearchResetToken((t) => t + 1)
-  }
 
   return (
     <>
       <CRow className="mb-3 g-2 align-items-center">
         <CCol xs="auto">
-          <CFormSelect size="sm" value={type} onChange={(e) => setType(e.target.value)}>
+          <CFormSelect size="sm" value={type} onChange={(e) => onTypeChange(e.target.value)}>
             {TYPE_OPTIONS.map((option) => (
               <option key={option.key} value={option.key}>
                 {option.label}
@@ -87,7 +92,11 @@ const ProcessMessageLogsTab = ({ processes }) => {
           </CFormSelect>
         </CCol>
         <CCol xs="auto">
-          <CFormSelect size="sm" value={processId} onChange={(e) => setProcessId(e.target.value)}>
+          <CFormSelect
+            size="sm"
+            value={processId}
+            onChange={(e) => onProcessIdChange(e.target.value)}
+          >
             <option value="">All processes</option>
             {processes.map((p) => (
               <option key={p.id} value={p.id}>
@@ -100,14 +109,14 @@ const ProcessMessageLogsTab = ({ processes }) => {
           <TableSearchInput
             key={searchResetToken}
             value={search}
-            onSearch={setSearch}
+            onSearch={onSearchChange}
             placeholder="Search by text..."
           />
         </CCol>
-        <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+        <DateRangeFilter from={from} to={to} onFromChange={onFromChange} onToChange={onToChange} />
         <CCol className="d-flex justify-content-end gap-2">
           <IconButton icon={cilReload} size="sm" center onClick={reload} ariaLabel="Reload" />
-          <ResetFiltersButton active={hasActiveFilters} onClick={resetFilters} />
+          <ResetFiltersButton active={hasActiveFilters} onClick={onResetFilters} />
         </CCol>
       </CRow>
 

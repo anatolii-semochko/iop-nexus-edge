@@ -25,7 +25,17 @@ import ResetFiltersButton from '../../components/ResetFiltersButton'
 import TablePagination from '../../components/table/TablePagination'
 import TableSearchInput from '../../components/table/TableSearchInput'
 import { usePagination } from '../../hooks/usePagination'
+import { usePersistedState } from '../../hooks/usePersistedState'
 import DeviceSettingsModal from './DeviceSettingsModal'
+
+// Registration for usePersistedState (AGENTS_TO_DO.md, 2026-08-01) - flat
+// variant, same as NodesList.jsx.
+const PERSISTED_DEFAULTS = {
+  search: '',
+  groupFilter: '',
+  nodeFilter: '',
+  pageSize: 10,
+}
 
 const backendColor = (backend) => (backend === 'physical' ? 'primary' : 'info')
 
@@ -60,9 +70,13 @@ const DevicesList = () => {
   const [deviceGroups, setDeviceGroups] = useState([])
   const [nodes, setNodes] = useState([])
   const [error, setError] = useState(null)
-  const [search, setSearch] = useState('')
-  const [groupFilter, setGroupFilter] = useState('')
-  const [nodeFilter, setNodeFilter] = useState('')
+  const [pageState, setPageState] = usePersistedState('nexusedge.devicesPage', PERSISTED_DEFAULTS)
+  const { search, groupFilter, nodeFilter } = pageState
+  const setSearch = (value) => setPageState({ search: value })
+  const setGroupFilter = (value) => setPageState({ groupFilter: value })
+  const setNodeFilter = (value) => setPageState({ nodeFilter: value })
+  // Not persisted - a TableSearchInput remount trigger only, see
+  // NodesList.jsx's identical comment.
   const [searchResetToken, setSearchResetToken] = useState(0)
   const [configVisible, setConfigVisible] = useState(false)
   const [settingsDevice, setSettingsDevice] = useState(null)
@@ -93,13 +107,14 @@ const DevicesList = () => {
       (device) => !groupFilter || (device.device_group_ids ?? []).includes(Number(groupFilter)),
     )
     .filter((device) => !nodeFilter || String(device.node_id) === nodeFilter)
-  const { page, pageSize, pageItems, totalItems, setPage, setPageSize } = usePagination(filtered)
+  const { page, pageSize, pageItems, totalItems, setPage, setPageSize } = usePagination(filtered, {
+    pageSize: pageState.pageSize,
+    onPageSizeChange: (size) => setPageState({ pageSize: size }),
+  })
 
   const hasActiveFilters = Boolean(search) || Boolean(groupFilter) || Boolean(nodeFilter)
   const handleResetFilters = () => {
-    setSearch('')
-    setGroupFilter('')
-    setNodeFilter('')
+    setPageState({ search: '', groupFilter: '', nodeFilter: '' })
     setSearchResetToken((token) => token + 1)
   }
 

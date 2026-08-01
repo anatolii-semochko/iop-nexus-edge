@@ -24,8 +24,19 @@ import ResetFiltersButton from '../../components/ResetFiltersButton'
 import TablePagination from '../../components/table/TablePagination'
 import TableSearchInput from '../../components/table/TableSearchInput'
 import { usePagination } from '../../hooks/usePagination'
+import { usePersistedState } from '../../hooks/usePersistedState'
 import { formatRelativeTime } from '../../utils/format'
 import NodeSettingsModal from './NodeSettingsModal'
+
+// Registration for usePersistedState (AGENTS_TO_DO.md, 2026-08-01) - flat
+// variant (no tabs), unlike ProcessesList.jsx's `perTab` shape. `page`
+// itself is deliberately not persisted (AGENTS.md section 17) - only
+// `pageSize`, same convention as every other persisted page.
+const PERSISTED_DEFAULTS = {
+  search: '',
+  groupFilter: '',
+  pageSize: 10,
+}
 
 const healthColor = (health) => {
   switch (health) {
@@ -58,8 +69,15 @@ const NodesList = () => {
   const [nodes, setNodes] = useState(null)
   const [nodeGroups, setNodeGroups] = useState([])
   const [error, setError] = useState(null)
-  const [search, setSearch] = useState('')
-  const [groupFilter, setGroupFilter] = useState('')
+  const [pageState, setPageState] = usePersistedState('nexusedge.nodesPage', PERSISTED_DEFAULTS)
+  const { search, groupFilter } = pageState
+  const setSearch = (value) => setPageState({ search: value })
+  const setGroupFilter = (value) => setPageState({ groupFilter: value })
+  // Bumped on reset to force TableSearchInput to remount with a blank
+  // value (AGENTS.md section 11/17) - it owns its own typing state after
+  // mount, so a persisted `search` clear alone wouldn't clear what's
+  // actually showing in the box. Not itself persisted - a remount trigger,
+  // not meaningful state to restore.
   const [searchResetToken, setSearchResetToken] = useState(0)
   const [configVisible, setConfigVisible] = useState(false)
   const [settingsNode, setSettingsNode] = useState(null)
@@ -83,12 +101,14 @@ const NodesList = () => {
   const filtered = (nodes ?? [])
     .filter((node) => matchesSearch(node, search))
     .filter((node) => !groupFilter || String(node.group_id) === groupFilter)
-  const { page, pageSize, pageItems, totalItems, setPage, setPageSize } = usePagination(filtered)
+  const { page, pageSize, pageItems, totalItems, setPage, setPageSize } = usePagination(filtered, {
+    pageSize: pageState.pageSize,
+    onPageSizeChange: (size) => setPageState({ pageSize: size }),
+  })
 
   const hasActiveFilters = Boolean(search) || Boolean(groupFilter)
   const handleResetFilters = () => {
-    setSearch('')
-    setGroupFilter('')
+    setPageState({ search: '', groupFilter: '' })
     setSearchResetToken((token) => token + 1)
   }
 

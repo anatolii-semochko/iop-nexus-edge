@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React from 'react'
 import {
   CAlert,
   CCol,
@@ -35,14 +35,26 @@ const formatValue = (value) => (value === null || value === undefined ? '-' : St
  * logs - a future configurable process will decide what/when to log); this
  * tab still reads whatever history already exists. No Resource column
  * anymore - a Device is atomic, its name already says what was read.
+ *
+ * Filter/search/date-range/pageSize values and their setters are
+ * controlled props (2026-08-01) - see CommandLogsTab.jsx's identical doc
+ * comment for why.
  */
-const DeviceLogsTab = ({ devices }) => {
-  const [deviceId, setDeviceId] = useState('')
-  const [search, setSearch] = useState('')
-  const [from, setFrom] = useState('')
-  const [to, setTo] = useState('')
-  const [searchResetToken, setSearchResetToken] = useState(0)
-
+const DeviceLogsTab = ({
+  devices,
+  deviceId,
+  search,
+  from,
+  to,
+  pageSize: initialPageSize,
+  onDeviceIdChange,
+  onSearchChange,
+  onFromChange,
+  onToChange,
+  onPageSizeChange,
+  searchResetToken,
+  onResetFilters,
+}) => {
   const { items, total, loading, error, page, pageSize, setPage, setPageSize, reload } =
     useServerPaginatedList(
       (pageArg, pageSizeArg) =>
@@ -55,23 +67,20 @@ const DeviceLogsTab = ({ devices }) => {
           pageSize: pageSizeArg,
         }),
       [deviceId, search, from, to],
-      { pageSize: PAGE_SIZE_OPTIONS[0] },
+      { pageSize: initialPageSize, onPageSizeChange },
     )
 
   const hasActiveFilters = Boolean(deviceId || search || from || to)
-  const resetFilters = () => {
-    setDeviceId('')
-    setSearch('')
-    setFrom('')
-    setTo('')
-    setSearchResetToken((t) => t + 1)
-  }
 
   return (
     <>
       <CRow className="mb-3 g-2 align-items-center">
         <CCol xs="auto">
-          <CFormSelect size="sm" value={deviceId} onChange={(e) => setDeviceId(e.target.value)}>
+          <CFormSelect
+            size="sm"
+            value={deviceId}
+            onChange={(e) => onDeviceIdChange(e.target.value)}
+          >
             <option value="">All devices</option>
             {devices.map((d) => (
               <option key={d.id} value={d.id}>
@@ -84,14 +93,14 @@ const DeviceLogsTab = ({ devices }) => {
           <TableSearchInput
             key={searchResetToken}
             value={search}
-            onSearch={setSearch}
+            onSearch={onSearchChange}
             placeholder="Search by device..."
           />
         </CCol>
-        <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+        <DateRangeFilter from={from} to={to} onFromChange={onFromChange} onToChange={onToChange} />
         <CCol className="d-flex justify-content-end gap-2">
           <IconButton icon={cilReload} size="sm" center onClick={reload} ariaLabel="Reload" />
-          <ResetFiltersButton active={hasActiveFilters} onClick={resetFilters} />
+          <ResetFiltersButton active={hasActiveFilters} onClick={onResetFilters} />
         </CCol>
       </CRow>
 

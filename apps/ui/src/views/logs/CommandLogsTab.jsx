@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React from 'react'
 import {
   CAlert,
   CAvatar,
@@ -70,19 +70,36 @@ const ActorCell = ({ actorUser }) => {
  * actions (ON/OFF, config changes) alongside device writes, and to show
  * WHO issued each one - the orchestrator included, attributed to the real
  * "system" user rather than a separate filter entry. Historical/append-
- * only, no per-row interaction - a straight audit trail. Actor is the
- * first column (2026-08-01 follow-up), not last - who did it matters more
- * at a glance than the timestamp.
+ * only, no per-row interaction - a straight audit trail. Actor is shown
+ * inline in the Time cell (2026-08-01 follow-up).
+ *
+ * Filter/search/date-range/pageSize values and their setters are all
+ * controlled props now (2026-08-01), not local state - LogsList.jsx owns
+ * and persists them (`usePersistedState`'s tabbed variant), passing this
+ * component's whole slice down via `{...tabState('commands')}` plus the
+ * matching `onXChange` callbacks, the same prop-per-field convention
+ * ProcessesTable.jsx already uses.
  */
-const CommandLogsTab = ({ devices, users }) => {
-  const [deviceId, setDeviceId] = useState('')
-  const [action, setAction] = useState('')
-  const [actorUserId, setActorUserId] = useState('')
-  const [search, setSearch] = useState('')
-  const [from, setFrom] = useState('')
-  const [to, setTo] = useState('')
-  const [searchResetToken, setSearchResetToken] = useState(0)
-
+const CommandLogsTab = ({
+  devices,
+  users,
+  deviceId,
+  action,
+  actorUserId,
+  search,
+  from,
+  to,
+  pageSize: initialPageSize,
+  onDeviceIdChange,
+  onActionChange,
+  onActorUserIdChange,
+  onSearchChange,
+  onFromChange,
+  onToChange,
+  onPageSizeChange,
+  searchResetToken,
+  onResetFilters,
+}) => {
   const { items, total, loading, error, page, pageSize, setPage, setPageSize, reload } =
     useServerPaginatedList(
       (pageArg, pageSizeArg) =>
@@ -97,25 +114,20 @@ const CommandLogsTab = ({ devices, users }) => {
           pageSize: pageSizeArg,
         }),
       [deviceId, action, actorUserId, search, from, to],
-      { pageSize: PAGE_SIZE_OPTIONS[0] },
+      { pageSize: initialPageSize, onPageSizeChange },
     )
 
   const hasActiveFilters = Boolean(deviceId || action || actorUserId || search || from || to)
-  const resetFilters = () => {
-    setDeviceId('')
-    setAction('')
-    setActorUserId('')
-    setSearch('')
-    setFrom('')
-    setTo('')
-    setSearchResetToken((t) => t + 1)
-  }
 
   return (
     <>
       <CRow className="mb-3 g-2 align-items-center">
         <CCol xs="auto">
-          <CFormSelect size="sm" value={deviceId} onChange={(e) => setDeviceId(e.target.value)}>
+          <CFormSelect
+            size="sm"
+            value={deviceId}
+            onChange={(e) => onDeviceIdChange(e.target.value)}
+          >
             <option value="">All devices</option>
             {devices.map((d) => (
               <option key={d.id} value={d.id}>
@@ -125,7 +137,7 @@ const CommandLogsTab = ({ devices, users }) => {
           </CFormSelect>
         </CCol>
         <CCol xs="auto">
-          <CFormSelect size="sm" value={action} onChange={(e) => setAction(e.target.value)}>
+          <CFormSelect size="sm" value={action} onChange={(e) => onActionChange(e.target.value)}>
             <option value="">All actions</option>
             {ACTIONS.map((a) => (
               <option key={a} value={a}>
@@ -138,7 +150,7 @@ const CommandLogsTab = ({ devices, users }) => {
           <CFormSelect
             size="sm"
             value={actorUserId}
-            onChange={(e) => setActorUserId(e.target.value)}
+            onChange={(e) => onActorUserIdChange(e.target.value)}
           >
             <option value="">All users</option>
             {users.map((u) => (
@@ -152,14 +164,14 @@ const CommandLogsTab = ({ devices, users }) => {
           <TableSearchInput
             key={searchResetToken}
             value={search}
-            onSearch={setSearch}
+            onSearch={onSearchChange}
             placeholder="Search by device or process..."
           />
         </CCol>
-        <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+        <DateRangeFilter from={from} to={to} onFromChange={onFromChange} onToChange={onToChange} />
         <CCol className="d-flex justify-content-end gap-2">
           <IconButton icon={cilReload} size="sm" center onClick={reload} ariaLabel="Reload" />
-          <ResetFiltersButton active={hasActiveFilters} onClick={resetFilters} />
+          <ResetFiltersButton active={hasActiveFilters} onClick={onResetFilters} />
         </CCol>
       </CRow>
 

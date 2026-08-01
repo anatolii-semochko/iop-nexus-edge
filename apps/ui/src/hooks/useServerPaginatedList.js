@@ -16,11 +16,17 @@ const DEFAULT_PAGE_SIZE = 20
  * values, as a plain array - changing any of them both re-fetches and
  * resets `page` back to 1, same as every filter setter in
  * NotificationCenterModal/ProcessesTable already does by hand.
+ *
+ * `onPageSizeChange` mirrors `usePagination.js`'s own callback of the same
+ * name (AGENTS_TO_DO.md, 2026-08-01) - a plain notification hook, fired
+ * whenever `setPageSize` changes the size, for a caller that wants to
+ * persist the new value (this hook itself has no opinion on where a
+ * caller's page size preference lives).
  */
 export function useServerPaginatedList(
   fetcher,
   deps,
-  { pageSize: initialPageSize = DEFAULT_PAGE_SIZE } = {},
+  { pageSize: initialPageSize = DEFAULT_PAGE_SIZE, onPageSizeChange } = {},
 ) {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(initialPageSize)
@@ -84,6 +90,7 @@ export function useServerPaginatedList(
     setPageSize: (size) => {
       setPageSize(size)
       setPage(1)
+      onPageSizeChange?.(size)
     },
     reload: () => setReloadToken((t) => t + 1),
   }
