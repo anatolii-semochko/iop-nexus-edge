@@ -204,6 +204,13 @@ export const apiClient = {
       method: "POST",
       body: JSON.stringify({ reason }),
     }),
+  // System tick pulse (AGENTS_TO_DO.md, 2026-08-01) - the header's green
+  // "alive" indicator. No body at all (not even an empty one) - `request()`
+  // above only sets Content-Type when a body is present, so this stays a
+  // genuinely bodyless POST, the same problem forceStateBroadcast's comment
+  // describes solved from the other direction (always sending a body there
+  // instead of never sending one here).
+  tick: () => request("/system/tick", { method: "POST" }),
   // Heartbeating Control (AGENTS.md) - one batched call per tick from
   // index.ts's tick(), not one per process; see
   // apps/api/src/heartbeatControl.ts's touchHeartbeats for what this

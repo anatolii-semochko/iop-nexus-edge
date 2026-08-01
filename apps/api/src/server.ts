@@ -24,6 +24,7 @@ import { nodeGroupRoutes } from "./routes/nodeGroups.js";
 import { nodeRoutes } from "./routes/nodes.js";
 import { processGroupRoutes } from "./routes/processGroups.js";
 import { processRoutes } from "./routes/processes.js";
+import { systemTickRoutes } from "./routes/systemTick.js";
 import { tabGroupRoutes } from "./routes/tabGroups.js";
 import { userRoutes } from "./routes/users.js";
 
@@ -89,6 +90,7 @@ export async function startApiServer(): Promise<FastifyInstance> {
   await app.register(messageGroupRoutes);
   await app.register(messageLevelRoutes);
   await app.register(logRoutes);
+  await app.register(systemTickRoutes);
 
   // Command-API extension points (extension points design, AGENTS_TO_DO.md
   // 2026-07-28) - Library and private DNP api.ts plugins, registered after

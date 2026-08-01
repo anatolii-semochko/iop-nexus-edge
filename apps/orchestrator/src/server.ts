@@ -28,6 +28,11 @@ function registerBuiltinProcessKinds(): void {
 }
 
 async function tick(): Promise<void> {
+  // Fire-and-forget, not awaited - a slow/failed publish must never delay
+  // this tick's actual process runners below (AGENTS_TO_DO.md, 2026-08-01:
+  // purely a cosmetic "system is alive" signal, see apiClient.tick()).
+  void apiClient.tick().catch((err) => logger.warn({ err }, "failed to publish system tick"));
+
   let processes: ProcessRecord[];
   try {
     processes = await apiClient.listProcesses();

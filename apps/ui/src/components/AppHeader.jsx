@@ -34,6 +34,7 @@ import { cilContrast, cilMenu, cilMoon, cilSun } from '@coreui/icons'
 
 import { AppHeaderDropdown } from './header/index'
 import NotificationCenter from './header/NotificationCenter'
+import SystemTickIndicator from './header/SystemTickIndicator'
 
 /**
  * AppHeader functional component
@@ -73,6 +74,9 @@ const AppHeader = () => {
           <CIcon icon={cilMenu} size="lg" />
         </CHeaderToggler>
         <CHeaderNav className="ms-auto">
+          <li className="nav-item d-flex align-items-center py-1 me-3">
+            <SystemTickIndicator />
+          </li>
           <li className="nav-item d-flex align-items-center py-1">
             <NotificationCenter />
           </li>

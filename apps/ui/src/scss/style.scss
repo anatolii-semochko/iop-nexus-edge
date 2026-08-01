@@ -95,3 +95,42 @@ body {
 .wem-blink-ring {
   animation: wem-blink-ring 0.6s ease-in-out infinite;
 }
+
+// System tick indicator (header, left of the Notification icons -
+// AGENTS_TO_DO.md, 2026-08-01) - a short, comfortably visible pulse
+// (~450ms: long enough to actually register at a glance, short enough
+// not to still be mid-pulse when the next tick arrives about a second
+// later) retriggered by SystemTickIndicator.jsx changing the dot's own
+// `key` on every tick. `color`/`currentColor` (not a hardcoded hex) so
+// the glow tracks CoreUI's own success color across light/dark mode.
+@keyframes system-tick-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+    box-shadow: 0 0 0 0 currentColor;
+  }
+  60% {
+    transform: scale(1.25);
+    opacity: 1;
+    box-shadow: 0 0 4px 3px currentColor;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 0.35;
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+.system-tick-dot {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  color: var(--cui-success);
+  background-color: currentColor;
+  opacity: 0.35;
+}
+
+.system-tick-pulse {
+  animation: system-tick-pulse 0.1s ease-out;
+}

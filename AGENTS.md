@@ -3505,3 +3505,97 @@ Reset Filters, matching the Logs tabs' existing Reload+Reset placement;
 opened a Settings popup, changed a device's Name, saved, confirmed the
 new name appeared immediately in the table row and the modal's own
 header re-rendered with it live.
+
+## 36. System tick indicator (header, green pulse)
+
+A small green circular dot in the Main Header, left of the Notification
+icons - pulses once per `apps/orchestrator` tick, arriving live over the
+Socket Server (AGENTS_TO_DO.md, 2026-08-01: "зелений круглий індикатор,
+який блимає по тіках системи з Socket Server"). Purely cosmetic - "the
+system is alive," nothing more - not a data channel and not read by any
+other feature.
+
+### Why a genuine new tick pulse, not a reused broadcast
+
+The obvious cheap option was piggybacking `apps/api`'s existing process
+public-state broadcast (section 24, `process.state.snapshot`, default
+5s timer, occasionally sooner on urgent triggers) - zero new backend
+code. Rejected: that broadcast's cadence is irregular by design (the
+whole point of its urgent path) and 5s is a poor match for "tick" - this
+codebase already has a well-established, precise meaning for that word
+(`apps/orchestrator/src/tickInterval.ts`'s `TICK_INTERVAL_MS = 1000`,
+the same tick Heartbeating Control counts skips against), so the
+indicator should reflect *that* tick, not an unrelated timer that
+happens to also be periodic.
+
+### Wire path
+
+`apps/orchestrator/src/server.ts`'s `tick()` - already running every
+`TICK_INTERVAL_MS` - fires `apiClient.tick()` at its very top,
+fire-and-forget (`void ... .catch(...)`, never awaited: a slow/failed
+publish must not delay that tick's actual process runners). New
+`apps/api/src/routes/systemTick.ts`: `POST /system/tick` does exactly
+one thing - `redis.publish("system:tick", Date.now().toString())` - no
+DB read, no cache key, no assembled payload, the cheapest possible
+notify, same lightweight Redis Pub/Sub idiom `processBroadcast.ts`
+already uses for `process:state:updated` (section 24) but without that
+one's cache-key half, since a tick pulse carries no meaningful data of
+its own beyond "one just happened."
+
+`apps/messaging-gateway/src/server.ts` subscribes to `system:tick`
+alongside its existing `process:state:updated` subscription (one
+`subscriberRedis.on("message", ...)` handler now dispatches on
+`channel`) and relays it straight through as a WS event -
+`{routingKey: "system.tick", envelope: {domain: "tick", timestamp}}` -
+the same synthetic-routing-key idiom `PROCESS_STATE_ROUTING_KEY`
+already established, so a client's `topics=` pattern filtering already
+works on it for free. No initial-snapshot entry on a fresh connection
+(unlike process state) - a tick is transient, there is nothing
+meaningful to hand a client before the next one fires a second later.
+
+`apps/ui/src/api/useSystemTick.js` - a `useLiveProcess.js`-style hook,
+`subscribeToLiveEvents` filtered to `routingKey === "system.tick"`,
+returning a counter that increments once per tick (the counter's value
+has no meaning of its own - it only exists to *change*).
+`apps/ui/src/components/header/SystemTickIndicator.jsx` uses that
+counter as the dot's own React `key`: changing a `key` unmounts and
+remounts the element, which restarts its CSS animation from 0% every
+time - deliberately *not* `NotificationCenter.jsx`'s `.wem-blink-ring`
+approach (`animation: ... infinite`), which would keep blinking forever
+even if ticks actually stopped arriving (WS disconnected, orchestrator
+down) - this dot only ever pulses in direct response to a real tick,
+and visibly stops if they do.
+
+### The pulse itself
+
+`apps/ui/src/scss/style.scss`'s `@keyframes system-tick-pulse` (~450ms:
+long enough to register at a glance, short enough to have fully settled
+before the next tick arrives a second later) - scale 1 -> 1.25 -> 1,
+opacity 1 -> 1 -> 0.35, a `currentColor` glow (`box-shadow`) that
+blooms then vanishes. `color: var(--cui-success)` on the base
+`.system-tick-dot` (not a hardcoded hex) so both the fill and the glow
+track CoreUI's own success color across light/dark mode, matching how
+`NotificationCenter.jsx` already leans on Bootstrap's `bg-{color}`
+utilities rather than fixed colors. Idle state (between pulses) sits at
+the same 0.35 opacity the animation's own `100%` frame ends on - no
+`animation-fill-mode` needed, the two already agree.
+
+### Verified live
+
+Rebuilt (`make up-all`), `tsc` clean on `apps/api`/`apps/orchestrator`/
+`apps/messaging-gateway`, `eslint` clean on `apps/ui`. Confirmed the
+orchestrator is actually calling `POST /system/tick` once a second (API
+request logs, one `system/tick` line ~1000ms apart, indefinitely, no
+errors). Connected a raw WebSocket client directly to the messaging-
+gateway container (bypassing the UI, bypassing nginx) and captured five
+consecutive `system.tick` events over a 5s window, each ~1000ms apart,
+exact envelope shape `{domain: "tick", timestamp}` as designed - the
+whole Redis-Pub/Sub-relay chain working end to end, not just the two
+ends independently. Browser-verified: the dot renders in the header, in
+the correct position (left of the Notification bells); its accessible-
+tree reference goes stale roughly once a second on its own (confirming
+the element is genuinely remounting on each tick, not just visually
+pulsing via a CSS class toggle); console clean after a hard reload (one
+stale-chunk fetch error immediately following the rebuild, gone on a
+second reload - a normal artifact of swapping a running dev bundle
+mid-session, unrelated to this change).
