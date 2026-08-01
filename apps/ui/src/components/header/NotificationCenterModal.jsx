@@ -136,23 +136,24 @@ const NotificationCenterModal = ({ type, onTypeChange, onClose }) => {
   }, [live, processNameById, type, processFilter, search])
 
   // Picks a useful starting tab for this type selection (AGENTS_TO_DO.md,
-  // 2026-08-01) - previously always opened on "New" regardless of whether
-  // something more urgent was already active. "Active" if it's visible
-  // for this type and currently has something in it, "All" otherwise -
-  // "New" is still manually selectable, just never the auto-picked
-  // default anymore. Keyed only on `type` (opening or switching type),
-  // not on `activeItems` - this should decide where to land when the type
-  // selection changes, not keep yanking the user back to "Active" every
-  // time a new alarm arrives while they're already reading a different
-  // tab. This component never unmounts (only its rich content toggles on
-  // `type`), so `useState('new')`'s initial value alone can't provide a
-  // fresh default on every open - an effect is the only way to react to
-  // `type` going from `null` to set, or from one type to another.
+  // 2026-08-01, corrected same day - the original fix defaulted to "All"
+  // when nothing was active; "New" is the right fallback, "All" was a
+  // mistake in the original spec). "Active" if it's visible for this type
+  // and currently has something in it, "New" otherwise - "All" is still
+  // manually selectable, just never the auto-picked default. Keyed only
+  // on `type` (opening or switching type), not on `activeItems` - this
+  // should decide where to land when the type selection changes, not keep
+  // yanking the user back to "Active" every time a new alarm arrives
+  // while they're already reading a different tab. This component never
+  // unmounts (only its rich content toggles on `type`), so `useState
+  // ('new')`'s initial value alone can't provide a fresh default on every
+  // open - an effect is the only way to react to `type` going from `null`
+  // to set, or from one type to another.
   useEffect(() => {
     if (!type) return
     const activeVisible = type !== 'message'
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setTab(activeVisible && activeItems.length > 0 ? 'active' : 'all')
+    setTab(activeVisible && activeItems.length > 0 ? 'active' : 'new')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [type])
 

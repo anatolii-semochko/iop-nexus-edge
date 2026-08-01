@@ -3910,3 +3910,21 @@ stale-chunk fetch error from the exact rebuild moment on the Logs page,
 gone on a second reload - the same benign artifact sections 36/37
 already documented, unrelated to this change). `eslint` clean across
 the entire `apps/ui/src` tree, not just the touched files.
+
+## 40. Notification center default tab: correction (empty case is "New", not "All")
+
+Same-day correction to section 38's own fix (AGENTS_TO_DO.md, 2026-08-01
+- the user's own words: "Я помилився в завданні... Якщо є активні
+повідомлення - відкриваємо табу Active. Якщо немає - то 'New' (не
+'All')"). The logic itself was already right - "Active" when it's
+visible for the selected type and non-empty - only the fallback was
+wrong: section 38 shipped `'all'` as the empty-case default; it should
+be `'new'`. One-line fix in `NotificationCenterModal.jsx`'s tab-
+selecting effect (`setTab(activeVisible && activeItems.length > 0 ?
+'active' : 'new')`), doc comment updated to match. "All" remains
+manually selectable, exactly as "New" already was under the old
+(wrong) default.
+
+Verified live: with no active warnings, opening the Warnings bell now
+lands on "New" (previously landed on "All" per section 38's mistaken
+spec). Console clean, `eslint` clean.
