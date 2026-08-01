@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 
 import * as commandLog from "../commandLog.js";
-import type { DeviceCommandAction } from "../commandLog.js";
+import type { CommandActorType, DeviceCommandAction } from "../commandLog.js";
 import * as deviceLog from "../deviceLog.js";
 
 // Read side of the two append-only log tables (AGENTS.md section 22,
@@ -23,6 +23,8 @@ export async function logRoutes(app: FastifyInstance): Promise<void> {
     Querystring: {
       deviceId?: string;
       action?: DeviceCommandAction;
+      actorType?: CommandActorType;
+      actorUserId?: string;
       search?: string;
       from?: string;
       to?: string;
@@ -30,11 +32,14 @@ export async function logRoutes(app: FastifyInstance): Promise<void> {
       pageSize?: string;
     };
   }>("/logs/commands", async (request) => {
-    const { action, search, from, to } = request.query;
+    const { action, actorType, search, from, to } = request.query;
     const deviceId = request.query.deviceId ? Number(request.query.deviceId) : undefined;
+    const actorUserId = request.query.actorUserId ? Number(request.query.actorUserId) : undefined;
     return commandLog.listCommandLogs({
       deviceId,
       action,
+      actorType,
+      actorUserId,
       search,
       from,
       to,

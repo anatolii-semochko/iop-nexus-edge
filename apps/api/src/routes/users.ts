@@ -65,6 +65,24 @@ async function findUser(id: string): Promise<UserRow | undefined> {
   return result.rows[0];
 }
 
+// Minimal, non-admin-gated user listing (AGENTS_TO_DO.md, 2026-08-01) -
+// just enough to populate an "actor" filter/display (id, display name,
+// avatar), unlike GET /users below (admin-only, full account management
+// including roles/active/password). A separate exported function, not
+// registered inside userRoutes' plugin instance, so it sits outside that
+// instance's `requireAdmin` preHandler hook - any logged-in user needs
+// this today (the Logs > Commands actor filter), not just admins. Same
+// unauthenticated-read precedent as routes/processes.ts's `hidden_by_user`
+// join (log_messages), which already exposes these same fields.
+export async function userDirectoryRoutes(app: FastifyInstance): Promise<void> {
+  app.get("/users/directory", async () => {
+    const result = await pool.query<Pick<UserRow, "id" | "username" | "display_name" | "avatar_path">>(
+      "SELECT id, username, display_name, avatar_path FROM users WHERE active = true ORDER BY username",
+    );
+    return result.rows;
+  });
+}
+
 export async function userRoutes(app: FastifyInstance): Promise<void> {
   app.addHook("preHandler", requireAdmin);
 

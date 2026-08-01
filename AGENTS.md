@@ -3599,3 +3599,139 @@ pulsing via a CSS class toggle); console clean after a hard reload (one
 stale-chunk fetch error immediately following the rebuild, gone on a
 second reload - a normal artifact of swapping a running dev bundle
 mid-session, unrelated to this change).
+
+## 37. Logs page redesign: Commands widened to processes, per-row actor identity, Messages rename
+
+Triggered by a real production symptom (AGENTS_TO_DO.md, 2026-08-01): a
+running project's Commands log had grown to 41k+ rows, almost all
+identical `auto`/`false` repeats for the same device. Root cause,
+diagnosed before any redesign work started: `PUT /devices/:id/auto` (the
+orchestrator-driven write path) called `logCommand()` unconditionally on
+*every* tick, even when the value hadn't changed - a control-loop
+process re-asserts its computed output every cycle by design (so a
+device that drifted independently still gets corrected next tick), not
+just on change, and every one of those routine reassertions was being
+logged as if it were a new command. **Fixed first, independently of the
+redesign below**: `routes/devices.ts`'s `/auto` handler now reads the
+device's current `valueAuto` via `dualDevicesModel.getState()` before
+writing, and only calls `logCommand()` when it actually differs - the
+reassertion write/publish itself still happens every tick regardless,
+only the audit-log entry is suppressed. Mirrors a precedent already set
+once for `log_device`: `dualDevicesModel.ts`'s `publishReading()`
+comment already documents the 2026-07-27 refactor dropping this exact
+"log every tick" behavior for sensor readings; this closes the same gap
+for commands.
+
+Investigating that bug surfaced a second, larger gap: the Commands tab
+only ever covered device writes - a process's ON/OFF switch and its
+config/parameter changes were (and always had been) completely
+unlogged, and no row anywhere said *who* issued a command; `source` was
+always the literal string `"api"`, useless for that purpose. The user's
+own request scoped a full three-tab redesign:
+
+### Commands tab - now covers processes too, with per-row actor identity
+
+`log_command` (migration `1690000000039`) gains `process_id` (nullable
+FK `processes`, mirrors `device_id`'s own nullable/`ON DELETE SET NULL`
+shape - deliberately no "at least one of device_id/process_id" CHECK,
+since that would break the exact reason `device_id` is nullable in the
+first place: a later delete of the referenced row must be free to null
+the column out without invalidating an already-written log row),
+`actor_type` (`'user' | 'orchestrator'`, NOT NULL, backfilled from
+`action` - `auto` was always orchestrator-only, the other three were
+always UI-only, so this is an exact backfill, not a guess), and
+`actor_user_id` (nullable FK `users` - null for `actor_type =
+'orchestrator'`, since the orchestrator has no user account and never
+will; it's not a login-capable actor, just an unauthenticated internal
+caller). `action`'s CHECK widens to add `'on'`, `'off'`, `'config'`.
+
+**The routes that create these rows previously had no way to know who
+was calling them** - `routes/devices.ts`'s write/simulate/release and
+`routes/processes.ts`'s action/config routes were all deliberately
+unauthenticated (`auth.ts`'s own comment: "a separate, not-yet-started
+task"). Confirmed with the user before doing this: since the whole UI
+is already behind `AuthGate` (section 13) and the session cookie
+already rides every same-origin fetch automatically
+(`apps/ui/src/api/client.js`'s own comment on this), adding `{
+preHandler: requireAuth }` to exactly these five routes doesn't change
+normal UI behavior at all - it only means a direct, cookie-less API
+call (curl/Postman) now needs a real login first. `PUT /devices/:id/
+auto` deliberately stays unauthenticated - it's orchestrator-only, and
+the orchestrator has no credentials to send; its `logCommand()` call
+just hardcodes `actorType: "orchestrator"`.
+
+- `POST /processes/:id/action` (ON/OFF) now logs `{processId, action:
+  action === "ON" ? "on" : "off", actorType: "user", actorUserId:
+  request.user.sub}` right before applying the change - no `value`
+  (same "nothing meaningful to log" reasoning `release` already had).
+- `PATCH /processes/:id/config` now logs `{processId, action: "config",
+  value: request.body, ...}` - `value` is the partial patch actually
+  sent, not the whole resulting config, matching "value is what was
+  written" everywhere else in this table.
+
+`commandLog.ts`'s `listCommandLogs()` now `LEFT JOIN`s both `devices`
+and `processes` (search matches whichever one a row targets) and
+`users` (for `actor_user`), plus new `actorType`/`actorUserId` filter
+params. New non-admin-gated `GET /users/directory` (`routes/users.ts`,
+a separate exported function outside `userRoutes`' `requireAdmin`
+preHandler hook) - the existing `GET /users` is fully admin-gated
+(roles/password management), but the Commands tab's actor filter needs
+a minimal id/username/display_name/avatar_path listing for *any*
+logged-in user, not just admins; same unauthenticated-read precedent
+`log_messages`'s `hidden_by_user` join already established for exposing
+these same fields.
+
+UI (`CommandLogsTab.jsx`): new Actor filter dropdown (All users /
+Orchestrator / each real user) and an Actor column replacing the old,
+always-`"api"` Source column - a `CAvatar` (photo or initials, exact
+same pattern `ProcessMessageLogsTab.jsx`'s `hidden_by_user` rendering
+already used) for a human actor, or a dark `CAvatar` wrapping the same
+`cilSettings` icon this app already uses for orchestration/Processes
+(`_nav.jsx`) for the orchestrator - deliberately reusing that icon's
+existing meaning rather than introducing a second "system" glyph. A
+`user`-typed row with no `actor_user` (a legacy row from before this
+migration - the backfill only knew "was a human", never who) renders a
+generic `?` avatar titled "Unknown user". Device column renamed
+"Target" (shows whichever of device/process name applies - a row
+targets exactly one), and `formatValue()` now JSON-stringifies object
+values (the `config` action's diff) instead of `String()`-ing them into
+`"[object Object]"`.
+
+### Devices tab
+
+Unchanged, per explicit instruction.
+
+### Messages tab (renamed from "Processes")
+
+The existing `ProcessMessageLogsTab.jsx` (WEM type filter, process
+filter, text search, date range) already matched the requested spec
+exactly - no code changes, `LogsList.jsx`'s `TAB_DEFS` label is now
+"Messages".
+
+### Verified live
+
+Root-cause fix verified first, in isolation: watched `GET /logs/
+commands`'s total command count stay frozen across a 5-second window
+for a device stuck at a constant `false` (previously one new row every
+single second, confirmed via the exact same 41k+-row project's live
+data). Auth enforcement: an unauthenticated `curl` to `PUT .../simulate`
+and `POST .../action` both now 401 (`{"error":"unauthorized"}`); logged
+in via `POST /auth/login`, the same two calls (plus a config PATCH)
+succeed and each produced exactly one `log_command` row with the
+correct `actor_user` (id/display_name/username/avatar_path all
+resolved), `process_name` resolved for the process rows, and `value`
+holding the right shape (`null` for on/off, the partial patch object
+for config). Filtering verified via `curl`: `actorType=orchestrator`
+returns only the `auto` rows with `actor_user: null`; `actorType=user`/
+`actorUserId=1` both correctly scope to the logged-in admin's own
+rows; `search=Zummer` matches on `process_name` (previously only
+`device_name` was searched). Browser-verified end to end: Actor column
+shows the admin's avatar photo on user rows and the dark gear-icon
+badge on orchestrator rows; the Actor filter dropdown lists "All users
+/ Orchestrator / Administrator / System"; selecting "Orchestrator"
+correctly narrows the table to only `auto` rows and shows the Reset
+Filters button, which correctly restores the full list on click; the
+Messages tab shows its renamed label. Console clean (one stale-chunk
+fetch error from the exact rebuild moment, gone on a second reload -
+the same benign artifact section 36 already documented). `tsc`/`eslint`
+clean on `apps/api` and `apps/ui`.

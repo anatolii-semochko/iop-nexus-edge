@@ -120,15 +120,30 @@ export const api = {
   // deviceCommands/sensors, AGENTS_TO_DO.md's 2026-07-27 Device/Node refactor -
   // matches the renamed log_command/log_device tables). The processes tab
   // reuses listProcessMessages above instead of a third function here.
-  listCommandLogs: ({ deviceId, action, search, from, to, page, pageSize }) => {
+  listCommandLogs: ({
+    deviceId,
+    action,
+    actorType,
+    actorUserId,
+    search,
+    from,
+    to,
+    page,
+    pageSize,
+  }) => {
     const params = new URLSearchParams({ page, pageSize })
     if (deviceId) params.set('deviceId', deviceId)
     if (action) params.set('action', action)
+    if (actorType) params.set('actorType', actorType)
+    if (actorUserId) params.set('actorUserId', actorUserId)
     if (search) params.set('search', search)
     if (from) params.set('from', from)
     if (to) params.set('to', to)
     return request(`/logs/commands?${params}`)
   },
+  // Minimal user listing (AGENTS_TO_DO.md, 2026-08-01) - not admin-gated
+  // like listUsers() below, for the Commands tab's actor filter.
+  listUserDirectory: () => request('/users/directory'),
   listDeviceLogs: ({ deviceId, search, from, to, page, pageSize }) => {
     const params = new URLSearchParams({ page, pageSize })
     if (deviceId) params.set('deviceId', deviceId)

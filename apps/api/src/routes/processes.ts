@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 
 import { requireAuth } from "../auth.js";
+import { logCommand } from "../commandLog.js";
 import { pool } from "../db.js";
 import * as heartbeatControl from "../heartbeatControl.js";
 import type { HeartbeatControlConfig } from "../heartbeatControl.js";
@@ -88,47 +89,76 @@ export async function processRoutes(app: FastifyInstance): Promise<void> {
       ramWarnMax?: number;
       diskWarnMax?: number;
     };
-  }>("/processes/:id/config", async (request, reply) => {
-    const process = await findProcess(request.params.id);
-    if (!process) {
-      return reply.code(404).send({ error: "process not found" });
-    }
+  }>(
+    "/processes/:id/config",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const process = await findProcess(request.params.id);
+      if (!process) {
+        return reply.code(404).send({ error: "process not found" });
+      }
 
-    const config: ProcessConfig = { ...process.config, ...request.body };
-    if (config.min !== undefined && config.max !== undefined && config.max < config.min) {
-      return reply.code(400).send({ error: "max cannot be less than min" });
-    }
+      const config: ProcessConfig = { ...process.config, ...request.body };
+      if (config.min !== undefined && config.max !== undefined && config.max < config.min) {
+        return reply.code(400).send({ error: "max cannot be less than min" });
+      }
 
-    await pool.query("UPDATE processes SET config = $1, updated_at = now() WHERE id = $2", [config, process.id]);
-    return { status: "ok", config };
-  });
+      // Logged before applying (AGENTS.md section 22's precedent for device
+      // writes) - `value` is the partial patch actually sent, not the whole
+      // resulting config, matching "value is what was written" everywhere
+      // else in log_command.
+      await logCommand({
+        processId: process.id,
+        action: "config",
+        value: request.body,
+        source: "api",
+        actorType: "user",
+        actorUserId: request.user.sub,
+      });
+
+      await pool.query("UPDATE processes SET config = $1, updated_at = now() WHERE id = $2", [config, process.id]);
+      return { status: "ok", config };
+    },
+  );
 
   // Only ON/OFF exist today (the two seeded processes need nothing else) -
   // START/PAUSE/STOP are named in the general process concept but not
   // implemented yet.
-  app.post<{ Params: { id: string }; Body: { action: string } }>("/processes/:id/action", async (request, reply) => {
-    const process = await findProcess(request.params.id);
-    if (!process) {
-      return reply.code(404).send({ error: "process not found" });
-    }
+  app.post<{ Params: { id: string }; Body: { action: string } }>(
+    "/processes/:id/action",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const process = await findProcess(request.params.id);
+      if (!process) {
+        return reply.code(404).send({ error: "process not found" });
+      }
 
-    const { action } = request.body;
-    if (!process.actions.includes(action)) {
-      return reply.code(400).send({ error: `action '${action}' is not valid for this process`, allowed: process.actions });
-    }
-    if (!IMPLEMENTED_ACTIONS.has(action)) {
-      return reply.code(400).send({ error: `action '${action}' is not implemented yet` });
-    }
+      const { action } = request.body;
+      if (!process.actions.includes(action)) {
+        return reply.code(400).send({ error: `action '${action}' is not valid for this process`, allowed: process.actions });
+      }
+      if (!IMPLEMENTED_ACTIONS.has(action)) {
+        return reply.code(400).send({ error: `action '${action}' is not implemented yet` });
+      }
 
-    await processRegistry.setStatus(process.id, action === "ON" ? "on" : "off", "api");
-    // `status` is a deliberately non-urgent, timer-only broadcast field
-    // (AGENTS.md section 24) - a UI-driven ON/OFF click is exactly the
-    // "flip it and watch the effect immediately" case that's laggy for,
-    // same reasoning as the dashboard-flag-cleared route below. Forced,
-    // not left to the next periodic tick or an unrelated urgent trigger.
-    await broadcastForced(`process-action:${action}`);
-    return { status: "ok" };
-  });
+      await logCommand({
+        processId: process.id,
+        action: action === "ON" ? "on" : "off",
+        source: "api",
+        actorType: "user",
+        actorUserId: request.user.sub,
+      });
+
+      await processRegistry.setStatus(process.id, action === "ON" ? "on" : "off", "api");
+      // `status` is a deliberately non-urgent, timer-only broadcast field
+      // (AGENTS.md section 24) - a UI-driven ON/OFF click is exactly the
+      // "flip it and watch the effect immediately" case that's laggy for,
+      // same reasoning as the dashboard-flag-cleared route below. Forced,
+      // not left to the next periodic tick or an unrelated urgent trigger.
+      await broadcastForced(`process-action:${action}`);
+      return { status: "ok" };
+    },
+  );
 
   // UI-driven, "heartbeat-control-test" kind only (AGENTS.md's
   // Heartbeating Control section) - a bespoke internal flag, deliberately

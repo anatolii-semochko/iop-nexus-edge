@@ -1,5 +1,6 @@
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 
+import { requireAuth } from "../auth.js";
 import * as dualDevicesModel from "../dualDevicesModel.js";
 import { pool } from "../db.js";
 import { logCommand } from "../commandLog.js";
@@ -134,36 +135,40 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
   // setManualActive (a direct UI write *is* what puts a device into MANUAL -
   // see AGENTS.md section 6), then proxy to EdgeX core-command. Used today
   // by the dev simulator page to override a virtual device's sensor values.
-  app.put<{ Params: { id: string }; Body: { value: unknown } }>("/devices/:id", async (request, reply) => {
-    const { value } = request.body;
-    if (value === undefined) {
-      return reply.code(400).send({ error: "request body must include a 'value'" });
-    }
+  app.put<{ Params: { id: string }; Body: { value: unknown } }>(
+    "/devices/:id",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const { value } = request.body;
+      if (value === undefined) {
+        return reply.code(400).send({ error: "request body must include a 'value'" });
+      }
 
-    const device = await requireEdgeXDevice(request.params.id, reply);
-    if (!device) return;
+      const device = await requireEdgeXDevice(request.params.id, reply);
+      if (!device) return;
 
-    if (device.capabilities.readOnly) {
-      return reply
-        .code(400)
-        .send({ error: `device '${device.name}' is read-only - it has no AUTO/MANUAL mode`, hint: "use .../simulate for dev testing" });
-    }
+      if (device.capabilities.readOnly) {
+        return reply
+          .code(400)
+          .send({ error: `device '${device.name}' is read-only - it has no AUTO/MANUAL mode`, hint: "use .../simulate for dev testing" });
+      }
 
-    // Logged as an attempt, not just a success (AGENTS.md section 22) -
-    // a rejected command is often the more interesting thing to audit,
-    // so this runs before the forbidden-state/EdgeX checks below, not
-    // gated on them succeeding.
-    await logCommand({ deviceId: device.id, action: "write", value, source: "api" });
+      // Logged as an attempt, not just a success (AGENTS.md section 22) -
+      // a rejected command is often the more interesting thing to audit,
+      // so this runs before the forbidden-state/EdgeX checks below, not
+      // gated on them succeeding.
+      await logCommand({ deviceId: device.id, action: "write", value, source: "api", actorType: "user", actorUserId: request.user.sub });
 
-    const forbidden = await checkForbidden(device, value, app.log);
-    if (!forbidden.ok) {
-      return reply.code(409).send({ error: "forbidden state", reason: forbidden.reason });
-    }
+      const forbidden = await checkForbidden(device, value, app.log);
+      if (!forbidden.ok) {
+        return reply.code(409).send({ error: "forbidden state", reason: forbidden.reason });
+      }
 
-    const state = await dualDevicesModel.setManualActive(device.id, value);
-    if (!(await writeOrReject(reply, device.edgex_device_name, device.capabilities.edgexResource, value))) return;
-    return { status: "ok", state };
-  });
+      const state = await dualDevicesModel.setManualActive(device.id, value);
+      if (!(await writeOrReject(reply, device.edgex_device_name, device.capabilities.edgexResource, value))) return;
+      return { status: "ok", state };
+    },
+  );
 
   // Dev-only path for readOnly (sensor) devices: writes straight through to
   // EdgeX, bypassing the Dual Devices Model entirely - a pure sensor has no
@@ -171,36 +176,42 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
   // exists purely to let the Dev Simulator inject a new simulated reading
   // for a virtual device, the same way a physical sensor would push a new
   // value on its own.
-  app.put<{ Params: { id: string }; Body: { value: unknown } }>("/devices/:id/simulate", async (request, reply) => {
-    const { value } = request.body;
-    if (value === undefined) {
-      return reply.code(400).send({ error: "request body must include a 'value'" });
-    }
+  app.put<{ Params: { id: string }; Body: { value: unknown } }>(
+    "/devices/:id/simulate",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const { value } = request.body;
+      if (value === undefined) {
+        return reply.code(400).send({ error: "request body must include a 'value'" });
+      }
 
-    const device = await requireEdgeXDevice(request.params.id, reply);
-    if (!device) return;
+      const device = await requireEdgeXDevice(request.params.id, reply);
+      if (!device) return;
 
-    if (!device.capabilities.readOnly) {
-      return reply
-        .code(400)
-        .send({ error: `device '${device.name}' is not read-only`, hint: "use PUT /devices/:id instead" });
-    }
+      if (!device.capabilities.readOnly) {
+        return reply
+          .code(400)
+          .send({ error: `device '${device.name}' is not read-only`, hint: "use PUT /devices/:id instead" });
+      }
 
-    await logCommand({ deviceId: device.id, action: "simulate", value, source: "api" });
+      await logCommand({ deviceId: device.id, action: "simulate", value, source: "api", actorType: "user", actorUserId: request.user.sub });
 
-    if (!(await writeOrReject(reply, device.edgex_device_name, device.capabilities.edgexResource, value))) return;
-    // No Dual Devices Model state for a readOnly device, but the new
-    // reading still needs to reach the state:* cache and nexus.events -
-    // otherwise this device could never do what it exists to test
-    // (AGENTS.md section 9): pushing a live value change onto the bus.
-    await dualDevicesModel.publishReading(device.id, value, "api");
-    return { status: "ok" };
-  });
+      if (!(await writeOrReject(reply, device.edgex_device_name, device.capabilities.edgexResource, value))) return;
+      // No Dual Devices Model state for a readOnly device, but the new
+      // reading still needs to reach the state:* cache and nexus.events -
+      // otherwise this device could never do what it exists to test
+      // (AGENTS.md section 9): pushing a live value change onto the bus.
+      await dualDevicesModel.publishReading(device.id, value, "api");
+      return { status: "ok" };
+    },
+  );
 
   // Orchestrator-driven equivalent of the write path above: records
   // valueAuto, but only reaches EdgeX if the device is currently in AUTO
   // mode (a manual override keeps winning until released). Called every
-  // tick by apps/orchestrator/src/processes/temperatureControl.ts.
+  // tick by whichever control-loop process plugin owns this device (e.g.
+  // a target project's own temperature-control - the base platform's own
+  // copy was removed in the 2026-07-29 "chistiy proekt" decision).
   app.put<{ Params: { id: string }; Body: { value: unknown } }>("/devices/:id/auto", async (request, reply) => {
     const { value } = request.body;
     if (value === undefined) {
@@ -214,7 +225,20 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: `device '${device.name}' is read-only - it has no AUTO/MANUAL mode` });
     }
 
-    await logCommand({ deviceId: device.id, action: "auto", value, source: "api" });
+    // A control-loop process re-asserts its computed output every tick by
+    // design (so a device that drifted independently still gets corrected
+    // next cycle) - not just on change. Logging every one of those
+    // reassertions as if it were a new command flooded log_command
+    // (41k+ rows observed live in one running project, AGENTS_TO_DO.md
+    // 2026-08-01). Only log when valueAuto actually changes - mirrors
+    // dualDevicesModel.ts's own publishReading() precedent, which already
+    // dropped this exact "log every tick" behavior for log_device in the
+    // 2026-07-27 refactor. The reassertion write/publish below still runs
+    // every tick regardless - only the audit log entry is suppressed.
+    const previousState = await dualDevicesModel.getState(device.id);
+    if (JSON.stringify(previousState.valueAuto) !== JSON.stringify(value)) {
+      await logCommand({ deviceId: device.id, action: "auto", value, source: "api", actorType: "orchestrator" });
+    }
 
     const forbidden = await checkForbidden(device, value, app.log);
     if (!forbidden.ok) {
@@ -230,26 +254,30 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
 
   // Releases a device from MANUAL back to AUTO - the orchestrator's last
   // computed value takes over immediately.
-  app.post<{ Params: { id: string } }>("/devices/:id/release", async (request, reply) => {
-    const device = await requireEdgeXDevice(request.params.id, reply);
-    if (!device) return;
+  app.post<{ Params: { id: string } }>(
+    "/devices/:id/release",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const device = await requireEdgeXDevice(request.params.id, reply);
+      if (!device) return;
 
-    if (device.capabilities.readOnly) {
-      return reply.code(400).send({ error: `device '${device.name}' is read-only - it has no AUTO/MANUAL mode` });
-    }
-
-    await logCommand({ deviceId: device.id, action: "release", source: "api" });
-
-    const state = await dualDevicesModel.release(device.id);
-    if (state.valueAuto !== undefined) {
-      const forbidden = await checkForbidden(device, state.valueAuto, app.log);
-      if (!forbidden.ok) {
-        return reply.code(409).send({ error: "forbidden state", reason: forbidden.reason });
+      if (device.capabilities.readOnly) {
+        return reply.code(400).send({ error: `device '${device.name}' is read-only - it has no AUTO/MANUAL mode` });
       }
-      if (!(await writeOrReject(reply, device.edgex_device_name, device.capabilities.edgexResource, state.valueAuto))) return;
-    }
-    return { status: "ok", state };
-  });
+
+      await logCommand({ deviceId: device.id, action: "release", source: "api", actorType: "user", actorUserId: request.user.sub });
+
+      const state = await dualDevicesModel.release(device.id);
+      if (state.valueAuto !== undefined) {
+        const forbidden = await checkForbidden(device, state.valueAuto, app.log);
+        if (!forbidden.ok) {
+          return reply.code(409).send({ error: "forbidden state", reason: forbidden.reason });
+        }
+        if (!(await writeOrReject(reply, device.edgex_device_name, device.capabilities.edgexResource, state.valueAuto))) return;
+      }
+      return { status: "ok", state };
+    },
+  );
 
   // Called by apps/orchestrator's Data Logger runner (AGENTS.md's Data
   // Logger section) once a device's configured period is actually due -
