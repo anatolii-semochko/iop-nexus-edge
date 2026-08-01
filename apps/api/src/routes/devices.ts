@@ -343,6 +343,32 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  // Renaming, from the same per-device Settings popup as the group/node
+  // assignment above (AGENTS_TO_DO.md, 2026-08-01 filter-row/Config
+  // follow-up). `devices.name` is UNIQUE, same 409 handling as every
+  // named-entity rename in this app (processGroups.ts etc).
+  app.patch<{ Params: { id: string }; Body: { name: string } }>(
+    "/devices/:id/name",
+    async (request, reply) => {
+      const name = request.body.name?.trim();
+      if (!name) return reply.code(400).send({ error: "name is required" });
+
+      try {
+        const result = await pool.query<{ id: number }>(
+          "UPDATE devices SET name = $1, updated_at = now() WHERE id = $2 RETURNING id",
+          [name, request.params.id],
+        );
+        if (!result.rows[0]) return reply.code(404).send({ error: "device not found" });
+        return findDeviceListRow(request.params.id);
+      } catch (err) {
+        if (isUniqueViolation(err)) {
+          return reply.code(409).send({ error: "a device with this name already exists" });
+        }
+        throw err;
+      }
+    },
+  );
+
   // System-wide aggregate of every controllable device's mode (AGENTS.md
   // section 6). The full device list comes from Postgres (the source of
   // truth for what devices exist) - a device untouched in Redis is
@@ -357,6 +383,10 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
 async function findDevice(id: string): Promise<DeviceRow | undefined> {
   const result = await pool.query<DeviceRow>("SELECT * FROM devices WHERE id = $1", [id]);
   return result.rows[0];
+}
+
+function isUniqueViolation(err: unknown): boolean {
+  return err instanceof Error && "code" in err && (err as { code: string }).code === "23505";
 }
 
 async function findDeviceListRow(id: string): Promise<DeviceListRow | undefined> {

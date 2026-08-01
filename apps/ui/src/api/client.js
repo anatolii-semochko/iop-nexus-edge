@@ -48,6 +48,8 @@ export const api = {
   // own per-row Settings popup.
   setNodeGroup: (id, groupId) =>
     request(`/nodes/${id}/group`, { method: 'PATCH', body: JSON.stringify({ groupId }) }),
+  renameNode: (id, name) =>
+    request(`/nodes/${id}/name`, { method: 'PATCH', body: JSON.stringify({ name }) }),
   listDevices: () => request('/devices'),
   getDevice: (id) => request(`/devices/${id}`),
   // Per-device Device Group membership (multiple at once - shared devices
@@ -62,6 +64,8 @@ export const api = {
     }),
   setDeviceNode: (id, nodeId) =>
     request(`/devices/${id}/node`, { method: 'PATCH', body: JSON.stringify({ nodeId }) }),
+  renameDevice: (id, name) =>
+    request(`/devices/${id}/name`, { method: 'PATCH', body: JSON.stringify({ name }) }),
   // A UI write is always a manual override (Dual Devices Model MANUAL mode
   // - see AGENTS.md section 6). No `resource` param anymore (AGENTS_TO_DO.md's
   // 2026-07-27 Device/Node refactor) - a Device is atomic, exactly one value.

@@ -31,6 +31,10 @@ async function findNode(id: string) {
   return result.rows[0];
 }
 
+function isUniqueViolation(err: unknown): boolean {
+  return err instanceof Error && "code" in err && (err as { code: string }).code === "23505";
+}
+
 export async function nodeRoutes(app: FastifyInstance): Promise<void> {
   app.get("/nodes", async () => {
     const result = await pool.query(`${SELECT_NODE} ORDER BY n.name`);
@@ -62,6 +66,32 @@ export async function nodeRoutes(app: FastifyInstance): Promise<void> {
       );
       if (!result.rows[0]) return reply.code(404).send({ error: "node not found" });
       return findNode(request.params.id);
+    },
+  );
+
+  // Renaming, from the same per-node Settings popup as the group
+  // assignment above (AGENTS_TO_DO.md, 2026-08-01 filter-row/Config
+  // follow-up). `nodes.name` is UNIQUE, same 409 handling as every named-
+  // entity rename in this app (processGroups.ts etc).
+  app.patch<{ Params: { id: string }; Body: { name: string } }>(
+    "/nodes/:id/name",
+    async (request, reply) => {
+      const name = request.body.name?.trim();
+      if (!name) return reply.code(400).send({ error: "name is required" });
+
+      try {
+        const result = await pool.query<{ id: number }>(
+          "UPDATE nodes SET name = $1, updated_at = now() WHERE id = $2 RETURNING id",
+          [name, request.params.id],
+        );
+        if (!result.rows[0]) return reply.code(404).send({ error: "node not found" });
+        return findNode(request.params.id);
+      } catch (err) {
+        if (isUniqueViolation(err)) {
+          return reply.code(409).send({ error: "a node with this name already exists" });
+        }
+        throw err;
+      }
     },
   );
 }

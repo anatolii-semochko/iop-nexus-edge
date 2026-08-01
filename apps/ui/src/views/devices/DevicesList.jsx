@@ -115,15 +115,6 @@ const DevicesList = () => {
           <>
             <CRow className="mb-3 g-2 align-items-center">
               <CCol xs="auto">
-                <IconButton
-                  icon={cilSettings}
-                  size="sm"
-                  center
-                  onClick={() => setConfigVisible(true)}
-                  ariaLabel="Configure Device Groups"
-                />
-              </CCol>
-              <CCol xs="auto">
                 <CFormSelect
                   size="sm"
                   value={groupFilter}
@@ -159,7 +150,14 @@ const DevicesList = () => {
                   placeholder="Search by name, type..."
                 />
               </CCol>
-              <CCol className="d-flex justify-content-end">
+              <CCol className="d-flex justify-content-end gap-2">
+                <IconButton
+                  icon={cilSettings}
+                  size="sm"
+                  center
+                  onClick={() => setConfigVisible(true)}
+                  ariaLabel="Configure Device Groups"
+                />
                 <ResetFiltersButton active={hasActiveFilters} onClick={handleResetFilters} />
               </CCol>
             </CRow>

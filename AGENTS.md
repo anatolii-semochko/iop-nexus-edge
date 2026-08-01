@@ -3448,3 +3448,60 @@ the one device in "Lighting" after assigning it via the per-row Settings
 popup, and Reset Filters correctly cleared it back to both rows; the
 Devices list's Node column showed `-` for an unassigned device instead of
 a raw id, confirming the bug fix. Console clean throughout.
+
+## 35. Filter row layout convention (left/right block split) + per-item rename
+
+Two small, unrelated fixes requested together as a follow-up to section
+34's Node/Device Groups work (AGENTS_TO_DO.md, 2026-08-01).
+
+### Canonical filter row: left block vs. right block
+
+Every filter row in this app (`ResetFiltersButton`, section 26) now
+follows one template, made explicit here because it previously existed
+only as convention-by-copying, not a documented rule - the very first
+version of `NodesList.jsx`/`DevicesList.jsx`'s Config button broke it by
+accident (placed first in the left block instead of the right one):
+
+- **Left block**, pinned left (each filter its own `xs="auto"` `CCol`,
+  filters in priority order - more consequential filters leftmost, the
+  search box last/rightmost within this block, e.g.
+  `ProcessesTable.jsx`'s group -> type -> status -> search).
+- **Right block**, pinned right (a single non-`xs="auto"` `CCol
+  className="d-flex justify-content-end gap-2"`, taking the row's
+  remaining width and right-aligning its own contents) - a page's own
+  extra buttons (Config, Reload...) in whatever order makes sense for
+  that page, with `ResetFiltersButton` always the last element. The
+  Logs tabs' `IconButton` (Reload) + `ResetFiltersButton` pairing
+  (`DeviceLogsTab.jsx` etc.) already matched this exactly and is the
+  reference implementation the fix below now also follows.
+
+Applied to `NodesList.jsx`/`DevicesList.jsx`: the page-level Config
+button moved out of the left block (where it was sitting before the
+group dropdown) into the right block, immediately before
+`ResetFiltersButton`, `gap-2` added to that `CCol`'s className to space
+the two buttons apart.
+
+### Per-item rename, in the same Config popup
+
+`NodeSettingsModal.jsx`/`DeviceSettingsModal.jsx` (section 34's per-row
+Settings/"Config" popups) each gained a Name text field at the top,
+saved together with the existing group/node fields in the same
+`Promise.all` - the user's own name for these popups throughout section
+34's discussion was "Config попап", so a Name field belongs there rather
+than as a separate rename control. New endpoints: `PATCH
+/nodes/:id/name` and `PATCH /devices/:id/name`, each following the exact
+409-on-unique-violation pattern every other named-entity rename in this
+app already uses (`processGroups.ts` etc.) - both `nodes.name` and
+`devices.name` are `UNIQUE`. Client-side empty-name validation happens
+before the request fires (`trim()` + early return), matching
+`NamedListManager`'s own guard.
+
+### Verified live
+
+Rebuilt (`make up-all`), `tsc`/`eslint` clean on both `apps/api` and
+`apps/ui`. Browser-verified: Config button now sits at the right edge of
+the filter row on both Nodes and Devices pages, immediately left of
+Reset Filters, matching the Logs tabs' existing Reload+Reset placement;
+opened a Settings popup, changed a device's Name, saved, confirmed the
+new name appeared immediately in the table row and the modal's own
+header re-rendered with it live.

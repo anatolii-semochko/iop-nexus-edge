@@ -3,6 +3,7 @@ import {
   CAlert,
   CButton,
   CFormCheck,
+  CFormInput,
   CFormLabel,
   CFormSelect,
   CModal,
@@ -19,14 +20,16 @@ import { api } from '../../api/client'
  * single-group NodeSettingsModal, a Device is a logical workplace that can
  * be in several Device Groups at once (shared devices, e.g. a siren in
  * both a "fire" and "intrusion" group), so this is a checkbox multiselect,
- * plus this device's own Node assignment (single, nullable) alongside it -
- * both edited together from the same popup ("Маппінг груп і нод пристрою
- * відбувається в Config попапі кожного елемента DN"). `device.device_
- * group_ids`/`device.node_id` already come back from GET /devices (see
+ * plus this device's own Node assignment (single, nullable) and its own
+ * name - all edited together from the same popup ("Маппінг груп і нод
+ * пристрою відбувається в Config попапі кожного елемента DN"; the Name
+ * field is a 2026-08-01 follow-up). `device.device_group_ids`/`device.
+ * node_id`/`device.name` already come back from GET /devices (see
  * routes/devices.ts's SELECT_DEVICE_LIST_BASE), so no separate fetch-on-
  * open is needed here, unlike ProcessSettingsModal's GroupCheckboxSection.
  */
 const DeviceSettingsModal = ({ visible, onClose, device, deviceGroups, nodes, onSaved }) => {
+  const [name, setName] = useState('')
   const [selectedGroupIds, setSelectedGroupIds] = useState(new Set())
   const [nodeId, setNodeId] = useState('')
   const [busy, setBusy] = useState(false)
@@ -35,10 +38,11 @@ const DeviceSettingsModal = ({ visible, onClose, device, deviceGroups, nodes, on
   useEffect(() => {
     if (visible && device) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
+      setName(device.name)
+
       setSelectedGroupIds(new Set(device.device_group_ids ?? []))
 
       setNodeId(device.node_id ?? '')
-
       setError(null)
     }
   }, [visible, device])
@@ -54,10 +58,16 @@ const DeviceSettingsModal = ({ visible, onClose, device, deviceGroups, nodes, on
   }
 
   const handleSave = async () => {
+    const trimmedName = name.trim()
+    if (!trimmedName) {
+      setError('Name is required')
+      return
+    }
     setBusy(true)
     setError(null)
     try {
       await Promise.all([
+        api.renameDevice(device.id, trimmedName),
         api.setDeviceGroups(device.id, [...selectedGroupIds]),
         api.setDeviceNode(device.id, nodeId === '' ? null : Number(nodeId)),
       ])
@@ -77,6 +87,10 @@ const DeviceSettingsModal = ({ visible, onClose, device, deviceGroups, nodes, on
       </CModalHeader>
       <CModalBody>
         {error && <CAlert color="danger">{error}</CAlert>}
+        <div className="mb-3">
+          <CFormLabel>Name</CFormLabel>
+          <CFormInput value={name} onChange={(e) => setName(e.target.value)} disabled={busy} />
+        </div>
         <div className="mb-3">
           <CFormLabel>Node</CFormLabel>
           <CFormSelect value={nodeId} onChange={(e) => setNodeId(e.target.value)} disabled={busy}>

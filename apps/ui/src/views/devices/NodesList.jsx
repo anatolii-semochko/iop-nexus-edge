@@ -104,15 +104,6 @@ const NodesList = () => {
           <>
             <CRow className="mb-3 g-2 align-items-center">
               <CCol xs="auto">
-                <IconButton
-                  icon={cilSettings}
-                  size="sm"
-                  center
-                  onClick={() => setConfigVisible(true)}
-                  ariaLabel="Configure Node Groups"
-                />
-              </CCol>
-              <CCol xs="auto">
                 <CFormSelect
                   size="sm"
                   value={groupFilter}
@@ -134,7 +125,14 @@ const NodesList = () => {
                   placeholder="Search by name, type, location..."
                 />
               </CCol>
-              <CCol className="d-flex justify-content-end">
+              <CCol className="d-flex justify-content-end gap-2">
+                <IconButton
+                  icon={cilSettings}
+                  size="sm"
+                  center
+                  onClick={() => setConfigVisible(true)}
+                  ariaLabel="Configure Node Groups"
+                />
                 <ResetFiltersButton active={hasActiveFilters} onClick={handleResetFilters} />
               </CCol>
             </CRow>
