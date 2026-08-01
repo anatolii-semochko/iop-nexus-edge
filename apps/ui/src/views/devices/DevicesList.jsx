@@ -177,7 +177,9 @@ const DevicesList = () => {
                       <CTableHeaderCell scope="col">Node</CTableHeaderCell>
                       <CTableHeaderCell scope="col">Backend</CTableHeaderCell>
                       <CTableHeaderCell scope="col">Status</CTableHeaderCell>
-                      <CTableHeaderCell scope="col">Actions</CTableHeaderCell>
+                      <CTableHeaderCell scope="col" className="text-end">
+                        Actions
+                      </CTableHeaderCell>
                     </CTableRow>
                   </CTableHead>
                   <CTableBody>
@@ -194,7 +196,7 @@ const DevicesList = () => {
                         <CTableDataCell>
                           <StatusBadge device={device} />
                         </CTableDataCell>
-                        <CTableDataCell>
+                        <CTableDataCell className="text-end">
                           <IconButton
                             icon={cilSettings}
                             size="sm"

@@ -3,7 +3,7 @@ import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import { requireAuth } from "../auth.js";
 import * as dualDevicesModel from "../dualDevicesModel.js";
 import { pool } from "../db.js";
-import { logCommand } from "../commandLog.js";
+import { getSystemActorUserId, logCommand } from "../commandLog.js";
 import { logReading } from "../deviceLog.js";
 import * as dataLoggerControl from "../dataLoggerControl.js";
 import { EdgeXError, listEdgeXDevices, readValue, writeValue, type EdgeXDeviceStatus } from "../edgex.js";
@@ -157,7 +157,7 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
       // a rejected command is often the more interesting thing to audit,
       // so this runs before the forbidden-state/EdgeX checks below, not
       // gated on them succeeding.
-      await logCommand({ deviceId: device.id, action: "write", value, source: "api", actorType: "user", actorUserId: request.user.sub });
+      await logCommand({ deviceId: device.id, action: "write", value, source: "api", actorUserId: request.user.sub });
 
       const forbidden = await checkForbidden(device, value, app.log);
       if (!forbidden.ok) {
@@ -194,7 +194,7 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
           .send({ error: `device '${device.name}' is not read-only`, hint: "use PUT /devices/:id instead" });
       }
 
-      await logCommand({ deviceId: device.id, action: "simulate", value, source: "api", actorType: "user", actorUserId: request.user.sub });
+      await logCommand({ deviceId: device.id, action: "simulate", value, source: "api", actorUserId: request.user.sub });
 
       if (!(await writeOrReject(reply, device.edgex_device_name, device.capabilities.edgexResource, value))) return;
       // No Dual Devices Model state for a readOnly device, but the new
@@ -237,7 +237,7 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
     // every tick regardless - only the audit log entry is suppressed.
     const previousState = await dualDevicesModel.getState(device.id);
     if (JSON.stringify(previousState.valueAuto) !== JSON.stringify(value)) {
-      await logCommand({ deviceId: device.id, action: "auto", value, source: "api", actorType: "orchestrator" });
+      await logCommand({ deviceId: device.id, action: "auto", value, source: "api", actorUserId: await getSystemActorUserId() });
     }
 
     const forbidden = await checkForbidden(device, value, app.log);
@@ -265,7 +265,7 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(400).send({ error: `device '${device.name}' is read-only - it has no AUTO/MANUAL mode` });
       }
 
-      await logCommand({ deviceId: device.id, action: "release", source: "api", actorType: "user", actorUserId: request.user.sub });
+      await logCommand({ deviceId: device.id, action: "release", source: "api", actorUserId: request.user.sub });
 
       const state = await dualDevicesModel.release(device.id);
       if (state.valueAuto !== undefined) {

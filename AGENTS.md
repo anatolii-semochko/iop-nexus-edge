@@ -3735,3 +3735,104 @@ Messages tab shows its renamed label. Console clean (one stale-chunk
 fetch error from the exact rebuild moment, gone on a second reload -
 the same benign artifact section 36 already documented). `tsc`/`eslint`
 clean on `apps/api` and `apps/ui`.
+
+## 38. Logs/Commands follow-ups: system-user actor, column order, Actions alignment, Notifications default tab
+
+Four small fixes (AGENTS_TO_DO.md, 2026-08-01), on top of section 37.
+
+### The orchestrator IS the "system" user - no separate actor type
+
+Section 37's synthetic `actor_type: 'orchestrator'` turned out to
+duplicate a concept that already existed: `routes/users.ts`'s "system"
+user is a protected, non-deletable service account seeded specifically
+for this. Migration `1690000000040` backfills every existing
+`actor_type = 'orchestrator'` row's `actor_user_id` to the real "system"
+user's id, then drops `actor_type` and its CHECK entirely -
+`CommandLogEntry.actorUserId` is now always required, never optional,
+and there is no more `CommandActorType` in the type system at all. New
+`commandLog.getSystemActorUserId()` - looked up once by username
+(`'system'`) and cached in memory forever after the first successful
+call (only caches on success, so a lookup failure at boot doesn't wedge
+every later call into repeating the same error) - `routes/devices.ts`'s
+`/auto` handler calls it instead of hardcoding an actor type. Net
+effect: the "system" user now just IS the orchestrator's identity
+everywhere in this table, rendered with its own real avatar in the
+Commands tab exactly like any human actor - no more special-cased gear
+icon, no more separate "Orchestrator" entry in the actor filter
+dropdown (`GET /users/directory` already returns "system" like any
+other active user, so it appears there for free).
+
+### Actor column moved first
+
+`CommandLogsTab.jsx`'s column order is now Actor / Time / Target /
+Action / Value - who did it reads more usefully at a glance than the
+timestamp.
+
+### Actions column: always right-aligned (new default table convention)
+
+Adopted as a standing rule for every table in this app, not just this
+one instance: **a table's rightmost "Actions" column - header cell and
+every data cell - is right-aligned** (`className="text-end"` on the
+`CTableHeaderCell`/`CTableDataCell`; a cell with multiple buttons also
+wraps them in `<div className="d-flex justify-content-end align-items-
+center gap-1">` inside the cell, not just the cell class alone). No new
+SCSS class was added for this - Bootstrap's own `text-end` utility
+(already CoreUI's own convention, see `ProcessesTable.jsx`'s pre-
+existing Actions column, which already did exactly this) fully covers
+it; introducing a bespoke class would only duplicate what the utility
+class already does. Applied now to `NodesList.jsx`/`DevicesList.jsx`
+(both previously left-aligned, unlike `ProcessesTable.jsx`) - any new
+table's Actions column should follow this from the start rather than
+needing a follow-up fix like this one.
+
+### Notification center popup: smarter default tab
+
+`NotificationCenterModal.jsx` always opened on "New" regardless of
+whether something more urgent was already active. Now: "Active" if
+it's visible for the selected type (not `message` - a one-shot message
+never has an "active" concept) and currently non-empty, "All" otherwise
+- "New" is still manually selectable, just never the auto-picked
+default. Implemented as a `useEffect` keyed only on `type` (opening the
+modal or switching type inside it), deliberately *not* on `activeItems`
+- this decides where to land when the type selection changes, not
+continuously yank the user back to "Active" every time a new alarm
+arrives while they're reading a different tab. This component never
+unmounts (only its rich content toggles on `type` being non-null), so
+`useState('new')`'s initial value can't provide a fresh default on
+every open by itself - an effect reacting to `type` is the only way.
+
+**Bug found and fixed during live verification, not present before this
+change**: switching straight to "Active" (now possible from a
+background effect, not only a user's own tab click) could leave the
+New/All tab's REST-fetch effect's `loading` flag stuck `true` forever -
+that effect's own cancellation guard (`if (cancelled) return` in its
+`.then`/`.finally`) correctly skips a stale response's state updates,
+but its early-return branch for `effectiveTab === 'active'` never reset
+`loading` itself either, and Active's own view never fetches at all to
+ever clear it. Reproduced live: opening the Errors bell while an error
+was genuinely active landed correctly on "Active" but showed an
+infinite spinner over an otherwise-already-rendered-empty view. Fixed
+by having that early-return branch explicitly `setLoading(false)`
+before returning.
+
+### Verified live
+
+Migration backfill confirmed via `curl`: pre-existing `auto` rows (the
+same ones from section 37's verification) now show `actor_user: {id:
+2, username: "system", ...}` instead of the old `actor_type:
+"orchestrator"` shape; a fresh process ON/OFF toggle still attributes
+to the logged-in admin correctly; no `"system user not found"` errors
+in API logs across a rebuild. `GET /users/directory` returns exactly
+`admin`/`system`, confirming no synthetic third entry. Browser-verified:
+Commands tab's actor filter dropdown lists only "All users /
+Administrator / System" (no "Orchestrator"); orchestrator-driven rows
+show the system user's own avatar image, not an icon; Actor is the
+leftmost column. Forced a genuine active error (`PUT .../heartbeat-
+test-failure {simulate:true}`) and confirmed the Errors bell opens
+directly on "Active" with real content and no stuck spinner (both
+before *and* after the loading-flag fix - the bug was caught precisely
+by this live check, not by code review); confirmed the empty case
+separately (Warnings bell with nothing currently active correctly
+opens on "All", tested twice under two different type selections).
+Reverted the forced test failure afterward. Console clean, `tsc`/
+`eslint` clean on `apps/api` and `apps/ui`.

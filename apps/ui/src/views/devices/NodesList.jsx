@@ -151,7 +151,9 @@ const NodesList = () => {
                       <CTableHeaderCell scope="col">Group</CTableHeaderCell>
                       <CTableHeaderCell scope="col">Health</CTableHeaderCell>
                       <CTableHeaderCell scope="col">Last heartbeat</CTableHeaderCell>
-                      <CTableHeaderCell scope="col">Actions</CTableHeaderCell>
+                      <CTableHeaderCell scope="col" className="text-end">
+                        Actions
+                      </CTableHeaderCell>
                     </CTableRow>
                   </CTableHead>
                   <CTableBody>
@@ -167,7 +169,7 @@ const NodesList = () => {
                         <CTableDataCell>
                           {formatRelativeTime(node.last_heartbeat_at)}
                         </CTableDataCell>
-                        <CTableDataCell>
+                        <CTableDataCell className="text-end">
                           <IconButton
                             icon={cilSettings}
                             size="sm"

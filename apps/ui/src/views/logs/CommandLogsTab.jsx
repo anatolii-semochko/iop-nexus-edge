@@ -13,8 +13,7 @@ import {
   CTableHeaderCell,
   CTableRow,
 } from '@coreui/react'
-import CIcon from '@coreui/icons-react'
-import { cilReload, cilSettings } from '@coreui/icons'
+import { cilReload } from '@coreui/icons'
 import { api } from '../../api/client'
 import DateRangeFilter from '../../components/table/DateRangeFilter'
 import IconButton from '../../components/IconButton'
@@ -26,7 +25,6 @@ import { formatSmartDateTime, localDateTimeToIso, userInitials } from '../../uti
 
 const ACTIONS = ['write', 'auto', 'release', 'simulate', 'on', 'off', 'config']
 const PAGE_SIZE_OPTIONS = [20, 50, 100]
-const ORCHESTRATOR_ACTOR_VALUE = 'orchestrator'
 
 const formatValue = (value) => {
   if (value === null || value === undefined) return '-'
@@ -35,22 +33,14 @@ const formatValue = (value) => {
 }
 
 // Who issued this command (AGENTS_TO_DO.md, 2026-08-01) - the orchestrator
-// is a distinct actor (no user account, AGENTS.md section 13), rendered
-// with the same icon this app already uses for orchestration/Processes
-// (`cilSettings`, _nav.jsx) rather than colliding with a generic "system"
-// glyph. A `user`-typed row with no `actor_user` is a legacy row from
-// before this column existed (migration 1690000000039's backfill couldn't
-// know who - only that it was a human).
-const ActorCell = ({ actorType, actorUser }) => {
-  if (actorType === 'orchestrator') {
-    return (
-      <span title="Orchestrator">
-        <CAvatar color="dark" textColor="white" size="sm">
-          <CIcon icon={cilSettings} size="sm" />
-        </CAvatar>
-      </span>
-    )
-  }
+// IS the "system" user (routes/users.ts's protected service account, also
+// AGENTS_TO_DO.md 2026-08-01: "system... Це і є оркестратор"), not a
+// separate synthetic actor - it renders exactly like any other user here,
+// its own avatar included, no special-casing. Only a legacy row predating
+// actor_user_id existing at all (migration 1690000000039's backfill had
+// no way to know which human issued an old write/release/simulate
+// command) has no `actorUser` to show.
+const ActorCell = ({ actorUser }) => {
   if (!actorUser) {
     return (
       <span title="Unknown user">
@@ -74,25 +64,24 @@ const ActorCell = ({ actorType, actorUser }) => {
 }
 
 /**
- * Logs page (AGENTS.md section 29/36) - commands tab. Read side of
+ * Logs page (AGENTS.md section 29/36/38) - commands tab. Read side of
  * `log_command` (renamed from `device_command_logs`, AGENTS_TO_DO.md's
  * 2026-07-27 Device/Node refactor) - widened 2026-08-01 to cover process
  * actions (ON/OFF, config changes) alongside device writes, and to show
- * WHO issued each one (the orchestrator counts as a distinct actor here,
- * not a human - "оркестратор у нас теж є користувачем"). Historical/
- * append-only, no per-row interaction - a straight audit trail.
+ * WHO issued each one - the orchestrator included, attributed to the real
+ * "system" user rather than a separate filter entry. Historical/append-
+ * only, no per-row interaction - a straight audit trail. Actor is the
+ * first column (2026-08-01 follow-up), not last - who did it matters more
+ * at a glance than the timestamp.
  */
 const CommandLogsTab = ({ devices, users }) => {
   const [deviceId, setDeviceId] = useState('')
   const [action, setAction] = useState('')
-  const [actor, setActor] = useState('')
+  const [actorUserId, setActorUserId] = useState('')
   const [search, setSearch] = useState('')
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [searchResetToken, setSearchResetToken] = useState(0)
-
-  const actorType = actor === ORCHESTRATOR_ACTOR_VALUE ? 'orchestrator' : actor ? 'user' : undefined
-  const actorUserId = actorType === 'user' ? actor : undefined
 
   const { items, total, loading, error, page, pageSize, setPage, setPageSize, reload } =
     useServerPaginatedList(
@@ -100,23 +89,22 @@ const CommandLogsTab = ({ devices, users }) => {
         api.listCommandLogs({
           deviceId: deviceId || undefined,
           action: action || undefined,
-          actorType,
-          actorUserId,
+          actorUserId: actorUserId || undefined,
           search: search || undefined,
           from: localDateTimeToIso(from),
           to: localDateTimeToIso(to),
           page: pageArg,
           pageSize: pageSizeArg,
         }),
-      [deviceId, action, actor, search, from, to],
+      [deviceId, action, actorUserId, search, from, to],
       { pageSize: PAGE_SIZE_OPTIONS[0] },
     )
 
-  const hasActiveFilters = Boolean(deviceId || action || actor || search || from || to)
+  const hasActiveFilters = Boolean(deviceId || action || actorUserId || search || from || to)
   const resetFilters = () => {
     setDeviceId('')
     setAction('')
-    setActor('')
+    setActorUserId('')
     setSearch('')
     setFrom('')
     setTo('')
@@ -147,9 +135,12 @@ const CommandLogsTab = ({ devices, users }) => {
           </CFormSelect>
         </CCol>
         <CCol xs="auto">
-          <CFormSelect size="sm" value={actor} onChange={(e) => setActor(e.target.value)}>
+          <CFormSelect
+            size="sm"
+            value={actorUserId}
+            onChange={(e) => setActorUserId(e.target.value)}
+          >
             <option value="">All users</option>
-            <option value={ORCHESTRATOR_ACTOR_VALUE}>Orchestrator</option>
             {users.map((u) => (
               <option key={u.id} value={u.id}>
                 {u.display_name ?? u.username}
@@ -189,13 +180,15 @@ const CommandLogsTab = ({ devices, users }) => {
                 <CTableHeaderCell scope="col">Target</CTableHeaderCell>
                 <CTableHeaderCell scope="col">Action</CTableHeaderCell>
                 <CTableHeaderCell scope="col">Value</CTableHeaderCell>
-                <CTableHeaderCell scope="col">Actor</CTableHeaderCell>
               </CTableRow>
             </CTableHead>
             <CTableBody>
               {items.map((item) => (
                 <CTableRow key={item.id}>
                   <CTableDataCell className="text-body-secondary small text-nowrap">
+                    <span className="me-3">
+                      <ActorCell actorUser={item.actor_user} />
+                    </span>
                     {formatSmartDateTime(item.created_at)}
                   </CTableDataCell>
                   <CTableDataCell>
@@ -205,9 +198,6 @@ const CommandLogsTab = ({ devices, users }) => {
                   </CTableDataCell>
                   <CTableDataCell>{item.action}</CTableDataCell>
                   <CTableDataCell>{formatValue(item.value)}</CTableDataCell>
-                  <CTableDataCell>
-                    <ActorCell actorType={item.actor_type} actorUser={item.actor_user} />
-                  </CTableDataCell>
                 </CTableRow>
               ))}
             </CTableBody>

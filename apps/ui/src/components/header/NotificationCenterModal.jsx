@@ -135,6 +135,27 @@ const NotificationCenterModal = ({ type, onTypeChange, onClose }) => {
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
   }, [live, processNameById, type, processFilter, search])
 
+  // Picks a useful starting tab for this type selection (AGENTS_TO_DO.md,
+  // 2026-08-01) - previously always opened on "New" regardless of whether
+  // something more urgent was already active. "Active" if it's visible
+  // for this type and currently has something in it, "All" otherwise -
+  // "New" is still manually selectable, just never the auto-picked
+  // default anymore. Keyed only on `type` (opening or switching type),
+  // not on `activeItems` - this should decide where to land when the type
+  // selection changes, not keep yanking the user back to "Active" every
+  // time a new alarm arrives while they're already reading a different
+  // tab. This component never unmounts (only its rich content toggles on
+  // `type`), so `useState('new')`'s initial value alone can't provide a
+  // fresh default on every open - an effect is the only way to react to
+  // `type` going from `null` to set, or from one type to another.
+  useEffect(() => {
+    if (!type) return
+    const activeVisible = type !== 'message'
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setTab(activeVisible && activeItems.length > 0 ? 'active' : 'all')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [type])
+
   // Every filter setter resets `page` to 1 (and the checkbox selection,
   // which belongs to whatever result set was on screen when it was made)
   // in the same event handler that changes the filter, not a separate
@@ -180,12 +201,27 @@ const NotificationCenterModal = ({ type, onTypeChange, onClose }) => {
   }
 
   useEffect(() => {
-    if (!type || effectiveTab === 'active') return
+    if (!type || effectiveTab === 'active') {
+      // Defensive reset, not just an early-out (2026-08-01 follow-up,
+      // found live): switching straight to "Active" - now possible
+      // programmatically (the default-tab effect above), not only via a
+      // user's own click on the New/All tab this effect was mid-fetch
+      // for - cancels that in-flight fetch below, but its own `.finally`
+      // skips `setLoading(false)` for a cancelled run (correctly, so a
+      // stale response can't clear a *newer* fetch's spinner) - leaving
+      // `loading` stuck `true` forever with nothing left to ever flip it
+      // back, since Active's own view never fetches at all. Reproduced
+      // live: Errors bell opened straight onto the now-empty Active tab
+      // stuck on an infinite spinner.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setLoading(false)
+      return
+    }
     let cancelled = false
     // setLoading/setError here are the effect's whole job, not incidental -
     // synchronizing "a fetch tied to these dependencies is in flight" with
     // the dependencies changing is exactly what this effect exists to do.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+
     setLoading(true)
     setError(null)
     api

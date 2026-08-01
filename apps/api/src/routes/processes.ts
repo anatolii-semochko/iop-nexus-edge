@@ -112,7 +112,6 @@ export async function processRoutes(app: FastifyInstance): Promise<void> {
         action: "config",
         value: request.body,
         source: "api",
-        actorType: "user",
         actorUserId: request.user.sub,
       });
 
@@ -145,7 +144,6 @@ export async function processRoutes(app: FastifyInstance): Promise<void> {
         processId: process.id,
         action: action === "ON" ? "on" : "off",
         source: "api",
-        actorType: "user",
         actorUserId: request.user.sub,
       });
 
