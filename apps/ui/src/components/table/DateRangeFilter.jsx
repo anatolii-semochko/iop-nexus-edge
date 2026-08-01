@@ -16,6 +16,7 @@ const DateRangeFilter = ({ from, to, onFromChange, onToChange }) => (
       <CFormInput
         type="datetime-local"
         size="sm"
+        style={{ width: '13em' }}
         value={from}
         onChange={(e) => onFromChange(e.target.value)}
         aria-label="From"
@@ -25,6 +26,7 @@ const DateRangeFilter = ({ from, to, onFromChange, onToChange }) => (
       <CFormInput
         type="datetime-local"
         size="sm"
+        style={{ width: '13em' }}
         value={to}
         onChange={(e) => onToChange(e.target.value)}
         aria-label="To"
