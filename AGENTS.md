@@ -3928,3 +3928,34 @@ manually selectable, exactly as "New" already was under the old
 Verified live: with no active warnings, opening the Warnings bell now
 lands on "New" (previously landed on "All" per section 38's mistaken
 spec). Console clean, `eslint` clean.
+
+## 41. NamedListManager's "Add Group" button wrapping to two lines
+
+Found via `git status` - an uncommitted, ineffective fix attempt already
+sat in the working tree (`className="text-nowrap"` passed to
+`<NamedListManager>`/`<GroupsConfigModal>` call sites in
+`SettingsTab.jsx`, `NodesList.jsx`, `DevicesList.jsx`). Neither component
+destructures or forwards a `className` prop at all, so that prop was a
+silent no-op everywhere it was added - React drops an unknown prop
+passed to a custom component, no error, no effect. The actual bug: the
+"Add Group" submit button sits in a `<CForm className="d-flex gap-2">`
+next to a `CFormInput` - in a narrow enough container (a modal body is
+the tightest case, `GroupsConfigModal.jsx`), the flex layout can squeeze
+the button below its label's natural width, and a plain `<button>`'s
+default `white-space: normal` lets "Add Group" wrap onto two lines,
+doubling the button's own height against every sibling `size="sm"`
+control in the same row.
+
+Fixed at the actual source instead of the call sites: `text-nowrap`
+added directly to the button inside `NamedListManager.jsx` itself - the
+one place every consumer (`SettingsTab.jsx`'s three group lists,
+`GroupsConfigModal.jsx`'s Node/Device Groups) shares, so no per-call-site
+prop is needed at all. The three dead `className="text-nowrap"` props
+removed from the call sites as part of this fix - restored those three
+files to their prior committed content exactly (confirmed via `git
+diff` showing zero changes left in them).
+
+Verified live: rebuilt (`make up-all`), opened the Node Groups popup
+(the narrowest/most reproduction-prone context) - "Add Group" renders
+on one line, button height matches the adjacent input field. `eslint`
+clean, console clean.

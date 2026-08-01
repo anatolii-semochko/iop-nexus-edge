@@ -129,7 +129,18 @@ const NamedListManager = ({
           disabled={busy}
           onChange={(e) => setNewName(e.target.value)}
         />
-        <CButton type="submit" size="sm" color="success" disabled={busy || !newName.trim()}>
+        {/* nowrap - a narrow flex container (this CForm shrinks the
+            CFormInput's sibling first) can otherwise squeeze a two-word
+            label like "Add Group" onto two lines, doubling the button's
+            own height against every other `size="sm"` control next to it
+            (2026-08-01 follow-up, caught live). */}
+        <CButton
+          type="submit"
+          size="sm"
+          color="success"
+          className="text-nowrap"
+          disabled={busy || !newName.trim()}
+        >
           {addLabel}
         </CButton>
       </CForm>
@@ -140,7 +151,7 @@ const NamedListManager = ({
         {items.map((item, index) => (
           <CListGroupItem key={item.id} className="d-flex align-items-center gap-2">
             {orderable && (
-              <div className="d-flex flex-column">
+              <div>
                 <CButton
                   size="sm"
                   color="secondary"
