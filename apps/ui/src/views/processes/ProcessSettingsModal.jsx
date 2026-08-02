@@ -1,23 +1,27 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import {
   CAlert,
   CButton,
+  CCol,
   CFormCheck,
+  CFormSelect,
   CModal,
   CModalBody,
   CModalFooter,
   CModalHeader,
   CModalTitle,
+  CRow,
   CSpinner,
 } from '@coreui/react'
 import { api } from '../../api/client'
 
 // One checkbox section - fetches this process's current membership in
-// `items` (Tab Groups or Message Groups, whichever `entity` names) when
-// the modal opens, exposes the locally-edited selection back to the
-// parent via `onChange` so a single Save can persist both sections at
-// once (AGENTS.md section 22 - Tab Groups and Message Groups are
-// independent entities, but both edited from the same popup).
+// `items` (Tab Groups or Message Casting Groups, whichever `entity`
+// names) when the modal opens, exposes the locally-edited selection
+// back to the parent via `onChange` so a single Save can persist both
+// sections at once (AGENTS.md section 22 - Tab Groups and Message
+// Casting Groups are independent entities, but both edited from the
+// same popup).
 const GroupCheckboxSection = ({ title, items, fetchSelected, selectedIds, onChange, busy }) => {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -86,36 +90,128 @@ const GroupCheckboxSection = ({ title, items, fetchSelected, selectedIds, onChan
   )
 }
 
+// Per-kind extra section, rendered below the standard Tab Groups/Message
+// Casting Groups pair (AGENTS_TO_DO.md, 2026-08-02 - "один основний
+// попап з конфігом... загальні стандартні опції, а після того блок
+// унікальних для процесу опцій"). A plain kind->component map, same
+// dispatch idiom ProcessesTable.jsx's own KIND_PANELS already uses -
+// only one entry exists today, but the shape scales the same way that
+// one does.
+// Owns its own slots state, initialized straight from `process.config.
+// slots` - safe as a plain useState initializer (no effect needed)
+// because this component only ever renders inside the `visible &&
+// process &&` block below, so it mounts fresh every time the modal
+// opens, same as GroupCheckboxSection above. Writes its latest value
+// into `slotsRef` from the CFormSelect's own onChange handler (a ref
+// write during a real event is always safe - unlike during render or
+// inside an effect body, both of which this codebase's stricter React
+// Compiler-era lint rules reject) so the parent's Save handler can read
+// the latest edited value on demand, without lifting this into parent
+// state (which would need an effect to reset on reopen, since the
+// parent itself never unmounts - see ProcessSettingsModal's own
+// `slotsRef` comment for why that's the one thing to avoid here).
+const AnnunciatorSlotsSection = ({ process, groups, slotsRef }) => {
+  const [slots, setSlots] = useState(process.config.slots ?? [])
+
+  const updateSlot = (index, messageGroupId) => {
+    const next = slots.map((s, i) => (i === index ? { ...s, messageGroupId } : s))
+    setSlots(next)
+    slotsRef.current = next
+  }
+
+  return (
+    <div className="mb-3">
+      <div className="text-body-secondary small mb-2">Alarm Annunciator - slot bindings</div>
+      {slots.map((slot, index) => (
+        <CRow key={index} className="align-items-center g-2 mb-2">
+          <CCol xs="3">
+            <div className="text-body-secondary small">Slot {index + 1}</div>
+          </CCol>
+          <CCol>
+            <CFormSelect
+              size="sm"
+              value={slot.messageGroupId ?? ''}
+              onChange={(e) =>
+                updateSlot(index, e.target.value === '' ? null : Number(e.target.value))
+              }
+            >
+              <option value="">Not bound</option>
+              {groups.map((group) => (
+                <option key={group.id} value={group.id}>
+                  {group.name}
+                </option>
+              ))}
+            </CFormSelect>
+          </CCol>
+        </CRow>
+      ))}
+    </div>
+  )
+}
+
+const EXTRA_SETTINGS_SECTIONS = {
+  'alarm-annunciator': AnnunciatorSlotsSection,
+}
+
 /**
  * Per-process Settings popup (AGENTS.md section 22) - opened from the
- * first action button on a process's row. Two independent checkbox
- * sections: Tab Groups (which of the operator's curated page tabs this
- * process shows up in) and Message Groups (which notification routing
- * groups this process's WEM goes to) - structurally identical, but
- * genuinely separate entities (a process can be in either, both, or
- * neither, independently), each with its own Save-time PUT.
+ * first action button on a process's row. Standard sections first (Tab
+ * Groups, Message Casting Groups - which notification routing groups
+ * this process CASTS its WEM into, AGENTS_TO_DO.md 2026-08-02 rename
+ * disambiguating from the not-yet-built inverse "Message Receiving
+ * Groups" some future process kinds will have), then one optional
+ * kind-specific block below (`EXTRA_SETTINGS_SECTIONS`) - single popup
+ * per process, not a separate kind-specific modal (AGENTS_TO_DO.md,
+ * 2026-08-02 - Alarm Annunciator's own slot-binding UI used to be a
+ * second modal opened from the expanded panel; consolidated here).
+ * The underlying Message Groups entity/table/route/field names
+ * (`message_groups`, `/message-groups`, `messageGroupId`) are
+ * deliberately unchanged - this is a display-label rename only, scoped
+ * to this popup (the one place users actually see the ambiguity).
  *
  * `tabGroups`/`messageGroups` (already loaded/ordered at the page level)
  * are passed in rather than fetched here - the same lists every row's
  * popup would otherwise re-fetch identically. Only this process's own
- * current membership in each is fetched on open.
+ * current membership in each is fetched on open; the extra section's own
+ * data (`process.config.slots`) is already on `process`, no separate
+ * fetch needed.
  */
 const ProcessSettingsModal = ({ visible, onClose, process, tabGroups, messageGroups, onSaved }) => {
   const [selectedTabGroupIds, setSelectedTabGroupIds] = useState(new Set())
   const [selectedMessageGroupIds, setSelectedMessageGroupIds] = useState(new Set())
+  // Not React state - AnnunciatorSlotsSection (mounts fresh each open,
+  // see its own comment) writes an edited value here from its own
+  // onChange handler; `null` means "untouched this session", so
+  // handleSave falls back to the process's own current config (a no-op
+  // write, not data loss). Reset on close so a cancelled edit for one
+  // process can never leak into a later save for another.
+  const slotsRef = useRef(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
+
+  const ExtraSection = process && EXTRA_SETTINGS_SECTIONS[process.kind]
+
+  const handleClose = () => {
+    slotsRef.current = null
+    onClose()
+  }
 
   const handleSave = async () => {
     setBusy(true)
     setError(null)
     try {
-      await Promise.all([
+      const writes = [
         api.setProcessTabGroups(process.id, [...selectedTabGroupIds]),
         api.setProcessMessageGroups(process.id, [...selectedMessageGroupIds]),
-      ])
+      ]
+      if (ExtraSection) {
+        writes.push(
+          api.setProcessConfig(process.id, { slots: slotsRef.current ?? process.config.slots }),
+        )
+      }
+      await Promise.all(writes)
       onSaved?.()
-      onClose()
+      handleClose()
     } catch (err) {
       setError(err.message)
     } finally {
@@ -124,7 +220,7 @@ const ProcessSettingsModal = ({ visible, onClose, process, tabGroups, messageGro
   }
 
   return (
-    <CModal visible={visible} onClose={onClose}>
+    <CModal visible={visible} onClose={handleClose}>
       <CModalHeader>
         <CModalTitle>{process?.name} settings</CModalTitle>
       </CModalHeader>
@@ -147,18 +243,21 @@ const ProcessSettingsModal = ({ visible, onClose, process, tabGroups, messageGro
               busy={busy}
             />
             <GroupCheckboxSection
-              title="Message Groups"
+              title="Message Casting Groups"
               items={messageGroups}
               fetchSelected={() => api.getProcessMessageGroups(process.id)}
               selectedIds={selectedMessageGroupIds}
               onChange={setSelectedMessageGroupIds}
               busy={busy}
             />
+            {ExtraSection && (
+              <ExtraSection process={process} groups={messageGroups} slotsRef={slotsRef} />
+            )}
           </>
         )}
       </CModalBody>
       <CModalFooter>
-        <CButton color="secondary" variant="outline" onClick={onClose} disabled={busy}>
+        <CButton color="secondary" variant="outline" onClick={handleClose} disabled={busy}>
           Cancel
         </CButton>
         <CButton color="success" onClick={handleSave} disabled={busy}>

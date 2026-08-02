@@ -21,22 +21,37 @@ import { api } from '../../api/client'
 import GroupsConfigModal from '../../components/GroupsConfigModal'
 import IconButton from '../../components/IconButton'
 import ResetFiltersButton from '../../components/ResetFiltersButton'
+import ExpandAllToggleButton from '../../components/table/ExpandAllToggleButton'
+import ExpandToggleButton from '../../components/table/ExpandToggleButton'
 import TablePagination from '../../components/table/TablePagination'
 import TableSearchInput from '../../components/table/TableSearchInput'
+import { useExpandableRows } from '../../hooks/useExpandableRows'
 import { usePagination } from '../../hooks/usePagination'
 import { usePersistedState } from '../../hooks/usePersistedState'
 import { formatRelativeTime } from '../../utils/format'
 import NodeSettingsModal from './NodeSettingsModal'
 
-// Registration for usePersistedState (AGENTS_TO_DO.md, 2026-08-01) - flat
-// variant (no tabs), unlike ProcessesList.jsx's `perTab` shape. `page`
-// itself is deliberately not persisted (AGENTS.md section 17) - only
-// `pageSize`, same convention as every other persisted page.
+// Registration for usePersistedState (AGENTS_TO_DO.md, 2026-08-01, joined
+// 2026-08-02 by `expandedIds`) - flat variant (no tabs), unlike
+// ProcessesList.jsx's `perTab` shape. `page` itself is deliberately not
+// persisted (AGENTS.md section 17) - only `pageSize`, same convention as
+// every other persisted page.
 const PERSISTED_DEFAULTS = {
   search: '',
   groupFilter: '',
   pageSize: 10,
+  expandedIds: [],
 }
+
+// Detail row (AGENTS_TO_DO.md, 2026-08-02) - raw node state as JSON for
+// now ("Поки що показуємо стан ноди. Можеш показувати JSON. Потім будемо
+// допрацьовувати") - already have the full row object from the list, no
+// extra fetch needed.
+const NodeDetailRow = ({ node }) => (
+  <div className="p-3 pt-0">
+    <pre className="mb-0 small">{JSON.stringify(node, null, 2)}</pre>
+  </div>
+)
 
 const healthColor = (health) => {
   switch (health) {
@@ -70,9 +85,11 @@ const NodesList = () => {
   const [nodeGroups, setNodeGroups] = useState([])
   const [error, setError] = useState(null)
   const [pageState, setPageState] = usePersistedState('nexusedge.nodesPage', PERSISTED_DEFAULTS)
-  const { search, groupFilter } = pageState
+  const { search, groupFilter, expandedIds } = pageState
   const setSearch = (value) => setPageState({ search: value })
   const setGroupFilter = (value) => setPageState({ groupFilter: value })
+  const setExpandedIds = (ids) => setPageState({ expandedIds: ids })
+  const { isExpanded, toggleOne } = useExpandableRows(expandedIds, setExpandedIds)
   // Bumped on reset to force TableSearchInput to remount with a blank
   // value (AGENTS.md section 11/17) - it owns its own typing state after
   // mount, so a persisted `search` clear alone wouldn't clear what's
@@ -172,33 +189,55 @@ const NodesList = () => {
                       <CTableHeaderCell scope="col">Health</CTableHeaderCell>
                       <CTableHeaderCell scope="col">Last heartbeat</CTableHeaderCell>
                       <CTableHeaderCell scope="col" className="text-end">
-                        Actions
+                        <div className="d-flex justify-content-end align-items-center gap-2">
+                          <span>Actions</span>
+                          <ExpandAllToggleButton
+                            ids={pageItems.map((node) => node.id)}
+                            expandedIds={expandedIds}
+                            setExpandedIds={setExpandedIds}
+                          />
+                        </div>
                       </CTableHeaderCell>
                     </CTableRow>
                   </CTableHead>
                   <CTableBody>
                     {pageItems.map((node) => (
-                      <CTableRow key={node.id}>
-                        <CTableDataCell>{node.name}</CTableDataCell>
-                        <CTableDataCell>{node.type}</CTableDataCell>
-                        <CTableDataCell>{node.location ?? '-'}</CTableDataCell>
-                        <CTableDataCell>{node.group_name ?? '-'}</CTableDataCell>
-                        <CTableDataCell>
-                          <CBadge color={healthColor(node.health)}>{node.health}</CBadge>
-                        </CTableDataCell>
-                        <CTableDataCell>
-                          {formatRelativeTime(node.last_heartbeat_at)}
-                        </CTableDataCell>
-                        <CTableDataCell className="text-end">
-                          <IconButton
-                            icon={cilSettings}
-                            size="sm"
-                            center
-                            onClick={() => setSettingsNode(node)}
-                            ariaLabel={`${node.name} settings`}
-                          />
-                        </CTableDataCell>
-                      </CTableRow>
+                      <React.Fragment key={node.id}>
+                        <CTableRow>
+                          <CTableDataCell>{node.name}</CTableDataCell>
+                          <CTableDataCell>{node.type}</CTableDataCell>
+                          <CTableDataCell>{node.location ?? '-'}</CTableDataCell>
+                          <CTableDataCell>{node.group_name ?? '-'}</CTableDataCell>
+                          <CTableDataCell>
+                            <CBadge color={healthColor(node.health)}>{node.health}</CBadge>
+                          </CTableDataCell>
+                          <CTableDataCell>
+                            {formatRelativeTime(node.last_heartbeat_at)}
+                          </CTableDataCell>
+                          <CTableDataCell className="text-end">
+                            <div className="d-flex justify-content-end align-items-center gap-1 flex-nowrap">
+                              <IconButton
+                                icon={cilSettings}
+                                size="sm"
+                                center
+                                onClick={() => setSettingsNode(node)}
+                                ariaLabel={`${node.name} settings`}
+                              />
+                              <ExpandToggleButton
+                                expanded={isExpanded(node.id)}
+                                onClick={() => toggleOne(node.id)}
+                              />
+                            </div>
+                          </CTableDataCell>
+                        </CTableRow>
+                        {isExpanded(node.id) && (
+                          <CTableRow>
+                            <CTableDataCell colSpan={7} className="p-0">
+                              <NodeDetailRow node={node} />
+                            </CTableDataCell>
+                          </CTableRow>
+                        )}
+                      </React.Fragment>
                     ))}
                   </CTableBody>
                 </CTable>

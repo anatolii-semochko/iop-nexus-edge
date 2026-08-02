@@ -3,9 +3,11 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { apiClient } from "./apiClient.js";
+import { determineAlarmPlan } from "./alarmPolicy.js";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
 import { processRegistry, type ProcessRunner } from "./processRegistry.js";
+import { driveSoundOutput, silenceSoundOutput } from "./soundOutput.js";
 
 /**
  * Extension points (AGENTS_TO_DO.md 2026-07-29) - a target project's own
@@ -17,8 +19,8 @@ import { processRegistry, type ProcessRunner } from "./processRegistry.js";
  *
  * Unlike apiPlugins.ts's Fastify plugins (which receive the shared `app`
  * instance as their only argument), a process plugin's default export
- * receives `register` and a small `{ apiClient, logger }` context as
- * plain function arguments - deliberately NOT importing anything from
+ * receives `register` and a small context object as plain function
+ * arguments - deliberately NOT importing anything from
  * "@nexus-edge/orchestrator" itself. This avoids relying on Node module
  * resolution finding that package from an arbitrary mounted file path
  * (which would need a workaround like a self-referencing node_modules
@@ -29,11 +31,26 @@ import { processRegistry, type ProcessRunner } from "./processRegistry.js";
  * "@nexus-edge/orchestrator" - processRegistry's own export, section 31 -
  * remains possible for a target project that specifically wants tighter
  * integration, just isn't what this loader requires).
+ *
+ * `determineAlarmPlan`/`driveSoundOutput`/`silenceSoundOutput` joined
+ * `apiClient`/`logger` here (AGENTS_TO_DO.md, 2026-08-02) once a sound-
+ * output process kind (Active Zummer, then Alarm Annunciator) needed to
+ * move out of this repo entirely - a plugin's own alarm condition is
+ * always project-specific (which processes/groups matter), but the
+ * beep-pattern/burst-timer engine itself isn't, so it's injected the
+ * same zero-import way rather than either duplicated per plugin or
+ * exposed via a package.json `exports` entry (which wouldn't actually
+ * resolve for a bind-mounted plugin file outside the pnpm workspace
+ * anyway - confirmed live, no `node_modules/@nexus-edge` symlink exists
+ * for code mounted at EXTRA_PROCESS_PLUGINS_DIR).
  */
 
 interface ProcessPluginContext {
   apiClient: typeof apiClient;
   logger: typeof logger;
+  determineAlarmPlan: typeof determineAlarmPlan;
+  driveSoundOutput: typeof driveSoundOutput;
+  silenceSoundOutput: typeof silenceSoundOutput;
 }
 
 type ProcessPluginModule = (register: (kind: string, runner: ProcessRunner) => void, ctx: ProcessPluginContext) => void;
@@ -70,6 +87,12 @@ export async function loadProcessPlugins(): Promise<void> {
       throw new Error(`${file}: process.ts must have a default export (function(register, ctx) {...})`);
     }
     logger.info({ file }, "registering process plugin");
-    mod.default((kind, runner) => processRegistry.register(kind, runner), { apiClient, logger });
+    mod.default((kind, runner) => processRegistry.register(kind, runner), {
+      apiClient,
+      logger,
+      determineAlarmPlan,
+      driveSoundOutput,
+      silenceSoundOutput,
+    });
   }
 }

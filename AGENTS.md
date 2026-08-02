@@ -4315,3 +4315,180 @@ slots, Edit modal correctly lists/saves group bindings. Console clean,
 `tsc --noEmit`/`vitest` clean on `apps/api` and `apps/orchestrator`.
 All test state (message group, group membership, slot binding, message
 level config, simulate flag) reset to baseline afterward.
+
+## 46. CORE minimized to system-only processes; sound-output kinds move to target projects; process-settings/list UI consolidation
+
+Follow-up to section 45, driven by the user's own framing of the CORE/
+target-project split: CORE should stay "чистим і порожнім" (clean and
+empty) - only genuinely system-level processes seeded here, everything
+project-specific (which Message Groups matter, which rooms have
+buzzers) belongs in the target project that actually has that context.
+Confirmed narrowly before implementing (plain-text questions in
+`AGENTS_TO_DO.md`, not `AskUserQuestion` - unusable for this user
+mid-session, see below): **only the `processes` row and its
+orchestrator runner move** - the Library node type (`alarm-
+annunciator`) and every device instance (17 LEDs/buzzer for the
+annunciator, the buzzer for Active Zummer) stay seeded in CORE, since
+they're reusable hardware/library definitions, not project-specific
+policy. Node->Device and Process->Node dependencies stay documentation-
+only for now (not enforced), deliberately shaped so a future "Process
+Library Import: process->nodes->devices" automation could read them
+later - same for `node.yaml`'s `supports:` field.
+
+CORE's `processes` table now seeds exactly 4 rows: Data Logger,
+Heartbeating Control, Resource Monitor, Heartbeating control test.
+Active Zummer (section 42) and Alarm Annunciator (section 45) both
+moved to `nexus-edge-smart-house` as **plugin process kinds**, following
+the extension-point mechanism `processPlugins.ts` already documented
+(section 31/45's own note on it) - `plugins/active-buzzer/process.ts`
+and `plugins/alarm-annunciator/process.ts`, each a near-verbatim port of
+the deleted CORE files (`processes/activeBuzzer.ts`, `processes/
+alarmAnnunciator.ts`, both removed from this repo entirely - no runner
+left here for either kind). Removed via new migrations
+(`1690000000044_remove-active-buzzer-process-unconditionally.ts`,
+`1690000000045_remove-alarm-annunciator-process-unconditionally.ts`,
+same unconditional-delete shape as section 30's temperature-control
+removal, migration 035) - deletes only the `processes` row, node/device
+rows explicitly untouched.
+
+**Plugin context grew two new members.** Both moved processes need the
+same beep-pattern/burst-timer engine and alarm-priority logic CORE
+already has (`soundOutput.ts`'s `driveSoundOutput`/
+`silenceSoundOutput`, `alarmPolicy.ts`'s `determineAlarmPlan`) - rather
+than duplicate that logic per plugin, `processPlugins.ts`'s injected
+context object (`apps/orchestrator/src/processPlugins.ts:48-54`) grew
+from `{apiClient, logger}` to include all three, passed as plain
+function arguments into every plugin's default export alongside
+`register` - still zero imports from `@nexus-edge/orchestrator` itself,
+for the same reason as before (confirmed again: a `package.json`
+`exports` entry would not resolve at runtime for a plugin file mounted
+outside the pnpm workspace's `node_modules` graph). A target project
+that specifically wants tighter integration can still add a real `file:`
+dependency on the package instead - this loader just doesn't require it.
+
+**Message Groups renamed to "Message Casting Groups" - display label
+only, scoped to `ProcessSettingsModal.jsx`.** Disambiguates from a
+not-yet-built inverse ("Message Receiving Groups" or similar, for a
+future process kind that reacts to a group's state rather than casting
+into it - Alarm Annunciator is arguably already this shape, but its own
+UI names it "slot bindings", not the group-membership language this
+section covers). Deliberately NOT renamed anywhere else - the
+underlying entity/table/route/field names (`message_groups`, `/message-
+groups`, `messageGroupId`), and the Settings page's own card header,
+are all unchanged (confirmed narrowly with the user: rename is scoped
+to "у кожному попапі процесу", the popup only).
+
+**`ProcessSettingsModal.jsx` consolidated into the single popup already
+opened from a process row's first action button** - previously Alarm
+Annunciator's slot bindings lived in a second, kind-specific modal
+(`AnnunciatorEditModal.jsx`, opened from a gear button added to the
+expanded panel) opened alongside the general Tab Groups/Message Groups
+popup; the user asked for one popup only ("один основний попап з
+конфігом... загальні стандартні опції, а після того блок унікальних для
+процесу опцій"). `AnnunciatorEditModal.jsx` deleted; its slot-editing UI
+now renders as an extra section below the standard Tab Groups/Message
+Casting Groups pair, dispatched by process kind via a plain `kind ->
+component` map (`EXTRA_SETTINGS_SECTIONS`, mirrors `ProcessesTable.jsx`'s
+own `KIND_PANELS` idiom) - today only `alarm-annunciator` has an entry,
+but the shape scales the same way that one does. State ownership needed
+two passes to satisfy this codebase's stricter lint rules
+(`react-hooks/set-state-in-effect`, `react-hooks/refs`): the extra
+section owns its own `slots` state via a plain `useState` initializer
+(safe because it only ever mounts while the modal is actually open, so
+every reopen is a fresh mount - no reset effect needed), and writes its
+latest edit into a parent-owned `slotsRef` only from the `CFormSelect`'s
+own `onChange` handler (a ref write during a real event is always safe;
+during render or inside an effect body, both got rejected live). The
+parent's Save handler reads `slotsRef.current ?? process.config.slots`
+- `null` means "untouched this session", a no-op write rather than data
+loss - and `handleClose` resets the ref so a cancelled edit for one
+process can never leak into a later save for a different one.
+
+**`AnnunciatorPanel.jsx`** lost its gear button (config now lives
+entirely in the consolidated popup above) and gained a mini
+`BuzzerIndicator` for the process's own buzzer live state in its header
+row next to the level selector - previously missing entirely, the
+panel showed the 16 slot LEDs but nothing for the buzzer itself.
+
+**New MINI indicator size** (`components/indicators/constants.js`):
+`MINI_INDICATOR_SIZE = 30`, `MINI_BORDER_WIDTH = 3`, alongside the
+existing full `INDICATOR_SIZE = 48`/`BORDER_WIDTH = 5`.
+`StatusIndicator`/`BuzzerIndicator` both took optional `size`/
+`borderWidth` props (defaulting to the full constants, so every existing
+call site is unchanged) - `BuzzerIndicator`'s internal grille size is
+now `size * 0.3` rather than a hardcoded module-level constant. Used at
+the mini size in `AnnunciatorPanel.jsx`'s 16 slot LEDs (dense panel,
+`radius 30px, border 3px` per the user's own spec) and the new buzzer
+indicator above; used at the existing full size in the new Devices-list
+expansion below.
+
+**Nodes and Devices list pages gained expandable detail rows**, reusing
+`useExpandableRows`/`ExpandToggleButton`/`ExpandAllToggleButton`
+(section 39's hook, built for Processes and explicitly designed for
+reuse) rather than anything new - `expandedIds` joined each page's own
+`usePersistedState` defaults, a header-level `ExpandAllToggleButton`
+sits next to "Actions". **Nodes**' detail row shows the raw node object
+as formatted JSON (`JSON.stringify(node, null, 2)` - already have the
+full row from the list, no extra fetch; user's own framing: "Поки що
+показуємо стан ноди. Можеш показувати JSON. Потім будемо
+допрацьовувати" - deliberately deferred, not a final design). **Devices**'
+detail row (`DeviceDetailRow`) fetches the device once on expand
+(`api.getDevice`, same "get once then overlay live" shape
+`ActiveBuzzerPanel.jsx` already used) and overlays `useDeviceLiveState`
+for the current value; renders a full-size `BuzzerIndicator`/
+`StatusIndicator` for `active-buzzer`/`led` device types (matching what
+Processes -> Active Zummer already shows), raw `String(value)` for
+every other type for now (explicit user answer: "Показуй поки що сире
+значення").
+
+**Two more real, pre-existing bugs found live during this section's own
+verification pass**, both fixed via new non-destructive migrations (CORE
+via `node-pg-migrate`, smart-house via a new numbered `migrate-extra`
+SQL file) rather than editing already-applied ones:
+
+- **`ON CONFLICT (name)` idempotency mismatch** in smart-house's own
+  `migrations/001_seed_thermal.sql`: `migrate-extra` re-runs every SQL
+  file on every container start (section 31), so its seed INSERT must
+  stay idempotent - but `name` is the user-editable display name, and
+  these three devices had since been renamed via the UI ("Сенсор
+  температури"/"Нагрівач"/"Охолоджувач"), so the old conflict target no
+  longer matched and every restart attempted a fresh INSERT, colliding
+  instead on the separate `devices_edgex_device_name_key` constraint -
+  `nexus-edge-smart-house-migrate-extra` was crash-looping on this found
+  live while seeding this section's own `house-buzzer-01`. Fixed by
+  switching the conflict target to `edgex_device_name` (the stable
+  identity column) in `001_seed_thermal.sql` and the new
+  `002_seed_house_buzzer.sql`.
+- **Nodes' `heartbeat_control` stuck at the bare `{}` column default**:
+  migration `1690000000025_add-heartbeat-control-to-entities.ts`'s own
+  backfill only covered `processes`/`devices` ("No nodes exist yet...
+  nothing to backfill", true when written) - nodes created since
+  (`example-thermal-node-01`, migration 031; `alarm-annunciator-01`,
+  migration 043) inherited the bare default and were never backfilled.
+  `GET /heartbeat-controls` already lists node-type entries alongside
+  devices/processes, and `HeartbeatEditModal.jsx` reads `.warning.level`
+  unconditionally - would crash for any node whose `heartbeat_control`
+  is missing the key entirely (same bug class as the device-side gap
+  section 45 already fixed once). Fixed with CORE migration
+  `1690000000046_backfill-node-heartbeat-control-defaults.ts` and
+  matching smart-house migration
+  `005_backfill_thermal_node_heartbeat_defaults.sql` (same rich shape as
+  migration 025's own backfill). Verified: CORE's node now shows a
+  proper rich `heartbeatControl`; smart-house's backfill affected 3 rows
+  (`thermal-node-01` plus two renamed rows), confirmed via `GET /nodes`.
+
+Verified live end to end: full `make up-all` in both `nexus-edge` and
+`nexus-edge-smart-house` (the latter needed a second full rebuild after
+an earlier verification pass mistakenly only restarted `migrate-extra`,
+leaving the UI container stale and the new settings-modal section
+invisible until caught). CORE's Processes list shows exactly the 4
+system rows. Smart-house's Processes list shows Active Zummer and Alarm
+Annunciator, both running; opening Alarm Annunciator's settings shows
+Tab Groups, Message Casting Groups, and the consolidated "Alarm
+Annunciator - slot bindings" section together in one popup; the panel's
+16 LEDs render visibly smaller than the Devices page's 48px indicators,
+with a mini buzzer indicator next to the level selector. CORE's own Data
+Logger settings popup confirms the rename displays correctly there too
+("Message Casting Groups" with real checkboxes). Devices list expansion
+shows live LED/buzzer indicators for the relevant device types. Both
+tabs' consoles clean throughout.

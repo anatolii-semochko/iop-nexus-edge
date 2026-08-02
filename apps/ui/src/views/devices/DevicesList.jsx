@@ -22,19 +22,26 @@ import { api } from '../../api/client'
 import GroupsConfigModal from '../../components/GroupsConfigModal'
 import IconButton from '../../components/IconButton'
 import ResetFiltersButton from '../../components/ResetFiltersButton'
-import TablePagination from '../../components/table/TablePagination'
-import TableSearchInput from '../../components/table/TableSearchInput'
+import ExpandAllToggleButton from '../../components/table/ExpandAllToggleButton'
+import ExpandToggleButton from '../../components/table/ExpandToggleButton'
+import { useExpandableRows } from '../../hooks/useExpandableRows'
 import { usePagination } from '../../hooks/usePagination'
 import { usePersistedState } from '../../hooks/usePersistedState'
+import { useDeviceLiveState } from '../../api/useLiveDevice'
+import BuzzerIndicator from '../../components/indicators/BuzzerIndicator'
+import StatusIndicator from '../../components/indicators/StatusIndicator'
+import TablePagination from '../../components/table/TablePagination'
+import TableSearchInput from '../../components/table/TableSearchInput'
 import DeviceSettingsModal from './DeviceSettingsModal'
 
-// Registration for usePersistedState (AGENTS_TO_DO.md, 2026-08-01) - flat
-// variant, same as NodesList.jsx.
+// Registration for usePersistedState (AGENTS_TO_DO.md, 2026-08-01, joined
+// 2026-08-02 by `expandedIds`) - flat variant, same as NodesList.jsx.
 const PERSISTED_DEFAULTS = {
   search: '',
   groupFilter: '',
   nodeFilter: '',
   pageSize: 10,
+  expandedIds: [],
 }
 
 const backendColor = (backend) => (backend === 'physical' ? 'primary' : 'info')
@@ -47,6 +54,41 @@ const StatusBadge = ({ device }) => {
     <CBadge color={device.edgex.operatingState === 'UP' ? 'success' : 'danger'}>
       {device.edgex.operatingState}
     </CBadge>
+  )
+}
+
+// Detail row (AGENTS_TO_DO.md, 2026-08-02) - live indicators for the two
+// kinds Alarm Annunciator/Active Zummer already use (same 48px
+// StatusIndicator/BuzzerIndicator as Processes -> Active Zummer's own
+// panel), raw value for everything else for now ("Показуй поки що сире
+// значення") - one REST fetch on expand (same "get once, then overlay
+// live" shape ActiveBuzzerPanel.jsx already uses) plus the live overlay,
+// so the value is correct immediately rather than waiting for this
+// device's next WS event.
+const DeviceDetailRow = ({ device }) => {
+  const [fetched, setFetched] = useState(null)
+  const live = useDeviceLiveState(device.id)
+
+  useEffect(() => {
+    api
+      .getDevice(device.id)
+      .then(setFetched)
+      .catch(() => {})
+  }, [device.id])
+
+  const value = live.value !== undefined ? live.value : fetched?.value
+  const active = value === true
+
+  return (
+    <div className="p-3 pt-0">
+      {device.type === 'active-buzzer' ? (
+        <BuzzerIndicator active={active} />
+      ) : device.type === 'led' ? (
+        <StatusIndicator active={active} />
+      ) : (
+        <span className="text-body-secondary">{value !== undefined ? String(value) : '-'}</span>
+      )}
+    </div>
   )
 }
 
@@ -71,10 +113,12 @@ const DevicesList = () => {
   const [nodes, setNodes] = useState([])
   const [error, setError] = useState(null)
   const [pageState, setPageState] = usePersistedState('nexusedge.devicesPage', PERSISTED_DEFAULTS)
-  const { search, groupFilter, nodeFilter } = pageState
+  const { search, groupFilter, nodeFilter, expandedIds } = pageState
   const setSearch = (value) => setPageState({ search: value })
   const setGroupFilter = (value) => setPageState({ groupFilter: value })
   const setNodeFilter = (value) => setPageState({ nodeFilter: value })
+  const setExpandedIds = (ids) => setPageState({ expandedIds: ids })
+  const { isExpanded, toggleOne } = useExpandableRows(expandedIds, setExpandedIds)
   // Not persisted - a TableSearchInput remount trigger only, see
   // NodesList.jsx's identical comment.
   const [searchResetToken, setSearchResetToken] = useState(0)
@@ -193,34 +237,56 @@ const DevicesList = () => {
                       <CTableHeaderCell scope="col">Backend</CTableHeaderCell>
                       <CTableHeaderCell scope="col">Status</CTableHeaderCell>
                       <CTableHeaderCell scope="col" className="text-end">
-                        Actions
+                        <div className="d-flex justify-content-end align-items-center gap-2">
+                          <span>Actions</span>
+                          <ExpandAllToggleButton
+                            ids={pageItems.map((device) => device.id)}
+                            expandedIds={expandedIds}
+                            setExpandedIds={setExpandedIds}
+                          />
+                        </div>
                       </CTableHeaderCell>
                     </CTableRow>
                   </CTableHead>
                   <CTableBody>
                     {pageItems.map((device) => (
-                      <CTableRow key={device.id}>
-                        <CTableDataCell>
-                          <Link to={`/devices/${device.id}`}>{device.name}</Link>
-                        </CTableDataCell>
-                        <CTableDataCell>{device.type}</CTableDataCell>
-                        <CTableDataCell>{device.node_name ?? '-'}</CTableDataCell>
-                        <CTableDataCell>
-                          <CBadge color={backendColor(device.backend)}>{device.backend}</CBadge>
-                        </CTableDataCell>
-                        <CTableDataCell>
-                          <StatusBadge device={device} />
-                        </CTableDataCell>
-                        <CTableDataCell className="text-end">
-                          <IconButton
-                            icon={cilSettings}
-                            size="sm"
-                            center
-                            onClick={() => setSettingsDevice(device)}
-                            ariaLabel={`${device.name} settings`}
-                          />
-                        </CTableDataCell>
-                      </CTableRow>
+                      <React.Fragment key={device.id}>
+                        <CTableRow>
+                          <CTableDataCell>
+                            <Link to={`/devices/${device.id}`}>{device.name}</Link>
+                          </CTableDataCell>
+                          <CTableDataCell>{device.type}</CTableDataCell>
+                          <CTableDataCell>{device.node_name ?? '-'}</CTableDataCell>
+                          <CTableDataCell>
+                            <CBadge color={backendColor(device.backend)}>{device.backend}</CBadge>
+                          </CTableDataCell>
+                          <CTableDataCell>
+                            <StatusBadge device={device} />
+                          </CTableDataCell>
+                          <CTableDataCell className="text-end">
+                            <div className="d-flex justify-content-end align-items-center gap-1 flex-nowrap">
+                              <IconButton
+                                icon={cilSettings}
+                                size="sm"
+                                center
+                                onClick={() => setSettingsDevice(device)}
+                                ariaLabel={`${device.name} settings`}
+                              />
+                              <ExpandToggleButton
+                                expanded={isExpanded(device.id)}
+                                onClick={() => toggleOne(device.id)}
+                              />
+                            </div>
+                          </CTableDataCell>
+                        </CTableRow>
+                        {isExpanded(device.id) && (
+                          <CTableRow>
+                            <CTableDataCell colSpan={6} className="p-0">
+                              <DeviceDetailRow device={device} />
+                            </CTableDataCell>
+                          </CTableRow>
+                        )}
+                      </React.Fragment>
                     ))}
                   </CTableBody>
                 </CTable>

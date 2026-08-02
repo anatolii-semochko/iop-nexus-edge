@@ -4,8 +4,6 @@ import { apiClient, type ProcessRecord } from "./apiClient.js";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
 import { loadProcessPlugins } from "./processPlugins.js";
-import { runActiveBuzzer } from "./processes/activeBuzzer.js";
-import { runAlarmAnnunciator } from "./processes/alarmAnnunciator.js";
 import { runDataLogger } from "./processes/dataLogger.js";
 import { runHeartbeatControl } from "./processes/heartbeatControl.js";
 import { runHeartbeatControlTest } from "./processes/heartbeatControlTest.js";
@@ -15,15 +13,16 @@ import { TICK_INTERVAL_MS } from "./tickInterval.js";
 
 // Built-in process kinds (AGENTS.md section 10) - registered through the
 // same processRegistry a target-project plugin would use (extension
-// points design, AGENTS_TO_DO.md 2026-07-28/29). temperature-control/
-// temperature-monitor moved out (AGENTS_TO_DO.md 2026-07-29 "chistiy proekt"
-// decision) - they were always a demo assembly on top of the example
-// Library devices, not a base system capability; nexus-edge-smart-house
-// now owns that recipe as its own process plugin (see processPlugins.ts).
+// points design, AGENTS_TO_DO.md 2026-07-28/29). CORE is deliberately
+// kept to a handful of genuinely base-platform system processes
+// (AGENTS_TO_DO.md, 2026-08-02 "CORE чистим і порожнім" decision) -
+// temperature-control/temperature-monitor moved out first (2026-07-29),
+// active-buzzer/alarm-annunciator followed (2026-08-02) - all four were
+// always a demo/recipe assembly on top of Library devices, not a base
+// system capability; nexus-edge-smart-house now owns those recipes as
+// its own process plugins (see processPlugins.ts).
 function registerBuiltinProcessKinds(): void {
   processRegistry.register("resource-monitor", runResourceMonitor);
-  processRegistry.register("active-buzzer", runActiveBuzzer);
-  processRegistry.register("alarm-annunciator", runAlarmAnnunciator);
   processRegistry.register("heartbeat-control", runHeartbeatControl);
   processRegistry.register("heartbeat-control-test", runHeartbeatControlTest);
   processRegistry.register("data-logger", runDataLogger);

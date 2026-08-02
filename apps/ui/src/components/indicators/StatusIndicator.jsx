@@ -12,13 +12,21 @@ const INACTIVE_FILL = '#ced4da'
  * now shared by anything else that wants the same "LED" visual instead of
  * redrawing it per call site.
  */
-const StatusIndicator = ({ active, color = '#0d6efd' }) => (
+// `size`/`borderWidth` default to the full footprint - pass
+// MINI_INDICATOR_SIZE/MINI_BORDER_WIDTH (constants.js) for a panel with
+// many indicators at once (AGENTS_TO_DO.md, 2026-08-02).
+const StatusIndicator = ({
+  active,
+  color = '#0d6efd',
+  size = INDICATOR_SIZE,
+  borderWidth = BORDER_WIDTH,
+}) => (
   <div
     style={{
-      width: INDICATOR_SIZE,
-      height: INDICATOR_SIZE,
+      width: size,
+      height: size,
       borderRadius: '50%',
-      border: `${BORDER_WIDTH}px solid #000`,
+      border: `${borderWidth}px solid #000`,
       backgroundColor: active ? color : INACTIVE_FILL,
       boxSizing: 'border-box',
       margin: '0 auto',
