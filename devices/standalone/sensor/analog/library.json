@@ -1,0 +1,5 @@
+{
+  "id": "device-analog",
+  "name": "Analog",
+  "description": "Generic analog input sensor - single scaled numeric reading from an ADC channel."
+}

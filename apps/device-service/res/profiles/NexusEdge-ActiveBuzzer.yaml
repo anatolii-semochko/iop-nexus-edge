@@ -1,5 +1,5 @@
 # Real device type, provisioned under devices/ (AGENTS.md section 7) -
-# source of truth is devices/standalone/active-buzzer/contract.schema.ts,
+# source of truth is devices/standalone/indicator/active-buzzer/contract.schema.ts,
 # kept identical here by hand (no automated provisioning flow yet - see
 # that folder's docs/README.md).
 apiVersion: "v2"

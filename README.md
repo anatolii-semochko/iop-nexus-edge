@@ -60,7 +60,7 @@ end-to-end today, verified live in a running container stack (see
 - **A universal pagination/filtering toolkit** for admin tables (debounced
   search, page-size control, client-side pagination) — built once, reused
   across every list view in the app.
-- **One real device type end-to-end** (`devices/standalone/light-regulator`)
+- **One real device type end-to-end** (`devices/standalone/actuator/light-regulator`)
   — contract schema, EdgeX device profile, safety rules, and both a
   production and a dev-simulator UI component, following the same
   convention every future device type will use.

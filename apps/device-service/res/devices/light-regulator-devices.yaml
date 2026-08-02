@@ -1,4 +1,4 @@
-# The Light Regulator device instance (devices/standalone/light-regulator/,
+# The Light Regulator device instance (devices/standalone/actuator/light-regulator/,
 # AGENTS.md section 7) - separate file from example-devices.yaml, which is
 # the smoke-test fixture only and is meant to be removed once real device
 # types exist; this one is real and stays.

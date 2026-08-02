@@ -5,7 +5,7 @@
 # meant to agree with (AGENTS.md section 7/30).
 #
 # Documents the rule at the NODE TYPE level, not either device type's own
-# safety.yaml (devices/standalone/heater/safety.yaml etc., both empty) - a
+# safety.yaml (devices/standalone/actuator/heater/safety.yaml etc., both empty) - a
 # rule like "heater and cooler must never both be active" is a property of
 # a physical assembly, not of either device type in isolation, and
 # Devices are independent library items now (AGENTS.md section 32) that

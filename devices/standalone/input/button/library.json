@@ -1,0 +1,5 @@
+{
+  "id": "device-button",
+  "name": "Button",
+  "description": "Momentary pushbutton (normally-open) - single Bool input, active while held."
+}

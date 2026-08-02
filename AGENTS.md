@@ -460,8 +460,9 @@ actual Heater/Cooler interlock rule staying on the node type's own
 physical assembly, section 30 already got this half right), not
 duplicated into either device type's.
 
-`devices/standalone/light-regulator/` and `devices/standalone/
-active-buzzer/` are real device types built to this layout - `runtime/`
+`devices/standalone/actuator/light-regulator/` and
+`devices/standalone/indicator/active-buzzer/` are real device types
+built to this layout - `runtime/`
 and `firmware/` are deliberately absent for both (nothing for either to
 add over the generic Virtual Node Runtime yet, no hardware to target),
 everything else (`contract.schema.ts`, `edgex-device-profile.yaml`,
@@ -577,8 +578,9 @@ for controllable devices, and renames "Release to Auto" to "Auto", shown
 only while a device is actually `MANUAL`.
 
 `devices/` device-type components are imported straight into `apps/ui` from
-outside its own package (`import ... from 'devices/standalone/light-
-regulator/ui/simulator/LightRegulatorSimulator.jsx'`) via a `'devices/'`
+outside its own package (`import ... from
+'devices/standalone/actuator/light-regulator/ui/simulator/LightRegulatorSimulator.jsx'`)
+via a `'devices/'`
 Vite resolve alias (`apps/ui/vite.config.mjs`) pointing at the repo-root
 `devices/` folder, which also needs `COPY devices devices` added to `apps/
 ui/Dockerfile`'s build stage to be present in the build context at all.
@@ -2324,7 +2326,7 @@ The platform's first physical-alarm device and the first real consumer of
 Message Levels (section 22/23's `message_levels` table, which sat as
 config-storage only until now). A single active buzzer - built-in tone
 generator, driven purely 0/1 - modeled as a real device type under
-`devices/standalone/active-buzzer/` (same layout as `light-regulator`,
+`devices/standalone/indicator/active-buzzer/` (same layout as `light-regulator`,
 section 7): `contract.schema.ts`, `edgex-device-profile.yaml` (mirrored
 into `apps/device-service/res/profiles/NexusEdge-ActiveBuzzer.yaml` +
 `res/devices/active-buzzer-devices.yaml`, seeded into Postgres by
@@ -2434,7 +2436,7 @@ entry) - no config to edit (unlike Temperature Control), just a live
 visualization via the shared `BuzzerIndicator` atom (section 26 - built
 ahead of time, unwired, specifically for this) fed by
 `useDeviceLiveState(process.device_id)`, same live-preferred-over-REST
-pattern as `TemperatureProcessPanel`. `devices/standalone/active-buzzer/
+pattern as `TemperatureProcessPanel`. `devices/standalone/indicator/active-buzzer/
 ui/control/ActiveBuzzerControl.jsx` (registered in `DeviceDetail.jsx`'s
 `DEVICE_TYPE_CONTROLS`, matching light-regulator's convention) is a
 separate, self-contained lamp - device-type components can't import
@@ -2901,7 +2903,7 @@ every write, same as before.
   the same `contract.schema.ts`/`edgex-device-profile.yaml`/`safety.yaml`/
   `config/default-state.yaml`/`docs/README.md`/`tests/README.md`/
   `CHANGELOG.md` template already established by
-  `devices/standalone/light-regulator`. New convention established here
+  `devices/standalone/actuator/light-regulator`. New convention established here
   (no prior precedent existed): a node-attached Device's own `safety.yaml`
   is always empty - a cross-device forbidden-state rule (e.g. "heater and
   cooler can't both be on") is declared once, on the **Node's**
@@ -4121,3 +4123,80 @@ directory, confirmed the generated `README.md` carries the correct
 `https://github.com/anatolii-semochko/iop-nexus-edge` link and the
 `.../blob/main/docs/CREATING_A_TARGET_PROJECT.md` doc link, `sh -n`
 clean, scratch directory removed afterward.
+
+## 44. Elementary components library: first real category tree, icons, 4 new lightweight devices
+
+Starter package toward the user's own wider goal ("пакет базових
+пристроїв" - button/switch/encoder, sensors, actuators, indicator
+LEDs/buzzers) - section 33's Library Catalog sync (`category.json` /
+`library.json` / optional `icon.svg` per folder) already supported
+nested categories in full, just unused until now (only the
+`_synctest` fixture had ever exercised it).
+
+**Category tree** - four new `devices/standalone/{input,sensor,
+actuator,indicator}/category.json` folders (`{name, description}`,
+matching `CategoryDescriptor`), populated by:
+
+**Recategorizing all 6 existing devices** into them (`git mv`, content
+untouched): `switch` -> `input/`, `temperature` -> `sensor/`,
+`active-buzzer` -> `indicator/`, `light-regulator`/`heater`/`cooler`
+-> `actuator/`. Real blast radius turned out wider than "just move
+folders": `apps/ui/src/builtinDeviceTypes.js` has *static* imports
+keyed to the old paths for `light-regulator`'s and `active-buzzer`'s
+UI control/simulator components (`import ... from 'devices/standalone/
+light-regulator/ui/control/...'`) - missing this would have broken
+the UI build silently until someone opened a Devices page. Updated in
+lockstep. Also swept every doc/comment "source of truth is
+`devices/standalone/<old-path>`" pointer across `AGENTS.md`,
+`README.md`, `docs/DEVELOPMENT_LOG.md`, two migrations, three
+`apps/device-service/res/` YAML files, and the moved `active-buzzer`
+device's own self-referencing `docs/README.md` - none of these break
+anything if left stale, but a wrong "source of truth" pointer is
+exactly the kind of thing that costs someone real time later.
+
+**Icons** - schematic/IEC-style line-art SVGs (`#495057` stroke,
+`stroke-width 3`, 64x64 viewBox, no `currentColor` - `LibraryBrowser.
+jsx`'s `RowIcon` renders via a plain `<img src>`, which doesn't
+inherit page CSS, so the color has to be baked into the file). Style
+sample (switch + LED) shown to the user as a published Artifact before
+producing the rest, per their own explicit ask ("хотів би для них
+іконку - схемотехнічне зображення") - approved with no changes. One
+`icon.svg` per device, all hand-drawn to read at both the actual
+24px Library-table thumbnail size and enlarged: switch (open-contact
+break + terminal dots), LED (diode wedge + cathode bar + emission
+arrows), thermometer (capsule + bulb + tick marks), speaker+arcs
+(active-buzzer), rheostat (light-regulator - resistor box + diagonal
+arrow), zigzag resistor + heat waves (heater), snowflake (cooler),
+momentary pushbutton (terminal dots + open bar + push arrow), sine
+wave (analog), coil + switch contact (relay).
+
+**4 new lightweight devices** - `input/button`, `sensor/analog`,
+`actuator/relay`, `indicator/led`. Deliberately NOT the full 8-file
+device-kind shape `switch/` etc. use (`contract.schema.ts`,
+`edgex-device-profile.yaml`, `config/default-state.yaml`,
+`safety.yaml`, `tests/README.md`) - confirmed with the user
+("робимо мінімум... розширимо, коли будемо точно знати, чого
+бракує"): none of these have real hardware yet, so building the full
+machinery now would be ~8 files x 20 devices of pure boilerplate for
+things nothing reads. Each gets just `library.json` (`{id, name,
+description}`) + `icon.svg` + a short `docs/README.md` stub with a
+`## Status` section explicitly marking it catalog-only and pointing at
+`switch/` as the shape to graduate into once it has a real node/
+process. `led` deliberately stays single-color - the original request
+listed `led R`/`G`/`B`/`RGB` separately, but three copies of one
+device with no real multi-channel contract isn't worth it yet; noted
+in the doc as a deferred decision, not forgotten.
+
+Device-detail drill-down (model, docs, links, images beyond the small
+icon) explicitly deferred - the user hasn't decided the shape of that
+yet either ("ще не визначився з стилем і деталями... розширимо, коли
+будемо точно знати").
+
+Verified live: rebuilt the `api` image (`devices/` is baked in at
+build time, no bind mount), `POST /library/sync` -> `{categories: 4,
+items: 11}` (10 devices + the pre-existing `example-thermal-node`),
+confirmed every icon path resolves (`GET /library-assets/library/
+standalone/<category>/<device>/icon.svg` -> 200) and renders correctly
+in all four categories in the browser at real thumbnail size, `light-
+regulator-01`'s device detail page still renders its control (the
+moved-import risk), console clean throughout.

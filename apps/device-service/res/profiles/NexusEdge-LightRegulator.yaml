@@ -1,5 +1,5 @@
 # Real device type, first one provisioned under devices/ (AGENTS.md section
-# 7) - source of truth is devices/standalone/light-regulator/edgex-device-
+# 7) - source of truth is devices/standalone/actuator/light-regulator/edgex-device-
 # profile.yaml, kept identical here by hand (no automated provisioning flow
 # yet - see that folder's docs/README.md).
 apiVersion: "v2"
@@ -19,7 +19,7 @@ deviceResources:
       valueType: "Int32"
       # RW at the EdgeX/core-command level even though this is a read-only
       # sensor from the platform's perspective - see the identical note in
-      # devices/standalone/light-regulator/edgex-device-profile.yaml.
+      # devices/standalone/actuator/light-regulator/edgex-device-profile.yaml.
       readWrite: "RW"
       minimum: 0
       maximum: 100

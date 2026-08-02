@@ -1,0 +1,4 @@
+{
+  "name": "Actuator",
+  "description": "Controllable outputs - relays, PWM outputs, servos, and other driven devices."
+}

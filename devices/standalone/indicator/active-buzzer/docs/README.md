@@ -2,7 +2,7 @@
 
 Standalone virtual actuator - a single active buzzer with a built-in tone
 generator, modeled on the platform's "first real device type" precedent
-(`devices/standalone/light-regulator/`, AGENTS.md section 7).
+(`devices/standalone/actuator/light-regulator/`, AGENTS.md section 7).
 
 ## Behavior
 
