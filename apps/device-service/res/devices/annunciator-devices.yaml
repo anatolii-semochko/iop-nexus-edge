@@ -1,0 +1,192 @@
+# The Alarm Annunciator node's device instances (devices/nodes/
+# alarm-annunciator/, AGENTS_TO_DO.md 2026-08-02) - 16 LEDs (8 red/error, 8
+# yellow/warning, one pair per message-group slot) plus its own buzzer
+# (reuses the existing NexusEdge-ActiveBuzzer profile - no new profile
+# needed for that one).
+deviceList:
+  - name: "annunciator-error-1"
+    profileName: "NexusEdge-Led"
+    description: "Alarm Annunciator slot 1 - red/error indicator"
+    labels:
+      - "indicator"
+    protocols:
+      backend:
+        mode: "virtual"
+      virtual:
+        "initial.Led": false
+
+  - name: "annunciator-error-2"
+    profileName: "NexusEdge-Led"
+    description: "Alarm Annunciator slot 2 - red/error indicator"
+    labels:
+      - "indicator"
+    protocols:
+      backend:
+        mode: "virtual"
+      virtual:
+        "initial.Led": false
+
+  - name: "annunciator-error-3"
+    profileName: "NexusEdge-Led"
+    description: "Alarm Annunciator slot 3 - red/error indicator"
+    labels:
+      - "indicator"
+    protocols:
+      backend:
+        mode: "virtual"
+      virtual:
+        "initial.Led": false
+
+  - name: "annunciator-error-4"
+    profileName: "NexusEdge-Led"
+    description: "Alarm Annunciator slot 4 - red/error indicator"
+    labels:
+      - "indicator"
+    protocols:
+      backend:
+        mode: "virtual"
+      virtual:
+        "initial.Led": false
+
+  - name: "annunciator-error-5"
+    profileName: "NexusEdge-Led"
+    description: "Alarm Annunciator slot 5 - red/error indicator"
+    labels:
+      - "indicator"
+    protocols:
+      backend:
+        mode: "virtual"
+      virtual:
+        "initial.Led": false
+
+  - name: "annunciator-error-6"
+    profileName: "NexusEdge-Led"
+    description: "Alarm Annunciator slot 6 - red/error indicator"
+    labels:
+      - "indicator"
+    protocols:
+      backend:
+        mode: "virtual"
+      virtual:
+        "initial.Led": false
+
+  - name: "annunciator-error-7"
+    profileName: "NexusEdge-Led"
+    description: "Alarm Annunciator slot 7 - red/error indicator"
+    labels:
+      - "indicator"
+    protocols:
+      backend:
+        mode: "virtual"
+      virtual:
+        "initial.Led": false
+
+  - name: "annunciator-error-8"
+    profileName: "NexusEdge-Led"
+    description: "Alarm Annunciator slot 8 - red/error indicator"
+    labels:
+      - "indicator"
+    protocols:
+      backend:
+        mode: "virtual"
+      virtual:
+        "initial.Led": false
+
+  - name: "annunciator-warning-1"
+    profileName: "NexusEdge-Led"
+    description: "Alarm Annunciator slot 1 - yellow/warning indicator"
+    labels:
+      - "indicator"
+    protocols:
+      backend:
+        mode: "virtual"
+      virtual:
+        "initial.Led": false
+
+  - name: "annunciator-warning-2"
+    profileName: "NexusEdge-Led"
+    description: "Alarm Annunciator slot 2 - yellow/warning indicator"
+    labels:
+      - "indicator"
+    protocols:
+      backend:
+        mode: "virtual"
+      virtual:
+        "initial.Led": false
+
+  - name: "annunciator-warning-3"
+    profileName: "NexusEdge-Led"
+    description: "Alarm Annunciator slot 3 - yellow/warning indicator"
+    labels:
+      - "indicator"
+    protocols:
+      backend:
+        mode: "virtual"
+      virtual:
+        "initial.Led": false
+
+  - name: "annunciator-warning-4"
+    profileName: "NexusEdge-Led"
+    description: "Alarm Annunciator slot 4 - yellow/warning indicator"
+    labels:
+      - "indicator"
+    protocols:
+      backend:
+        mode: "virtual"
+      virtual:
+        "initial.Led": false
+
+  - name: "annunciator-warning-5"
+    profileName: "NexusEdge-Led"
+    description: "Alarm Annunciator slot 5 - yellow/warning indicator"
+    labels:
+      - "indicator"
+    protocols:
+      backend:
+        mode: "virtual"
+      virtual:
+        "initial.Led": false
+
+  - name: "annunciator-warning-6"
+    profileName: "NexusEdge-Led"
+    description: "Alarm Annunciator slot 6 - yellow/warning indicator"
+    labels:
+      - "indicator"
+    protocols:
+      backend:
+        mode: "virtual"
+      virtual:
+        "initial.Led": false
+
+  - name: "annunciator-warning-7"
+    profileName: "NexusEdge-Led"
+    description: "Alarm Annunciator slot 7 - yellow/warning indicator"
+    labels:
+      - "indicator"
+    protocols:
+      backend:
+        mode: "virtual"
+      virtual:
+        "initial.Led": false
+
+  - name: "annunciator-warning-8"
+    profileName: "NexusEdge-Led"
+    description: "Alarm Annunciator slot 8 - yellow/warning indicator"
+    labels:
+      - "indicator"
+    protocols:
+      backend:
+        mode: "virtual"
+      virtual:
+        "initial.Led": false
+
+  - name: "annunciator-buzzer-01"
+    profileName: "NexusEdge-ActiveBuzzer"
+    description: "Alarm Annunciator's own buzzer"
+    labels:
+      - "indicator"
+    protocols:
+      backend:
+        mode: "virtual"
+      virtual:
+        "initial.Buzzer": false

@@ -22,6 +22,23 @@ interface ProcessConfig {
   cpuWarnMax?: number;
   ramWarnMax?: number;
   diskWarnMax?: number;
+  // alarm-annunciator (AGENTS_TO_DO.md, 2026-08-02) - 8 fixed slots (one
+  // per LED pair, device ids never change post-seed), each bound to a
+  // Message Group by an admin via this same generic config PATCH.
+  // `testLevel`/`testSlotIndex` are the process panel's own momentary
+  // test-button state (which slot is currently held, at which level) -
+  // written through this same route on mousedown/mouseup rather than a
+  // dedicated endpoint, since the traffic is a human clicking, not a hot
+  // loop.
+  slots?: AnnunciatorSlot[];
+  testLevel?: { type: "warning" | "error"; level: number } | null;
+  testSlotIndex?: number | null;
+}
+
+interface AnnunciatorSlot {
+  redDeviceId: number;
+  yellowDeviceId: number;
+  messageGroupId: number | null;
 }
 
 interface ProcessRow {
@@ -88,6 +105,9 @@ export async function processRoutes(app: FastifyInstance): Promise<void> {
       cpuWarnMax?: number;
       ramWarnMax?: number;
       diskWarnMax?: number;
+      slots?: AnnunciatorSlot[];
+      testLevel?: { type: "warning" | "error"; level: number } | null;
+      testSlotIndex?: number | null;
     };
   }>(
     "/processes/:id/config",

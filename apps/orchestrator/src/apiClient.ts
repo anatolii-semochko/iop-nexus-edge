@@ -16,6 +16,12 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+export interface AnnunciatorSlot {
+  redDeviceId: number;
+  yellowDeviceId: number;
+  messageGroupId: number | null;
+}
+
 export interface ProcessRecord {
   id: number;
   name: string;
@@ -41,6 +47,12 @@ export interface ProcessRecord {
     sensorDeviceId?: number;
     heaterDeviceId?: number;
     coolerDeviceId?: number;
+    // alarm-annunciator (AGENTS_TO_DO.md, 2026-08-02) - see
+    // apps/api/src/routes/processes.ts's own ProcessConfig for the
+    // authoritative shape this mirrors.
+    slots?: AnnunciatorSlot[];
+    testLevel?: { type: "warning" | "error"; level: number } | null;
+    testSlotIndex?: number | null;
   };
   status?: "on" | "off";
   // Fleet-wide, unfiltered by any user's "hidden" dismissal (AGENTS.md's
@@ -166,6 +178,11 @@ export const apiClient = {
   getMessageLevels: () => request<MessageLevelRecord[]>("/message-levels"),
   // Same "read fresh every tick" convention as getMessageLevels above.
   getMessageSignalTiming: () => request<MessageSignalTimingRecord>("/message-signal-timing"),
+  // Alarm Annunciator (AGENTS_TO_DO.md, 2026-08-02) - "does this group
+  // currently have an active error/warning", read fresh every tick same
+  // as message levels/signal timing above.
+  getMessageGroupsActiveState: () =>
+    request<{ id: number; hasActiveError: boolean; hasActiveWarning: boolean }[]>("/message-groups/active-state"),
   // Orchestrator-driven write - only reaches EdgeX while the device is
   // still AUTO (AGENTS.md section 6); always records the intended value
   // even while a human has it overridden MANUAL via the UI.

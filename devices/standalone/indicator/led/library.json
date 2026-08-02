@@ -1,5 +1,5 @@
 {
   "id": "device-led",
   "name": "LED",
-  "description": "Single-color status LED - single Bool (or PWM-dimmable) indicator output."
+  "description": "Single-color status LED - single Bool indicator output."
 }

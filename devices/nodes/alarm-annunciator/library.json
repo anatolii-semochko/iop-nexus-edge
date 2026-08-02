@@ -1,0 +1,5 @@
+{
+  "id": "node-alarm-annunciator",
+  "name": "Alarm Annunciator",
+  "description": "Operator panel - 16 status LEDs (8 red/error, 8 yellow/warning) plus a buzzer, one LED pair per Message Group."
+}

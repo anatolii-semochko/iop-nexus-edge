@@ -4200,3 +4200,118 @@ standalone/<category>/<device>/icon.svg` -> 200) and renders correctly
 in all four categories in the browser at real thumbnail size, `light-
 regulator-01`'s device detail page still renders its control (the
 moved-import risk), console clean throughout.
+
+## 45. Alarm Annunciator - operator panel node/process, second sound-output consumer
+
+An operator panel: 16 LED indicators (8 red/error + 8 yellow/warning,
+one pair per Message Group "slot") plus its own buzzer, so an operator
+can see which Message Groups have active warnings/errors at a glance,
+without the UI. Confirmed with the user before building (plain-text
+questions, not `AskUserQuestion` - its UI was hard to work with mid-
+session): severity level does **not** change an LED's own behavior -
+red/yellow are plain present/absent per group, all active groups lit
+simultaneously; the buzzer alone reflects the fleet-wide highest
+active level (unchanged Active Zummer policy). Test buttons are
+**momentary and UI-only** - no physical Button device backs them; the
+real panel hardware is only the 16 LEDs + buzzer. A bound-less slot's
+Test button is disabled (explicit user follow-up, easy to miss:
+"кнопки, які не прив'язані до групи - disabled").
+
+**Library**: `devices/nodes/alarm-annunciator/` (`supports: [led,
+active-buzzer]`, `bus.type: null` - virtual only, same as every other
+node type today). `indicator/led` graduated from its catalog-only
+entry (section 44) to the full 8-file device-kind shape - first real
+consumer.
+
+**Seed** (`1690000000043_seed-alarm-annunciator.ts`, one migration, ~50
+lines of "array + loop" reusing `1690000000031_seed-example-thermal-
+node.ts`'s own shape): 1 node row, 17 device rows (`annunciator-
+error-1..8`, `annunciator-warning-1..8` - type `led`; `annunciator-
+buzzer-01` - type `active-buzzer`, reuses the existing EdgeX profile,
+no new one needed), 1 process row (`kind: 'alarm-annunciator'`,
+`device_id` = the buzzer). `heartbeat_control`/`data_logger_control`
+are explicitly set to the same rich defaults the 2026-08-01 backfill
+migrations gave every already-existing row at the time - the bare
+column-level default (`{}`) breaks any code path that reads
+`.warning.level` unconditionally, which several already do.
+
+**Config shape** (`processes.config`, generic `PATCH /processes/:id/
+config` - no new route, same endpoint every other kind's settings
+already use): `slots: [{redDeviceId, yellowDeviceId, messageGroupId}]`
+x8 (device ids fixed at seed time, `messageGroupId` admin-editable via
+a new `AnnunciatorEditModal.jsx`, matching `HeartbeatEditModal.jsx`'s
+own "Edit" idiom) plus `testLevel`/`testSlotIndex` - the process
+panel's own momentary test-button state, written through this same
+route on mousedown/mouseup rather than a dedicated endpoint (a human
+clicking, not a hot loop).
+
+**Message Groups: first real reader.** Before this, `process_message_
+groups` was pure inert metadata - nothing computed "does this group
+have an active error/warning" (confirmed by research: the existing
+buzzer/Active Zummer derives its alarm condition fleet-wide from every
+process's `critical`/`warning`, never scoped by group). New route `GET
+/message-groups/active-state` (`routes/messageGroups.ts`) does the
+aggregation: for each group, does any member process (`process_
+message_groups`) currently have `critical`/`warning` true (Redis, via
+`processRegistry`). Same simplification the buzzer already makes: a
+process's critical/warning flag carries no WEM level of its own, so a
+real active flag always reads as level 1 - nothing produces a real
+level 2-4 today. A held test button additionally contributes its own
+operator-chosen level (1-4), which is the *only* way to exercise
+levels 2-4 anywhere in the system right now.
+
+**Shared burst engine** (`apps/orchestrator/src/soundOutput.ts`, new)
+- extracted whole from `activeBuzzer.ts` (section 42's burst-pattern
+engine) the moment a second sound-output consumer existed. One
+function, `driveSoundOutput(processId, deviceId, plan)`, handles
+constant/off/burst dispatch and the `bursts`/`lastSignature` Maps
+(now keyed across every sound-output process, not just one) -
+`activeBuzzer.ts` shrank to just computing its own fleet-wide
+`AlarmPlan` and handing it off; `alarmAnnunciator.ts` does the same
+with its own group-scoped plan. Neither file duplicates the pulse-
+timer logic anymore.
+
+**Per-tick logic** (`processes/alarmAnnunciator.ts`): for each of the 8
+slots, `errorActive = group.hasActiveError || (thisSlotIsBeingTested
+&& testLevel.type === 'error')` (same shape for warning) - writes both
+LEDs unconditionally every tick (safe: `PUT /devices/:id/auto`
+already dedupes unchanged reassertions in `log_command`, section 22's
+2026-08-01 fix). Builds `{error: [...], warning: [...]}` level arrays
+(real activity = level 1, held test = the chosen level) and calls the
+*unmodified* `determineAlarmPlan` (`alarmPolicy.ts`) - the annunciator
+needed zero changes to alarm-priority logic, only a different input.
+
+**Real bug found and fixed along the way**: `GET /devices` started
+returning `edgex: null` for the buzzer plus the last two LEDs right
+after seeding - looked like a provisioning failure, but `core-metadata`
+had all 17 devices registered and `UP` (confirmed directly). Root
+cause: `apps/api/src/edgex.ts`'s `listEdgeXDevices()` called `/api/v3/
+device/all` with no `limit` param - EdgeX's own default page size
+(empirically 20) silently truncated the fleet once total device count
+crossed it, something nobody had hit before this feature added 17
+devices at once. Fixed with `?limit=-1` (EdgeX's own "no limit"
+convention) - a real, previously-latent bug, not specific to this
+feature's devices.
+
+Verified live: full `make up-all` + one extra `api` rebuild for the
+`limit=-1` fix, migration ran clean, all 19 devices (fleet-wide, not
+just this feature's 17) confirmed `edgex.operatingState: UP` after the
+fix. Created a real Message Group, bound Heartbeating Control's own
+`critical` flag to it (the process that actually raises fleet
+critical/warning - not `heartbeat-control-test` itself, a mistake
+caught mid-verification, same confusion as a past session), bound
+Alarm Annunciator's slot 1 to it, drove a real error via `heartbeat-
+control-test`'s `simulate: true` and confirmed: slot 1's red LED
+(device value) went `true`, the buzzer burst-toggled per the
+configured `longBeep` pattern, unbound slots' LEDs stayed `false`.
+Separately verified the test-button path directly (`PATCH testSlotIndex/
+testLevel`): holding warning-tests slot 1 while its real error was
+already active lit *both* red and yellow simultaneously; releasing
+dropped yellow back to `false` while red (still really active) stayed
+`true` - simultaneous-not-priority behavior confirmed exactly as
+specified. Browser: process list shows "Alarm Annunciator", expanded
+panel shows live-updating LED colors, disabled Test buttons on unbound
+slots, Edit modal correctly lists/saves group bindings. Console clean,
+`tsc --noEmit`/`vitest` clean on `apps/api` and `apps/orchestrator`.
+All test state (message group, group membership, slot binding, message
+level config, simulate flag) reset to baseline afterward.

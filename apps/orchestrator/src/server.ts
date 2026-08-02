@@ -5,6 +5,7 @@ import { config } from "./config.js";
 import { logger } from "./logger.js";
 import { loadProcessPlugins } from "./processPlugins.js";
 import { runActiveBuzzer } from "./processes/activeBuzzer.js";
+import { runAlarmAnnunciator } from "./processes/alarmAnnunciator.js";
 import { runDataLogger } from "./processes/dataLogger.js";
 import { runHeartbeatControl } from "./processes/heartbeatControl.js";
 import { runHeartbeatControlTest } from "./processes/heartbeatControlTest.js";
@@ -22,6 +23,7 @@ import { TICK_INTERVAL_MS } from "./tickInterval.js";
 function registerBuiltinProcessKinds(): void {
   processRegistry.register("resource-monitor", runResourceMonitor);
   processRegistry.register("active-buzzer", runActiveBuzzer);
+  processRegistry.register("alarm-annunciator", runAlarmAnnunciator);
   processRegistry.register("heartbeat-control", runHeartbeatControl);
   processRegistry.register("heartbeat-control-test", runHeartbeatControlTest);
   processRegistry.register("data-logger", runDataLogger);

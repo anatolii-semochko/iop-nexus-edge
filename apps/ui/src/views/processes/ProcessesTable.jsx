@@ -27,6 +27,7 @@ import TableSearchInput from '../../components/table/TableSearchInput'
 import { useExpandableRows } from '../../hooks/useExpandableRows'
 import { usePagination } from '../../hooks/usePagination'
 import ActiveBuzzerPanel from './ActiveBuzzerPanel'
+import AnnunciatorPanel from './AnnunciatorPanel'
 import DataLoggerPanel from './DataLoggerPanel'
 import HeartbeatControlPanel from './HeartbeatControlPanel'
 import HeartbeatControlTestPanel from './HeartbeatControlTestPanel'
@@ -48,6 +49,7 @@ export const KIND_PANELS = {
   'resource-monitor': ResourceMonitorPanel,
   'active-buzzer': ActiveBuzzerPanel,
   'data-logger': DataLoggerPanel,
+  'alarm-annunciator': AnnunciatorPanel,
 }
 
 const statusColor = (status) => (status === 'on' ? 'success' : 'secondary')
