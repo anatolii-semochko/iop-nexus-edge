@@ -1,4 +1,4 @@
-module github.com/anatolii-semochko/iop-nexus-edge/apps/device-service
+module github.com/anatolii-semochko/iot-nexus-edge/apps/device-service
 
 go 1.25.0
 

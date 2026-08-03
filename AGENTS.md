@@ -4093,8 +4093,8 @@ context and the Makefile's version-drift check). Reused as a markdown
 link target it breaks on GitHub in a non-obvious way: a target project
 lives in its own separate repo, so a relative link like `../nexus-edge`
 resolves against *that repo's own* blob URL - GitHub reads
-`.../iop-nexus-edge-aquarium/blob/main/README.md` + `../nexus-edge` as
-`.../iop-nexus-edge-aquarium/blob/nexus-edge`, i.e. "nexus-edge" gets
+`.../iot-nexus-edge-aquarium/blob/main/README.md` + `../nexus-edge` as
+`.../iot-nexus-edge-aquarium/blob/nexus-edge`, i.e. "nexus-edge" gets
 interpreted as a *branch name inside the aquarium repo*, not a path to
 a different one. User caught this by the resulting broken URL showing
 up in the rendered README.
@@ -4114,13 +4114,13 @@ that generated the project.
 Same fix applied by hand to the two already-generated target projects
 (`nexus-edge-aquarium/README.md`, `nexus-edge-smart-house/README.md`) -
 their `NEXUS_EDGE_SOURCE_PATH`-derived `../nexus-edge` links replaced
-with the same `https://github.com/anatolii-semochko/iop-nexus-edge`
+with the same `https://github.com/anatolii-semochko/iot-nexus-edge`
 URL; regenerating them via `make new-project` wasn't an option (would
 discard real project state).
 
 Verified live: ran `scripts/new-project.sh` against a scratch target
 directory, confirmed the generated `README.md` carries the correct
-`https://github.com/anatolii-semochko/iop-nexus-edge` link and the
+`https://github.com/anatolii-semochko/iot-nexus-edge` link and the
 `.../blob/main/docs/CREATING_A_TARGET_PROJECT.md` doc link, `sh -n`
 clean, scratch directory removed afterward.
 

@@ -77,7 +77,7 @@ NEXUS_EDGE_SOURCE_PATH=$(realpath --relative-to="$TARGET_DIR" "$NEXUS_EDGE_DIR" 
 # there is no remote, e.g. a from-scratch tarball checkout).
 NEXUS_EDGE_REPO_URL=$(git -C "$NEXUS_EDGE_DIR" remote get-url origin 2>/dev/null | sed -E 's#^git@([^:]+):#https://\1/#; s#\.git$##')
 if [ -z "$NEXUS_EDGE_REPO_URL" ]; then
-  NEXUS_EDGE_REPO_URL="https://github.com/anatolii-semochko/iop-nexus-edge"
+  NEXUS_EDGE_REPO_URL="https://github.com/anatolii-semochko/iot-nexus-edge"
 fi
 
 echo "Generating '$PROJECT_NAME' (slug: $SLUG) at $TARGET_DIR ..."

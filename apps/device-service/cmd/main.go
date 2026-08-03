@@ -5,9 +5,9 @@ import (
 
 	"github.com/edgexfoundry/device-sdk-go/v4/pkg/startup"
 
-	deviceservice "github.com/anatolii-semochko/iop-nexus-edge/apps/device-service"
-	"github.com/anatolii-semochko/iop-nexus-edge/apps/device-service/internal/driver"
-	"github.com/anatolii-semochko/iop-nexus-edge/apps/device-service/internal/extrares"
+	deviceservice "github.com/anatolii-semochko/iot-nexus-edge/apps/device-service"
+	"github.com/anatolii-semochko/iot-nexus-edge/apps/device-service/internal/driver"
+	"github.com/anatolii-semochko/iot-nexus-edge/apps/device-service/internal/extrares"
 )
 
 const serviceName = "device-nexus-edge"
