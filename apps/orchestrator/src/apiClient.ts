@@ -36,9 +36,15 @@ export interface ProcessRecord {
     cpuMax?: number;
     ramMax?: number;
     diskMax?: number;
+    // Celsius, not a percentage like the three above - read from
+    // /sys/class/thermal (resourceMonitor.ts). Absent when no thermal zone
+    // is readable, e.g. a dev machine without container access to host
+    // sysfs - same "0/undefined disables the check" rule still applies.
+    tempMax?: number;
     cpuWarnMax?: number;
     ramWarnMax?: number;
     diskWarnMax?: number;
+    tempWarnMax?: number;
     // temperature-control/temperature-monitor role -> deviceId mapping
     // (AGENTS_TO_DO.md's 2026-07-27 Device/Node refactor, roadmap Phase 4.1) - a
     // single `device_id` above no longer says enough once the sensor and
@@ -98,6 +104,11 @@ export interface ProcessMetrics {
   cpu: number;
   ram: number;
   disk: number;
+  // Celsius. Absent when no thermal zone was readable (see
+  // resourceMonitor.ts's readTempCelsius) - omitted from the payload
+  // entirely rather than sent as 0, which would read as "freezing" instead
+  // of "unknown".
+  temp?: number;
 }
 
 export type MessageType = "warning" | "error" | "message";

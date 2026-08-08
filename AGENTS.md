@@ -1277,6 +1277,33 @@ subsystems (GPU, bluetooth, USB, battery, etc.) for a project whose stated
 target is Raspberry-Pi minimalism — not worth the weight for three numbers
 Node already exposes directly.
 
+**Temperature (`temp`, added 2026-08-08)**: same no-dependency stance,
+extended rather than abandoned once the question came up — reads
+`/sys/class/thermal/thermal_zone*/temp` directly (`readTempCelsius` in
+`resourceMonitor.ts`), no `systeminformation`, no `vcgencmd` shellout. On
+Raspberry Pi OS the kernel's own `bcm2835_thermal` driver exposes the SoC
+temperature at `thermal_zone0` with no extra tooling; a generic x86 dev
+machine can expose several zones (`acpitz`, `x86_pkg_temp`, `nvme`,
+`iwlwifi`, ...) with no single well-known "the CPU" index, so the reading
+reported is the **highest value across every zone found**, keeping this a
+single number like the other three metrics and matching the existing
+critical/warning model's own framing ("is anything on this host over
+threshold"), not per-sensor alerting. Requires the container to see host
+sysfs, which is Docker's default behavior, not a bind-mount this project
+adds — if `/sys/class/thermal` isn't present or isn't readable at all
+(most likely on a dev machine without that access), `readTempCelsius`
+returns `undefined`, `ProcessMetrics.temp` is omitted from that tick's
+payload entirely (not sent as `0`, which would misread as "freezing"), and
+every temp-related critical/warning/message check below is skipped for
+that tick only — the same "absent, not defaulted" treatment CPU's own
+first-tick-after-restart case already gets. Unlike the other three
+metrics, `tempMax`/`tempWarnMax` are degrees Celsius, not a percentage —
+seeded defaults (migration `..._add-temp-thresholds-to-resource-monitor`)
+are 70/80°C, taken from the Raspberry Pi SoC's own documented throttling
+points (soft throttle ~80°C, hard throttle steps at 85°C) rather than an
+arbitrary round number, since this project's actual deployment target is a
+Pi.
+
 **Container vs. host accuracy** (a real open question, not silently
 assumed): CPU/RAM read from `/proc` inside the orchestrator container
 reflect the real *host* values, and disk usage from the container's own
@@ -1293,12 +1320,12 @@ not attempted here).
 generic `PATCH /processes/:id/config` every other kind's config already
 uses (the handler merges whatever fields a request body actually contains,
 rather than hardcoding `min`/`max`). Two tiers per metric: `cpuMax`/
-`ramMax`/`diskMax` (error — red row, the original `critical` concept) and
-`cpuWarnMax`/`ramWarnMax`/`diskWarnMax` (warning — yellow row, a second,
-less severe Redis flag added alongside `critical`). **A threshold of 0 (or
-omitted) disables that specific check** — per metric, independently, not
-an all-or-nothing gate on the whole tick the way temperature-monitor's
-`min`/`max` are.
+`ramMax`/`diskMax`/`tempMax` (error — red row, the original `critical`
+concept) and `cpuWarnMax`/`ramWarnMax`/`diskWarnMax`/`tempWarnMax`
+(warning — yellow row, a second, less severe Redis flag added alongside
+`critical`). **A threshold of 0 (or omitted) disables that specific
+check** — per metric, independently, not an all-or-nothing gate on the
+whole tick the way temperature-monitor's `min`/`max` are.
 
 Live readings **are** pushed through the WebSocket feed, same as `status`/
 `critical`/`warning` — though the mechanism underneath changed in section
@@ -1343,13 +1370,17 @@ threshold, the state, and the row color.
 per process) since disk usage barely moves and `statfsSync` gains nothing
 from being called every second.
 
-**UI** (`apps/ui/src/views/processes/ResourceMonitorPanel.jsx`): three
-rows, not three processes — CPU/RAM/Disk, each with its live % in large
-type, a "Warning Max%" `NumericStepper` and, right after it, an "Error
-Max%" one (step 1, same component `TemperatureProcessPanel` uses, clamped
-`min={0} max={100}` here since these are percentages - see section 7's
-`NumericStepper` entry for the hold-to-repeat mechanism itself) for that
-metric's own two thresholds. The row itself (`ProcessesList.jsx`) picks
+**UI** (`apps/ui/src/views/processes/ResourceMonitorPanel.jsx`): four
+rows, not four processes — CPU/RAM/Disk/Temp, each with its live reading in
+large type, a "Warning Max" `NumericStepper` and, right after it, an
+"Error Max" one (step 1, same component `TemperatureProcessPanel` uses -
+see section 7's `NumericStepper` entry for the hold-to-repeat mechanism
+itself) for that metric's own two thresholds. `METRIC_ROWS` carries each
+row's own `unit`/`stepperMax` rather than hardcoding `%`/100 everywhere,
+since Temp's unit is °C and its steppers are clamped `min={0} max={150}`
+instead of the `100` the three percentages use - a live reading of
+`undefined` (Temp on a host with no readable thermal zone) renders as `-`,
+same placeholder the panel already used for CPU's own first-tick gap. The row itself (`ProcessesList.jsx`) picks
 `danger`/red over `warning`/yellow over nothing, same precedence as the
 orchestrator's own critical-wins-over-warning logic — confirmed live by
 dropping `cpuMax` to 1% (row turns red), then raising it back above the
@@ -1365,9 +1396,14 @@ readable against the row's own tinted `danger`/`warning` background rather
 than assuming a plain one.
 
 **1-minute levels chart** (`ResourceLevelsChart.jsx`, sitting to the right
-of the three rows): a rolling 60-second CPU/RAM/Disk line chart, one hand-
-rolled inline SVG, not a charting dependency - same "Node built-ins/no
-extra package" call already made for the metrics themselves. There is no
+of the four rows): a rolling 60-second CPU/RAM/Disk/Temp line chart, one
+hand-rolled inline SVG, not a charting dependency - same "Node built-ins/no
+extra package" call already made for the metrics themselves. Temp's line
+shares the same 0-100 y-axis as the three percentages despite being °C, not
+a second scale — this project's Raspberry Pi target throttles around 80°C,
+comfortably inside that range for normal operation, so the shared axis
+reads fine in practice; a sample with no `temp` (thermal zone unreadable)
+just draws as 0 on that one line, same as any other undefined key would. There is no
 server-side history endpoint; the chart is fed purely from the panel's own
 `useProcessLiveState` subscription (the same live feed that already drives
 `metrics` for the three rows), buffered client-side into a `history` array

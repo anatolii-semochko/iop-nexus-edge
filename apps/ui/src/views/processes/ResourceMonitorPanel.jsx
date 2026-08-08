@@ -7,9 +7,14 @@ import NumericStepper from '../devices/NumericStepper'
 import ResourceLevelsChart, { MAX_SAMPLES, ResourceLevelsChartLegend } from './ResourceLevelsChart'
 
 const METRIC_ROWS = [
-  { key: 'cpu', warnKey: 'cpuWarnMax', maxKey: 'cpuMax', label: 'CPU' },
-  { key: 'ram', warnKey: 'ramWarnMax', maxKey: 'ramMax', label: 'RAM' },
-  { key: 'disk', warnKey: 'diskWarnMax', maxKey: 'diskMax', label: 'Disk' },
+  { key: 'cpu', warnKey: 'cpuWarnMax', maxKey: 'cpuMax', label: 'CPU', unit: '%', stepperMax: 100 },
+  { key: 'ram', warnKey: 'ramWarnMax', maxKey: 'ramMax', label: 'RAM', unit: '%', stepperMax: 100 },
+  { key: 'disk', warnKey: 'diskWarnMax', maxKey: 'diskMax', label: 'Disk', unit: '%', stepperMax: 100 },
+  // Celsius, not a percentage like the three above - readTempCelsius
+  // (resourceMonitor.ts) is absent (not 0) on hosts with no readable
+  // thermal zone, e.g. a dev machine without container access to host
+  // sysfs, so `value` here can be `undefined` same as the others.
+  { key: 'temp', warnKey: 'tempWarnMax', maxKey: 'tempMax', label: 'Temp', unit: '°C', stepperMax: 150 },
 ]
 
 // A threshold of 0 (or unset) disables that check - same rule as the
@@ -26,13 +31,16 @@ const zoneFor = (value, warnMax, errorMax) => {
 
 /**
  * Expandable-row detail for the "resource-monitor" process kind (AGENTS.md
- * section 21) - host CPU/RAM/disk load, three rows sharing one panel (one
- * permanent process with three metrics, not three separate processes).
- * Two thresholds per metric (percentages, both writing to the process's own
- * config via PATCH /processes/:id/config, same as TemperatureProcessPanel's
- * min/max) - Warning Max% (cpuWarnMax/ramWarnMax/diskWarnMax) and Error
- * Max% (cpuMax/ramMax/diskMax), reusing NumericStepper as the +/- control
- * for both.
+ * section 21) - host CPU/RAM/disk/temp load, four rows sharing one panel
+ * (one permanent process with four metrics, not four separate processes).
+ * Two thresholds per metric, both writing to the process's own config via
+ * PATCH /processes/:id/config, same as TemperatureProcessPanel's min/max -
+ * Warning Max (cpuWarnMax/ramWarnMax/diskWarnMax/tempWarnMax) and Error Max
+ * (cpuMax/ramMax/diskMax/tempMax), reusing NumericStepper as the +/-
+ * control for both. CPU/RAM/Disk are percentages (0-100); Temp is degrees
+ * Celsius (readTempCelsius in resourceMonitor.ts, absent rather than 0 on a
+ * host with no readable thermal zone) - each row's own `unit`/`stepperMax`
+ * in METRIC_ROWS accounts for that difference instead of hardcoding `%`.
  *
  * Live % values arrive over the shared WebSocket feed (useProcessLiveState,
  * same as status/critical/warning elsewhere - AGENTS.md section 24), not a
@@ -80,7 +88,7 @@ const ResourceMonitorPanel = ({ process, onConfigChange }) => {
   return (
     <div className="p-3 pt-0 d-flex align-items-stretch gap-4">
       <div>
-        {METRIC_ROWS.map(({ key, warnKey, maxKey, label }) => {
+        {METRIC_ROWS.map(({ key, warnKey, maxKey, label, unit, stepperMax }) => {
           const value = metrics?.[key]
           const zone = zoneFor(value, process.config[warnKey], process.config[maxKey])
           return (
@@ -96,26 +104,26 @@ const ResourceMonitorPanel = ({ process, onConfigChange }) => {
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  {value !== undefined ? `${value.toFixed(1)}%` : '-'}
+                  {value !== undefined ? `${value.toFixed(1)}${unit}` : '-'}
                 </div>
               </CCol>
               <CCol xs="auto">
-                <div className="text-body-secondary small">Warning Max%</div>
+                <div className="text-body-secondary small">Warning Max{unit}</div>
                 <NumericStepper
                   value={process.config[warnKey] ?? 0}
                   step={1}
                   min={0}
-                  max={100}
+                  max={stepperMax}
                   onCommit={(v) => handleCommit(warnKey, v)}
                 />
               </CCol>
               <CCol xs="auto">
-                <div className="text-body-secondary small">Error Max%</div>
+                <div className="text-body-secondary small">Error Max{unit}</div>
                 <NumericStepper
                   value={process.config[maxKey] ?? 0}
                   step={1}
                   min={0}
-                  max={100}
+                  max={stepperMax}
                   onCommit={(v) => handleCommit(maxKey, v)}
                 />
               </CCol>
