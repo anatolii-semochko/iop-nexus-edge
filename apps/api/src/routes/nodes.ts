@@ -1,5 +1,7 @@
 import type { FastifyInstance } from "fastify";
 
+import { requireAuth } from "../auth.js";
+import { logCommand } from "../commandLog.js";
 import { pool } from "../db.js";
 import * as heartbeatControl from "../heartbeatControl.js";
 import type { HeartbeatControlConfig } from "../heartbeatControl.js";
@@ -15,6 +17,12 @@ interface NodeRow {
   last_heartbeat_at: string | null;
   group_id: number | null;
   heartbeat_control: HeartbeatControlConfig;
+  // Partial physical network (AGENTS_TO_DO.md, 2026-08-09/10) - the
+  // switching granularity for every node-attached device at once (see
+  // routes/devices.ts's resolveEdgexName) - a device ignores its own
+  // `simulated` column entirely once it has a `node_id`.
+  simulated: boolean;
+  has_simulated_twin: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -40,8 +48,15 @@ async function withLiveHeartbeat(node: NodeRow) {
 // view (NodesList.jsx) needs it for every row up front, unlike the
 // per-process Tab/Message Group membership (routes/processes.ts), which
 // is only fetched on-demand when a Settings popup opens.
+// `has_simulated_twin` (2026-08-09/10) - computed here rather than
+// forcing NodesList.jsx to fetch every node's devices just to know
+// whether its own simulated switch should be enabled (that list is
+// only fetched today for the per-row detail expansion, not up front for
+// every row - see DevicesList.jsx's own SELECT_DEVICE_LIST_BASE for the
+// same "resolve everything the list view needs in one query" idiom).
 const SELECT_NODE = `
-  SELECT n.*, g.name AS group_name
+  SELECT n.*, g.name AS group_name,
+    EXISTS(SELECT 1 FROM devices d WHERE d.node_id = n.id AND d.edgex_device_name_simulated IS NOT NULL) AS has_simulated_twin
   FROM nodes n
   LEFT JOIN node_groups g ON g.id = n.group_id
 `;
@@ -95,6 +110,50 @@ export async function nodeRoutes(app: FastifyInstance): Promise<void> {
       );
       if (!result.rows[0]) return reply.code(404).send({ error: "node not found" });
       return findNode(request.params.id);
+    },
+  );
+
+  // Partial physical network (AGENTS_TO_DO.md, 2026-08-09/10) - toggles
+  // this node's simulated redirect for every device attached to it at
+  // once (the switching granularity confirmed with the user - a device
+  // never drifts out of sync with its own physical neighbors). Rejected
+  // when not one single child device actually has a simulated twin
+  // provisioned - otherwise this would silently be a no-op (resolveEdgexName,
+  // routes/devices.ts, falls back to the physical name for any device
+  // with no twin), which would look like a bug, not a deliberate choice.
+  // No `log_command` row (that table has no `node_id` column - a bigger
+  // schema change not attempted in this pass) - `value` carries the
+  // node's own name instead, for at least some audit context.
+  app.patch<{ Params: { id: string }; Body: { simulated: boolean } }>(
+    "/nodes/:id/simulated",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const node = await findNode(request.params.id);
+      if (!node) return reply.code(404).send({ error: "node not found" });
+
+      if (request.body.simulated) {
+        const twinCount = await pool.query<{ count: string }>(
+          "SELECT count(*) FROM devices WHERE node_id = $1 AND edgex_device_name_simulated IS NOT NULL",
+          [request.params.id],
+        );
+        if (Number(twinCount.rows[0].count) === 0) {
+          return reply.code(409).send({ error: "no device on this node has a simulated twin provisioned" });
+        }
+      }
+
+      await logCommand({
+        action: request.body.simulated ? "simulated-on" : "simulated-off",
+        value: { nodeId: node.id, nodeName: node.name },
+        source: "api",
+        actorUserId: request.user.sub,
+      });
+
+      const result = await pool.query<{ id: number }>(
+        "UPDATE nodes SET simulated = $1, updated_at = now() WHERE id = $2 RETURNING id",
+        [request.body.simulated, request.params.id],
+      );
+      if (!result.rows[0]) return reply.code(404).send({ error: "node not found" });
+      return withLiveHeartbeat(await findNode(request.params.id));
     },
   );
 

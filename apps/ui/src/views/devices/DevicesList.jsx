@@ -22,6 +22,7 @@ import { api } from '../../api/client'
 import GroupsConfigModal from '../../components/GroupsConfigModal'
 import IconButton from '../../components/IconButton'
 import ResetFiltersButton from '../../components/ResetFiltersButton'
+import Switch from '../../components/Switch'
 import ExpandAllToggleButton from '../../components/table/ExpandAllToggleButton'
 import ExpandToggleButton from '../../components/table/ExpandToggleButton'
 import { useExpandableRows } from '../../hooks/useExpandableRows'
@@ -140,6 +141,15 @@ const DevicesList = () => {
       .then(setDeviceGroups)
       .catch((err) => setError(err.message))
 
+  // Partial physical network (AGENTS_TO_DO.md, 2026-08-09/10) - standalone
+  // devices only (node-attached ones switch via their node instead, see
+  // NodesList.jsx - the server rejects this call for those anyway).
+  const handleToggleSimulated = (device) =>
+    api
+      .setDeviceSimulated(device.id, !device.simulated)
+      .then(reloadDevices)
+      .catch((err) => setError(err.message))
+
   useEffect(() => {
     reloadDevices()
     reloadDeviceGroups()
@@ -253,21 +263,34 @@ const DevicesList = () => {
                     </CTableRow>
                   </CTableHead>
                   <CTableBody>
-                    {pageItems.map((device) => (
+                    {pageItems.map((device) => {
+                      // Same `border-bottom-0` idiom ProcessesTable.jsx's own
+                      // expanded row already uses (AGENTS_TO_DO.md, 2026-08-10
+                      // "візуальна консистентність"). `effectivelySimulated`
+                      // - a node-attached device has no switch of its own
+                      // (see below) but is still visually "simulated" right
+                      // now whenever its parent node is (`node_simulated`,
+                      // from SELECT_DEVICE_LIST_BASE's own join) - the row
+                      // highlight should reflect what's actually resolving,
+                      // not just this row's own `simulated` column.
+                      const expandedRow = isExpanded(device.id)
+                      const noBorderWhenExpanded = expandedRow ? 'border-bottom-0' : undefined
+                      const effectivelySimulated = device.node_id === null ? device.simulated : device.node_simulated
+                      return (
                       <React.Fragment key={device.id}>
-                        <CTableRow>
-                          <CTableDataCell>
+                        <CTableRow color={effectivelySimulated ? 'warning' : undefined}>
+                          <CTableDataCell className={noBorderWhenExpanded}>
                             <Link to={`/devices/${device.id}`}>{device.name}</Link>
                           </CTableDataCell>
-                          <CTableDataCell>{device.type}</CTableDataCell>
-                          <CTableDataCell>{device.node_name ?? '-'}</CTableDataCell>
-                          <CTableDataCell>
+                          <CTableDataCell className={noBorderWhenExpanded}>{device.type}</CTableDataCell>
+                          <CTableDataCell className={noBorderWhenExpanded}>{device.node_name ?? '-'}</CTableDataCell>
+                          <CTableDataCell className={noBorderWhenExpanded}>
                             <CBadge color={backendColor(device.backend)}>{device.backend}</CBadge>
                           </CTableDataCell>
-                          <CTableDataCell>
+                          <CTableDataCell className={noBorderWhenExpanded}>
                             <StatusBadge device={device} />
                           </CTableDataCell>
-                          <CTableDataCell className="text-end">
+                          <CTableDataCell className={`text-end ${noBorderWhenExpanded ?? ''}`}>
                             <div className="d-flex justify-content-end align-items-center gap-1 flex-nowrap">
                               <IconButton
                                 icon={cilSettings}
@@ -276,6 +299,22 @@ const DevicesList = () => {
                                 onClick={() => setSettingsDevice(device)}
                                 ariaLabel={`${device.name} settings`}
                               />
+                              {device.node_id === null && (
+                                <Switch
+                                  checked={device.simulated}
+                                  onChange={() => handleToggleSimulated(device)}
+                                  disabled={!device.simulated && !device.edgex_device_name_simulated}
+                                  activeColor="#e55353"
+                                  inactiveColor="#d3d3d3"
+                                  ariaLabel={
+                                    device.simulated
+                                      ? `${device.name} is simulated - switch to physical`
+                                      : device.edgex_device_name_simulated
+                                        ? `${device.name} is physical - switch to simulated`
+                                        : `${device.name} has no simulated twin provisioned`
+                                  }
+                                />
+                              )}
                               <ExpandToggleButton
                                 expanded={isExpanded(device.id)}
                                 onClick={() => toggleOne(device.id)}
@@ -283,15 +322,16 @@ const DevicesList = () => {
                             </div>
                           </CTableDataCell>
                         </CTableRow>
-                        {isExpanded(device.id) && (
-                          <CTableRow>
+                        {expandedRow && (
+                          <CTableRow color={effectivelySimulated ? 'warning' : undefined}>
                             <CTableDataCell colSpan={6} className="p-0">
                               <DeviceDetailRow device={device} />
                             </CTableDataCell>
                           </CTableRow>
                         )}
                       </React.Fragment>
-                    ))}
+                      )
+                    })}
                   </CTableBody>
                 </CTable>
                 <TablePagination

@@ -40,9 +40,44 @@ interface DeviceRow {
   location: string | null;
   backend: "physical" | "virtual";
   edgex_device_name: string | null;
+  // Partial physical network (AGENTS_TO_DO.md, 2026-08-09/10) - a second,
+  // opt-in EdgeX registration this device can be redirected to. `simulated`
+  // only has independent meaning for a standalone device (`node_id` null);
+  // a node-attached device's *effective* simulated-ness always comes from
+  // its own node instead (`node_simulated` below, joined in by every query
+  // that needs to resolve which name is currently active) - see
+  // `resolveEdgexName`.
+  simulated: boolean;
+  edgex_device_name_simulated: string | null;
   capabilities: DeviceCapabilities;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * Which of a device's two possible EdgeX registrations is currently active -
+ * the redirect this entire simulated-mode feature is about. A node-attached
+ * device ignores its own `simulated` column entirely and defers to its
+ * node's (the node is the switching granularity there, confirmed with the
+ * user - a device doesn't drift out of sync with its own physical
+ * neighbors); a standalone device (`node_id` null) uses its own. Falls back
+ * to the physical name whenever no simulated twin is actually provisioned
+ * (`edgex_device_name_simulated` null) - "opt-in" needs no separate flag,
+ * simulated mode simply has nothing to redirect to for a device that was
+ * never given a twin, same as if it were never toggled at all.
+ */
+export function resolveEdgexName(row: {
+  node_id: number | null;
+  simulated: boolean;
+  node_simulated?: boolean | null;
+  edgex_device_name: string | null;
+  edgex_device_name_simulated: string | null;
+}): string | null {
+  const effectiveSimulated = row.node_id !== null ? (row.node_simulated ?? false) : row.simulated;
+  if (effectiveSimulated && row.edgex_device_name_simulated) {
+    return row.edgex_device_name_simulated;
+  }
+  return row.edgex_device_name;
 }
 
 interface NodeRow {
@@ -52,6 +87,7 @@ interface NodeRow {
 
 interface DeviceListRow extends DeviceRow {
   node_name: string | null;
+  node_simulated: boolean | null;
   device_group_ids: number[];
 }
 
@@ -62,18 +98,28 @@ interface DeviceListRow extends DeviceRow {
 // filter for every row on every load, a hotter path than an admin
 // group-list screen's tens-of-rows fetch.
 const SELECT_DEVICE_LIST_BASE = `
-  SELECT d.*, n.name AS node_name,
+  SELECT d.*, n.name AS node_name, n.simulated AS node_simulated,
     COALESCE(array_agg(dg.device_group_id) FILTER (WHERE dg.device_group_id IS NOT NULL), '{}') AS device_group_ids
   FROM devices d
   LEFT JOIN nodes n ON n.id = d.node_id
   LEFT JOIN device_device_groups dg ON dg.device_id = d.id
 `;
 
+// Same node-join every other device query needs to resolve which EdgeX
+// registration is actually active (resolveEdgexName) - separate from
+// SELECT_DEVICE_LIST_BASE above since call sites here don't need the
+// Device Group aggregation/GROUP BY that one carries.
+const SELECT_DEVICE_WITH_NODE = `
+  SELECT d.*, n.simulated AS node_simulated
+  FROM devices d
+  LEFT JOIN nodes n ON n.id = d.node_id
+`;
+
 export async function deviceRoutes(app: FastifyInstance): Promise<void> {
   // List view: registry metadata plus EdgeX admin/operating state, fetched
   // once for every device.
   app.get("/devices", async () => {
-    const result = await pool.query<DeviceListRow>(`${SELECT_DEVICE_LIST_BASE} GROUP BY d.id, n.name ORDER BY d.name`);
+    const result = await pool.query<DeviceListRow>(`${SELECT_DEVICE_LIST_BASE} GROUP BY d.id, n.name, n.simulated ORDER BY d.name`);
 
     let edgexByName = new Map<string, EdgeXDeviceStatus>();
     try {
@@ -82,10 +128,13 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
       app.log.warn({ err }, "failed to fetch EdgeX device list; returning registry data without live status");
     }
 
-    return result.rows.map((device) => ({
-      ...device,
-      edgex: device.edgex_device_name ? (edgexByName.get(device.edgex_device_name) ?? null) : null,
-    }));
+    return result.rows.map((device) => {
+      const resolvedEdgexName = resolveEdgexName(device);
+      return {
+        ...device,
+        edgex: resolvedEdgexName ? (edgexByName.get(resolvedEdgexName) ?? null) : null,
+      };
+    });
   });
 
   // Detail view: registry metadata, the device's live value (read straight
@@ -106,8 +155,9 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
     let valueType: string | null = null;
     let units: string | null = null;
     let dualState: dualDevicesModel.DeviceState | null = null;
-    if (device.edgex_device_name && device.capabilities.edgexResource) {
-      const edgexDeviceName = device.edgex_device_name;
+    const resolvedEdgexName = resolveEdgexName(device);
+    if (resolvedEdgexName && device.capabilities.edgexResource) {
+      const edgexDeviceName = resolvedEdgexName;
       const edgexResource = device.capabilities.edgexResource;
       try {
         const reading = await readValue(edgexDeviceName, edgexResource);
@@ -165,7 +215,7 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const state = await dualDevicesModel.setManualActive(device.id, value);
-      if (!(await writeOrReject(reply, device.edgex_device_name, device.capabilities.edgexResource, value))) return;
+      if (!(await writeOrReject(reply, device.resolvedEdgexName, device.capabilities.edgexResource, value))) return;
       return { status: "ok", state };
     },
   );
@@ -196,7 +246,7 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
 
       await logCommand({ deviceId: device.id, action: "simulate", value, source: "api", actorUserId: request.user.sub });
 
-      if (!(await writeOrReject(reply, device.edgex_device_name, device.capabilities.edgexResource, value))) return;
+      if (!(await writeOrReject(reply, device.resolvedEdgexName, device.capabilities.edgexResource, value))) return;
       // No Dual Devices Model state for a readOnly device, but the new
       // reading still needs to reach the state:* cache and nexus.events -
       // otherwise this device could never do what it exists to test
@@ -247,7 +297,7 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
 
     const state = await dualDevicesModel.setActive(device.id, value);
     if (state.mode === "AUTO") {
-      if (!(await writeOrReject(reply, device.edgex_device_name, device.capabilities.edgexResource, value))) return;
+      if (!(await writeOrReject(reply, device.resolvedEdgexName, device.capabilities.edgexResource, value))) return;
     }
     return { status: "ok", state };
   });
@@ -273,7 +323,7 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
         if (!forbidden.ok) {
           return reply.code(409).send({ error: "forbidden state", reason: forbidden.reason });
         }
-        if (!(await writeOrReject(reply, device.edgex_device_name, device.capabilities.edgexResource, state.valueAuto))) return;
+        if (!(await writeOrReject(reply, device.resolvedEdgexName, device.capabilities.edgexResource, state.valueAuto))) return;
       }
       return { status: "ok", state };
     },
@@ -292,11 +342,12 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
     if (!device) {
       return reply.code(404).send({ error: "device not found" });
     }
-    if (!device.edgex_device_name || !device.capabilities.edgexResource) {
+    const resolvedEdgexName = resolveEdgexName(device);
+    if (!resolvedEdgexName || !device.capabilities.edgexResource) {
       return reply.code(400).send({ error: `device '${device.name}' has no EdgeX resource to read` });
     }
 
-    const reading = await readValue(device.edgex_device_name, device.capabilities.edgexResource);
+    const reading = await readValue(resolvedEdgexName, device.capabilities.edgexResource);
     await logReading({ deviceId: device.id, value: reading.value, source: "data-logger" });
     await dataLoggerControl.touchLastLoggedAt(device.id);
     return { status: "ok", value: reading.value };
@@ -371,6 +422,46 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  // Partial physical network (AGENTS_TO_DO.md, 2026-08-09/10) - toggles
+  // this *standalone* device's own simulated redirect. Node is the
+  // switching granularity for a node-attached device (confirmed with the
+  // user) - rejected here with a pointer to the node-level route instead,
+  // not silently accepted and ignored (this device would otherwise still
+  // resolve through its node regardless of what this column says -
+  // resolveEdgexName never even reads it for a node-attached device -
+  // better to fail loudly than let a client believe a no-op call worked).
+  app.patch<{ Params: { id: string }; Body: { simulated: boolean } }>(
+    "/devices/:id/simulated",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const device = await findDevice(request.params.id);
+      if (!device) return reply.code(404).send({ error: "device not found" });
+
+      if (device.node_id !== null) {
+        return reply
+          .code(409)
+          .send({ error: "device belongs to a node - toggle the node's own simulated mode instead" });
+      }
+      if (request.body.simulated && !device.edgex_device_name_simulated) {
+        return reply.code(409).send({ error: "device has no simulated twin provisioned" });
+      }
+
+      await logCommand({
+        deviceId: device.id,
+        action: request.body.simulated ? "simulated-on" : "simulated-off",
+        source: "api",
+        actorUserId: request.user.sub,
+      });
+
+      const result = await pool.query<{ id: number }>(
+        "UPDATE devices SET simulated = $1, updated_at = now() WHERE id = $2 RETURNING id",
+        [request.body.simulated, request.params.id],
+      );
+      if (!result.rows[0]) return reply.code(404).send({ error: "device not found" });
+      return findDeviceListRow(request.params.id);
+    },
+  );
+
   // Renaming, from the same per-device Settings popup as the group/node
   // assignment above (AGENTS_TO_DO.md, 2026-08-01 filter-row/Config
   // follow-up). `devices.name` is UNIQUE, same 409 handling as every
@@ -408,8 +499,12 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
   });
 }
 
-async function findDevice(id: string): Promise<DeviceRow | undefined> {
-  const result = await pool.query<DeviceRow>("SELECT * FROM devices WHERE id = $1", [id]);
+interface DeviceRowWithNode extends DeviceRow {
+  node_simulated: boolean | null;
+}
+
+async function findDevice(id: string): Promise<DeviceRowWithNode | undefined> {
+  const result = await pool.query<DeviceRowWithNode>(`${SELECT_DEVICE_WITH_NODE} WHERE d.id = $1`, [id]);
   return result.rows[0];
 }
 
@@ -419,14 +514,17 @@ function isUniqueViolation(err: unknown): boolean {
 
 async function findDeviceListRow(id: string): Promise<DeviceListRow | undefined> {
   const result = await pool.query<DeviceListRow>(
-    `${SELECT_DEVICE_LIST_BASE} WHERE d.id = $1 GROUP BY d.id, n.name`,
+    `${SELECT_DEVICE_LIST_BASE} WHERE d.id = $1 GROUP BY d.id, n.name, n.simulated`,
     [id],
   );
   return result.rows[0];
 }
 
-async function findDeviceByNodeAndName(nodeId: number, name: string): Promise<DeviceRow | undefined> {
-  const result = await pool.query<DeviceRow>("SELECT * FROM devices WHERE node_id = $1 AND name = $2", [nodeId, name]);
+async function findDeviceByNodeAndName(nodeId: number, name: string): Promise<DeviceRowWithNode | undefined> {
+  const result = await pool.query<DeviceRowWithNode>(
+    `${SELECT_DEVICE_WITH_NODE} WHERE d.node_id = $1 AND d.name = $2`,
+    [nodeId, name],
+  );
   return result.rows[0];
 }
 
@@ -468,17 +566,18 @@ async function writeOrReject(
 async function requireEdgeXDevice(
   id: string,
   reply: { code: (statusCode: number) => { send: (payload: unknown) => void } },
-): Promise<(DeviceRow & { edgex_device_name: string }) | undefined> {
+): Promise<(DeviceRowWithNode & { resolvedEdgexName: string }) | undefined> {
   const device = await findDevice(id);
   if (!device) {
     reply.code(404).send({ error: "device not found" });
     return undefined;
   }
-  if (!device.edgex_device_name) {
+  const resolvedEdgexName = resolveEdgexName(device);
+  if (!resolvedEdgexName) {
     reply.code(409).send({ error: "device is not backed by EdgeX" });
     return undefined;
   }
-  return device as DeviceRow & { edgex_device_name: string };
+  return { ...device, resolvedEdgexName };
 }
 
 /**
@@ -508,10 +607,11 @@ async function checkForbidden(
   await Promise.all(
     devicesNeededFor(rules, device.name).map(async (name) => {
       const other = await findDeviceByNodeAndName(nodeId, name);
-      if (!other || !other.edgex_device_name || !other.capabilities.edgexResource) {
+      const otherResolvedName = other ? resolveEdgexName(other) : null;
+      if (!other || !otherResolvedName || !other.capabilities.edgexResource) {
         return;
       }
-      const otherEdgexDeviceName = other.edgex_device_name;
+      const otherEdgexDeviceName = otherResolvedName;
       const otherEdgexResource = other.capabilities.edgexResource;
       currentValues[name] = await dualDevicesModel.resolveActiveValue(other.id, async () => {
         try {

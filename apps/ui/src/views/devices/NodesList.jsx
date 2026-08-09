@@ -20,6 +20,7 @@ import { cilSettings } from '@coreui/icons'
 import { api } from '../../api/client'
 import GroupsConfigModal from '../../components/GroupsConfigModal'
 import IconButton from '../../components/IconButton'
+import Switch from '../../components/Switch'
 import ResetFiltersButton from '../../components/ResetFiltersButton'
 import ExpandAllToggleButton from '../../components/table/ExpandAllToggleButton'
 import ExpandToggleButton from '../../components/table/ExpandToggleButton'
@@ -108,6 +109,17 @@ const NodesList = () => {
     api
       .listNodeGroups()
       .then(setNodeGroups)
+      .catch((err) => setError(err.message))
+
+  // Partial physical network (AGENTS_TO_DO.md, 2026-08-09/10) - toggles
+  // every device attached to this node's simulated redirect at once.
+  // Plain refetch-after-write, same as every other row mutation on this
+  // page (rename/group reassignment) - no optimistic update, this is a
+  // low-frequency admin action, not a hot path.
+  const handleToggleSimulated = (node) =>
+    api
+      .setNodeSimulated(node.id, !node.simulated)
+      .then(reloadNodes)
       .catch((err) => setError(err.message))
 
   useEffect(() => {
@@ -201,20 +213,28 @@ const NodesList = () => {
                     </CTableRow>
                   </CTableHead>
                   <CTableBody>
-                    {pageItems.map((node) => (
+                    {pageItems.map((node) => {
+                      // Same `border-bottom-0` idiom ProcessesTable.jsx's own
+                      // expanded row already uses (AGENTS_TO_DO.md, 2026-08-10
+                      // "візуальна консистентність") - removes the line
+                      // between a row and its own expansion, only while
+                      // actually expanded.
+                      const expandedRow = isExpanded(node.id)
+                      const noBorderWhenExpanded = expandedRow ? 'border-bottom-0' : undefined
+                      return (
                       <React.Fragment key={node.id}>
-                        <CTableRow>
-                          <CTableDataCell>{node.name}</CTableDataCell>
-                          <CTableDataCell>{node.type}</CTableDataCell>
-                          <CTableDataCell>{node.location ?? '-'}</CTableDataCell>
-                          <CTableDataCell>{node.group_name ?? '-'}</CTableDataCell>
-                          <CTableDataCell>
+                        <CTableRow color={node.simulated ? 'warning' : undefined}>
+                          <CTableDataCell className={noBorderWhenExpanded}>{node.name}</CTableDataCell>
+                          <CTableDataCell className={noBorderWhenExpanded}>{node.type}</CTableDataCell>
+                          <CTableDataCell className={noBorderWhenExpanded}>{node.location ?? '-'}</CTableDataCell>
+                          <CTableDataCell className={noBorderWhenExpanded}>{node.group_name ?? '-'}</CTableDataCell>
+                          <CTableDataCell className={noBorderWhenExpanded}>
                             <CBadge color={healthColor(node.health)}>{node.health}</CBadge>
                           </CTableDataCell>
-                          <CTableDataCell>
+                          <CTableDataCell className={noBorderWhenExpanded}>
                             {formatRelativeTime(node.last_heartbeat_at)}
                           </CTableDataCell>
-                          <CTableDataCell className="text-end">
+                          <CTableDataCell className={`text-end ${noBorderWhenExpanded ?? ''}`}>
                             <div className="d-flex justify-content-end align-items-center gap-1 flex-nowrap">
                               <IconButton
                                 icon={cilSettings}
@@ -223,6 +243,20 @@ const NodesList = () => {
                                 onClick={() => setSettingsNode(node)}
                                 ariaLabel={`${node.name} settings`}
                               />
+                              <Switch
+                                checked={node.simulated}
+                                onChange={() => handleToggleSimulated(node)}
+                                disabled={!node.simulated && !node.has_simulated_twin}
+                                activeColor="#e55353"
+                                inactiveColor="#d3d3d3"
+                                ariaLabel={
+                                  node.simulated
+                                    ? `${node.name} is simulated - switch to physical`
+                                    : node.has_simulated_twin
+                                      ? `${node.name} is physical - switch to simulated`
+                                      : `${node.name} has no simulated twin provisioned`
+                                }
+                              />
                               <ExpandToggleButton
                                 expanded={isExpanded(node.id)}
                                 onClick={() => toggleOne(node.id)}
@@ -230,15 +264,16 @@ const NodesList = () => {
                             </div>
                           </CTableDataCell>
                         </CTableRow>
-                        {isExpanded(node.id) && (
-                          <CTableRow>
+                        {expandedRow && (
+                          <CTableRow color={node.simulated ? 'warning' : undefined}>
                             <CTableDataCell colSpan={7} className="p-0">
                               <NodeDetailRow node={node} />
                             </CTableDataCell>
                           </CTableRow>
                         )}
                       </React.Fragment>
-                    ))}
+                      )
+                    })}
                   </CTableBody>
                 </CTable>
                 <TablePagination

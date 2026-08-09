@@ -50,6 +50,10 @@ export const api = {
     request(`/nodes/${id}/group`, { method: 'PATCH', body: JSON.stringify({ groupId }) }),
   renameNode: (id, name) =>
     request(`/nodes/${id}/name`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+  // Partial physical network (AGENTS_TO_DO.md, 2026-08-09/10) - a node
+  // switches every attached device's EdgeX redirect at once.
+  setNodeSimulated: (id, simulated) =>
+    request(`/nodes/${id}/simulated`, { method: 'PATCH', body: JSON.stringify({ simulated }) }),
   listDevices: () => request('/devices'),
   getDevice: (id) => request(`/devices/${id}`),
   // Per-device Device Group membership (multiple at once - shared devices
@@ -66,6 +70,11 @@ export const api = {
     request(`/devices/${id}/node`, { method: 'PATCH', body: JSON.stringify({ nodeId }) }),
   renameDevice: (id, name) =>
     request(`/devices/${id}/name`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+  // Same as setNodeSimulated above, for a standalone device (no node) -
+  // rejected server-side for a node-attached one (toggle the node
+  // instead).
+  setDeviceSimulated: (id, simulated) =>
+    request(`/devices/${id}/simulated`, { method: 'PATCH', body: JSON.stringify({ simulated }) }),
   // A UI write is always a manual override (Dual Devices Model MANUAL mode
   // - see AGENTS.md section 6). No `resource` param anymore (AGENTS_TO_DO.md's
   // 2026-07-27 Device/Node refactor) - a Device is atomic, exactly one value.

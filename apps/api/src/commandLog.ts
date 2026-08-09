@@ -12,7 +12,18 @@
 import { logger } from "./logger.js";
 import { pool } from "./db.js";
 
-export type DeviceCommandAction = "write" | "auto" | "release" | "simulate" | "on" | "off" | "config";
+export type DeviceCommandAction =
+  | "write"
+  | "auto"
+  | "release"
+  | "simulate"
+  | "on"
+  | "off"
+  | "config"
+  // Partial physical network (AGENTS_TO_DO.md, 2026-08-09/10) - toggling
+  // a node's or standalone device's simulated redirect.
+  | "simulated-on"
+  | "simulated-off";
 
 export interface CommandLogEntry {
   // Exactly one of deviceId/processId in practice (device actions vs

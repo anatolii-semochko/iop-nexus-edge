@@ -4689,3 +4689,145 @@ green/red color (not a generic checkbox, and not a 400 error - the
 readOnly-branch bug above was caught by this exact click). Control
 Node's own detail panel renders both metric rows with the seeded
 threshold defaults. Console clean throughout.
+
+## 48. Partial physical network - live physical/simulated redirect per Node or standalone Device
+
+AGENTS_TO_DO.md, 2026-08-09/10 - lets a Node (or a standalone Device,
+`node_id IS NULL`) be switched between its physical EdgeX identity and
+an opt-in simulated twin, **live**, from the UI. Directly revisits
+section 6's own "physical/virtual is config-time only, not a live UI
+toggle... nobody actually needs day-to-day" call - a second real need
+showed up (dev/prod bench-testing: some nodes physically on the bench,
+others simulated, switching which is which without a redeploy) - but
+does **not** touch that flag or `apps/device-service`'s own config-time
+`backend` resolution at all. This is a deliberately separate, additive
+axis living entirely in `apps/api` - `backend.go`'s own hot-swap-safety
+reasoning stays exactly as valid as it always was for what it actually
+governs.
+
+**Why not two Postgres device rows** (the earliest shape considered):
+would double Node/Device Group membership, fragment
+`log_command`/`log_device` history across a switch, and force every
+list view to somehow show "which of these two rows is the *real* one"
+right now. Real finding that made the alternative cheap instead:
+`dualDevicesModel.publishReading`/every other bus-facing call already
+keys everything off the stable Postgres `device.id`, never the EdgeX
+device name - nothing downstream (UI, the live WS feed, a process's own
+`apiClient.getDevice(id)`) has ever seen an EdgeX name at all. So one
+row, two possible EdgeX identities, redirect only where the name is
+actually resolved:
+
+- **Schema** (migration `1690000000048_add-simulated-mode`):
+  `nodes.simulated boolean`, `devices.simulated boolean`,
+  `devices.edgex_device_name_simulated text` (nullable). `simulated`
+  only carries independent meaning for a standalone device - a node-
+  attached one always defers to its own node's flag instead (the
+  switching granularity the user asked for: "для нод і пристроїв-
+  сиріт", not per-device-within-a-node). "Opt-in" needed no separate
+  flag - a device with no twin provisioned (`edgex_device_name_simulated`
+  null) simply has nothing to redirect to.
+- **Resolver** (`routes/devices.ts`'s new exported `resolveEdgexName`):
+  one function, called everywhere `device.edgex_device_name` used to be
+  read directly (~8 call sites - `GET /devices`, `GET /devices/:id`,
+  the four write paths via a generalized `requireEdgeXDevice` returning
+  `resolvedEdgexName`, `POST /devices/:id/log`, and the Model State
+  Validator's own sibling-device reads in `checkForbidden`). Needed a
+  `SELECT_DEVICE_WITH_NODE` join (`devices` LEFT JOIN `nodes` for
+  `node.simulated`) alongside the existing `SELECT_DEVICE_LIST_BASE`,
+  since `findDevice`/`findDeviceByNodeAndName` previously queried
+  `devices` bare, with nothing to resolve a node-attached device's
+  *effective* simulated-ness against.
+- **API**: `PATCH /nodes/:id/simulated` (rejects turning simulated on
+  when not one single child device has a twin - otherwise it would
+  silently be a no-op, indistinguishable from a bug) and
+  `PATCH /devices/:id/simulated` (rejects outright for a node-attached
+  device - "toggle the node's own simulated mode instead", not a
+  silent no-op either, since `resolveEdgexName` never even reads that
+  device's own column once it has a `node_id`). Both `requireAuth`;
+  `log_command`'s own `action` CHECK constraint gained `'simulated-on'`/
+  `'simulated-off'` (same migration) - the node-level entry has no
+  `device_id`/`process_id` to attach to (that table has no `node_id`
+  column, not added in this pass), so its `value` just carries the
+  node's own id/name instead of being omitted entirely.
+- **UI**: a compact `IconButton` (swap-horizontal icon, `secondary`/
+  outline when physical, `info`/solid when simulated, disabled when no
+  twin exists) on `NodesList.jsx` and `DevicesList.jsx` (standalone rows
+  only - hidden entirely, not shown-disabled, for a node-attached
+  device), placed between the existing Settings (gear) and Expand
+  buttons per the user's own explicit placement ask. `GET /nodes` grew
+  a computed `has_simulated_twin` (`EXISTS` subquery against `devices`)
+  so the list view can disable/enable the switch without a second
+  per-row fetch, same "resolve everything the list needs in one query"
+  idiom `SELECT_DEVICE_LIST_BASE` already established for Devices.
+
+**Explicitly deferred, per the user's own direction** (confirmed
+2026-08-10, "сервісний режим... на відповідальність інженера"), not
+forgotten:
+- **No safety guard on switching an actuator mid-command.** Flipping a
+  node from physical to simulated while it's actively driving real
+  hardware leaves the physical side exactly where it last was - nothing
+  forces a safe/neutral value on the way out. Left as a hook point for
+  a future guard (possibly firmware-side too, per the user), not built
+  now.
+- **No value-continuity seeding.** A freshly-simulated twin does not
+  inherit the physical side's last reading - confirmed live (see
+  below): switching a temperature device from physical (22°C) to
+  simulated (30°C, the twin's own separately-seeded value) is a real
+  discontinuity, deliberately left as an engineer-managed concern.
+
+Verified live end to end on `control-node-01` (nexus-edge-aquarium) -
+provisioned two representative simulated twins (`control-node-led-
+green-sim` Bool, `control-node-temperature-sim` Float32 - deliberately
+different seeded values, 22°C vs 30°C / false vs true, specifically so
+switching is visually unambiguous), linked via a plain `UPDATE` in
+`001_seed_control_node.sql` (not part of the base `INSERT`, so which
+devices get twins stays independent of the base seed). Real bug caught
+and fixed during this verification: `SELECT_DEVICE_LIST_BASE`'s new
+`n.simulated AS node_simulated` column broke both of its own `GROUP BY
+d.id, n.name` call sites (`42803`, Postgres requiring every selected
+non-aggregate column in the `GROUP BY`) - `GET /devices` returned a raw
+500 until both were extended to `GROUP BY d.id, n.name, n.simulated`.
+Confirmed via curl: `GET /devices/13` read `22` before toggling
+`control-node-01` to simulated, `30` immediately after, with no restart
+and no change to the request itself. Wrote `false` to the LED while
+simulated, switched back to physical, and confirmed the physical side's
+own value was untouched (`false`, its own pre-existing state, not
+overwritten by the simulated-side write) - twin isolation working as
+designed. Confirmed both rejection paths (`PATCH .../simulated` on a
+node-attached device; `PATCH /nodes/:id/simulated` with no twin
+anywhere - exercised via `alarm-annunciator-01`, which has none). In
+the browser: `NodesList.jsx`'s switch went solid blue on toggle, gray
+again on toggle-back, `alarm-annunciator-01`'s own switch stayed
+disabled throughout (no twin provisioned for that node at all).
+
+**Visual polish follow-up (2026-08-10):** the IconButton toggle above
+was replaced with the existing `Switch` component (gray/`#d3d3d3` when
+physical, red/`#e55353` when simulated - not the earlier blue "info"
+state) on both `NodesList.jsx`/`DevicesList.jsx`, and a simulated row
+(main row *and* its own expanded detail row) now gets `color="warning"`
+- the same contextual-row-tint convention already used elsewhere for
+critical/warning state. `DevicesList.jsx`'s tint uses a computed
+`effectivelySimulated` (`node_id === null ? device.simulated :
+device.node_simulated`) so a node-attached device tints correctly by
+its *parent's* flag, not its own always-`false` column. Both list pages
+also gained the same `border-bottom-0`-when-expanded idiom
+`ProcessesTable.jsx` already used (removes the line between a row and
+its own expansion) - a plain visual-consistency request, unrelated to
+simulated mode itself, done at the same time since both list pages were
+already being touched.
+
+**Investigated separately, not a bug:** enabling `simulated` on
+`control-node-01` and immediately seeing Heartbeating Control flag it
+critical ("hasn't sent a heartbeat in 11833 ticks") turned out to be
+unrelated to the toggle - `control-node-heartbeat` has no simulated
+twin at all, so `resolveEdgexName` returns its physical name either
+way. The real cause: restarting `device-service` earlier in this same
+session (to load the two new `-sim` device-list entries) reset every
+virtual device's value back to its own YAML `initial.X`, including
+`Heartbeat` back to `0` - and nothing auto-increments it in this all-
+virtual dev setup except a manual `.../simulate` call, so it had simply
+sat stale for the ~3.3 hours since. Confirmed live: a fresh simulated
+write to `Heartbeat` cleared the alarm instantly with `simulated` still
+on. Real firmware (once flashed) increments this every second on its
+own, so this specific staleness mode won't recur outside this all-
+virtual bring-up state.

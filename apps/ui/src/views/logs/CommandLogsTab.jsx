@@ -23,7 +23,7 @@ import TableSearchInput from '../../components/table/TableSearchInput'
 import { useServerPaginatedList } from '../../hooks/useServerPaginatedList'
 import { formatSmartDateTime, localDateTimeToIso, userInitials } from '../../utils/format'
 
-const ACTIONS = ['write', 'auto', 'release', 'simulate', 'on', 'off', 'config']
+const ACTIONS = ['write', 'auto', 'release', 'simulate', 'on', 'off', 'config', 'simulated-on', 'simulated-off']
 const PAGE_SIZE_OPTIONS = [20, 50, 100]
 
 const formatValue = (value) => {
