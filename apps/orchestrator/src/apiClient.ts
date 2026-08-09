@@ -26,6 +26,14 @@ export interface NodeRecord {
   heartbeat_control: HeartbeatControlConfig;
   heartbeatStopped: boolean;
   heartbeatLastSeenAt: string | null;
+  // Partial physical network (AGENTS_TO_DO.md, 2026-08-09/10) - while
+  // true, this node has no real hardware link to expect a heartbeat
+  // from at all (its own physical side is simply not currently in the
+  // loop), so heartbeatControl.ts's own staleness check skips it
+  // entirely rather than raising a permanent, un-actionable "hasn't
+  // sent a heartbeat" alarm for a node that was deliberately put into
+  // simulated/bench-test mode.
+  simulated: boolean;
 }
 
 export interface AnnunciatorSlot {

@@ -19,6 +19,15 @@
 // already had a natural 1s tick driver, nodes next once a real producer
 // existed, devices whenever one shows up for them too).
 //
+// A `simulated` node (partial physical network, AGENTS_TO_DO.md,
+// 2026-08-09/10) is skipped entirely, not just quietly stale - there is
+// no real hardware link for it to be stale *from* while deliberately in
+// bench-test/service mode (the user's own framing), so raising "hasn't
+// sent a heartbeat" for one would be a permanent, un-actionable false
+// alarm rather than a real fault signal. Found live: turning simulated
+// on for a node whose Heartbeat device has no producer of its own kept
+// tripping this exact alarm every few minutes.
+//
 // Deliberately not skipping this process's own id in the loop below - if
 // its own runner only sometimes throws (rather than every tick), letting
 // it evaluate itself like any other entry gives it a narrow chance of
@@ -51,6 +60,9 @@ interface HeartbeatEntity {
   heartbeat_control: ProcessRecord["heartbeat_control"];
   heartbeatStopped: boolean;
   heartbeatLastSeenAt: string | null;
+  // Only ever set on a NodeRecord - undefined for a process, which has
+  // no such concept. See this file's own header comment.
+  simulated?: boolean;
 }
 
 function evaluate(
@@ -61,6 +73,7 @@ function evaluate(
 ): void {
   const label = kind === "process" ? "Process" : "Node";
   for (const monitored of entities) {
+    if (monitored.simulated) continue;
     const { stoppable, warning, error } = monitored.heartbeat_control;
     if (stoppable && monitored.heartbeatStopped) continue;
     if (!warning && !error) continue;

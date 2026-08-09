@@ -4831,3 +4831,24 @@ write to `Heartbeat` cleared the alarm instantly with `simulated` still
 on. Real firmware (once flashed) increments this every second on its
 own, so this specific staleness mode won't recur outside this all-
 virtual bring-up state.
+
+**Correction (2026-08-10) - that diagnosis was incomplete.** The user
+reported the same alarm recurring minutes later, still with `simulated`
+on - correctly pointed out this needed a real fix, not just an
+explanation. The actual gap: `simulated` mode is meant for bench-
+testing/service state (the user's own framing, "сервісний режим") -
+a node in that state has, by definition, no real hardware link for a
+heartbeat to arrive on, so `heartbeatControl.ts`'s own staleness check
+was raising a **permanent, un-actionable** alarm for any node currently
+simulated, not a transient one that would self-resolve. Fixed:
+`NodeRecord` (orchestrator `apiClient.ts`) gained `simulated`;
+`heartbeatControl.ts`'s shared `evaluate()` now skips any entity with
+`simulated: true` outright, before even checking `stoppable`/
+thresholds - a node's own heartbeat is simply not evaluated at all
+while simulated, the same way `stoppable` already exempts an entity
+from evaluation, just on a different, orthogonal condition. Verified
+live both directions: switching `control-node-01` to `physical` while
+its `Heartbeat` device was still stale correctly re-raised the same
+error immediately; switching back to `simulated` correctly suppressed
+it again, staying clear well past the point it would otherwise have
+tripped.
