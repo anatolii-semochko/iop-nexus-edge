@@ -16,6 +16,18 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// Minimal - only what apps/orchestrator's own process runners need
+// (heartbeatControl.ts's fleet-wide staleness check, controlNode.ts's own
+// pulse/heartbeat/sensor handling), not a full mirror of routes/nodes.ts's
+// response shape.
+export interface NodeRecord {
+  id: number;
+  name: string;
+  heartbeat_control: HeartbeatControlConfig;
+  heartbeatStopped: boolean;
+  heartbeatLastSeenAt: string | null;
+}
+
 export interface AnnunciatorSlot {
   redDeviceId: number;
   yellowDeviceId: number;
@@ -59,6 +71,31 @@ export interface ProcessRecord {
     slots?: AnnunciatorSlot[];
     testLevel?: { type: "warning" | "error"; level: number } | null;
     testSlotIndex?: number | null;
+    // "control-node" kind (AGENTS_TO_DO.md, 2026-08-09 "НОДА КОНТРОЛЮ") -
+    // device/node id mapping (same "loose jsonb, looked up by role" style
+    // as sensorDeviceId/heaterDeviceId/coolerDeviceId above) plus its own
+    // two-sided min/max/warnMin/warnMax thresholds for temperature and
+    // humidity. `env` prefix (not `temp*`/`humidity*` plain) - resource-
+    // monitor's own `tempMax`/`tempWarnMax` above are a different, ceiling-
+    // only Celsius concept (host SoC temp), this is a two-sided enclosure
+    // ambient range; the plain names would collide as duplicate object
+    // keys on this same `config` type. `humidityDeviceId` is
+    // nullable/absent - a DS18B20-only bring-up instance has no humidity
+    // reading at all (see nexus-edge-aquarium's plugins/control-node/
+    // process.ts), not a 0% reading.
+    nodeId?: number;
+    pulseDeviceId?: number;
+    heartbeatDeviceId?: number;
+    temperatureDeviceId?: number;
+    humidityDeviceId?: number | null;
+    envTempMin?: number;
+    envTempMax?: number;
+    envTempWarnMin?: number;
+    envTempWarnMax?: number;
+    envHumidityMin?: number;
+    envHumidityMax?: number;
+    envHumidityWarnMin?: number;
+    envHumidityWarnMax?: number;
   };
   status?: "on" | "off";
   // Fleet-wide, unfiltered by any user's "hidden" dismissal (AGENTS.md's
@@ -181,7 +218,15 @@ export interface DataLoggerSettings {
 
 export const apiClient = {
   listProcesses: () => request<ProcessRecord[]>("/processes"),
+  listNodes: () => request<NodeRecord[]>("/nodes"),
   getDevice: (deviceId: number) => request<DeviceRecord>(`/devices/${deviceId}`),
+  // Node-side counterpart of the heartbeat call below - see routes/
+  // nodes.ts's POST /nodes/heartbeat (AGENTS_TO_DO.md, 2026-08-09).
+  touchNodeHeartbeats: (nodeIds: number[]) =>
+    request(`/nodes/heartbeat`, {
+      method: "POST",
+      body: JSON.stringify({ nodeIds }),
+    }),
   // AGENTS.md's Active Zummer section - the admin-configured beep policy
   // per (type, level), read fresh every tick rather than cached, since an
   // admin edit in Settings -> Message Levels should take effect on the

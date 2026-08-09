@@ -84,7 +84,11 @@ const DeviceDetailRow = ({ device }) => {
       {device.type === 'active-buzzer' ? (
         <BuzzerIndicator active={active} />
       ) : device.type === 'led' ? (
-        <StatusIndicator active={active} />
+        // `color` (2026-08-09, "control-node" node type) - optional
+        // per-instance hint (device.capabilities.color), StatusIndicator
+        // falls back to its own default blue when absent, so every
+        // pre-existing LED (e.g. Alarm Annunciator's 16) is unaffected.
+        <StatusIndicator active={active} color={device.capabilities?.color} />
       ) : (
         <span className="text-body-secondary">{value !== undefined ? String(value) : '-'}</span>
       )}

@@ -1,0 +1,21 @@
+# Source of truth for this device type's EdgeX-facing shape. The copy
+# actually loaded by apps/device-service lives at
+# apps/device-service/res/profiles/NexusEdge-Button.yaml - there is no
+# provisioning flow yet that reads this file directly (AGENTS.md section
+# 7), so the two must be kept in sync by hand. Identical content.
+name: "NexusEdge-Button"
+manufacturer: "NexusEdge"
+model: "button"
+labels:
+  - "input"
+description: "Momentary pushbutton (normally-open) - atomic device, one Bool value"
+
+deviceResources:
+  - name: "Button"
+    isHidden: false
+    description: "true while physically held, false otherwise"
+    properties:
+      valueType: "Bool"
+      readWrite: "RW"
+
+deviceCommands: []

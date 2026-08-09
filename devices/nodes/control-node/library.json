@@ -1,0 +1,5 @@
+{
+  "id": "node-control-node",
+  "name": "Control Node",
+  "description": "Raspberry Pi watchdog / enclosure monitor - STM32 board on the enclosure's CAN bus, autonomous LED/buzzer/reset escalation plus enclosure temperature/humidity."
+}

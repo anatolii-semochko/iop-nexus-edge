@@ -137,6 +137,45 @@ export async function getProcessHeartbeatStopped(processId: number): Promise<boo
   return isMonitoringStopped("process", processId);
 }
 
+/** The node-side counterpart of touchHeartbeats above (AGENTS_TO_DO.md,
+ * 2026-08-09 "НОДА КОНТРОЛЮ") - the first real heartbeat producer for a
+ * node. Unlike a process (which self-reports "my own tick just ran"), a
+ * physical node has no way to push into this API directly - its own
+ * permanent process (apps/orchestrator/src/processes/controlNode.ts)
+ * calls this once per tick, but only when that node's `Heartbeat` device
+ * resource actually *changed* since the last tick (see that device
+ * type's own contract.schema.ts for why a changed value, not just any
+ * value, is what proves freshness against EdgeX's non-expiring CAN frame
+ * cache).
+ *
+ * Also updates the legacy `nodes.last_heartbeat_at` column - present
+ * since the original Node/Device scaffold and already rendered by
+ * NodesList.jsx, but never written by anything until now (a real,
+ * pre-existing gap, not introduced here) - a free correctness fix now
+ * that a real producer exists, no separate migration needed since the
+ * column already exists. */
+export async function touchNodeHeartbeats(nodeIds: number[]): Promise<void> {
+  if (nodeIds.length === 0) return;
+  const now = String(Date.now());
+  const pipeline = redis.pipeline();
+  for (const id of nodeIds) {
+    pipeline.set(lastSeenKey("node", id), now);
+  }
+  await pipeline.exec();
+  await pool.query(
+    `UPDATE nodes SET last_heartbeat_at = now() WHERE id = ANY($1::int[])`,
+    [nodeIds],
+  );
+}
+
+export async function getNodeLastSeenAt(nodeId: number): Promise<string | null> {
+  return getLastSeenAt("node", nodeId);
+}
+
+export async function getNodeHeartbeatStopped(nodeId: number): Promise<boolean> {
+  return isMonitoringStopped("node", nodeId);
+}
+
 interface EntityRow {
   id: number;
   name: string;
@@ -154,7 +193,10 @@ async function listEntities(type: EntityType): Promise<HeartbeatControlEntry[]> 
       name: row.name,
       heartbeatControl: row.heartbeat_control,
       stopped: await isMonitoringStopped(type, row.id),
-      lastSeenAt: type === "process" ? await getLastSeenAt(type, row.id) : null,
+      // "device" has no real producer yet (AGENTS.md's Heartbeating
+      // Control section) - "process" and "node" (2026-08-09, the
+      // control-node's own Heartbeat device) both do.
+      lastSeenAt: type === "process" || type === "node" ? await getLastSeenAt(type, row.id) : null,
     })),
   );
 }

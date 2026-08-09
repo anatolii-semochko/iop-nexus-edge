@@ -1,0 +1,22 @@
+# Source of truth for this device type's EdgeX-facing shape. The copy
+# actually loaded by apps/device-service lives at
+# apps/device-service/res/profiles/NexusEdge-Pulse.yaml - there is no
+# provisioning flow yet that reads this file directly (AGENTS.md section
+# 7), so the two must be kept in sync by hand. Identical content.
+name: "NexusEdge-Pulse"
+manufacturer: "NexusEdge"
+model: "pulse"
+labels:
+  - "actuator"
+description: >
+  Written once/sec by the orchestrator - atomic device, one Bool value
+
+deviceResources:
+  - name: "Pulse"
+    isHidden: false
+    description: "Written true every tick - proves NexusEdge is alive"
+    properties:
+      valueType: "Bool"
+      readWrite: "RW"
+
+deviceCommands: []

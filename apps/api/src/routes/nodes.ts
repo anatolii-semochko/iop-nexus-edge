@@ -1,6 +1,8 @@
 import type { FastifyInstance } from "fastify";
 
 import { pool } from "../db.js";
+import * as heartbeatControl from "../heartbeatControl.js";
+import type { HeartbeatControlConfig } from "../heartbeatControl.js";
 
 interface NodeRow {
   id: number;
@@ -12,8 +14,26 @@ interface NodeRow {
   health: string;
   last_heartbeat_at: string | null;
   group_id: number | null;
+  heartbeat_control: HeartbeatControlConfig;
   created_at: string;
   updated_at: string;
+}
+
+// Heartbeating Control (AGENTS.md section 28) - live Redis state alongside
+// the Postgres `heartbeat_control` config already on `node` itself. Read
+// here so apps/orchestrator's heartbeat-control process kind gets
+// everything it needs from the one `GET /nodes` call it now also makes
+// every tick, mirroring how routes/processes.ts's own withLiveState
+// already does this for processes. `last_heartbeat_at` (the legacy
+// column) is included as-is from `SELECT n.*` above - Postgres/design-
+// time-adjacent but written by the same touchNodeHeartbeats call as the
+// Redis key below, not a separate concern.
+async function withLiveHeartbeat(node: NodeRow) {
+  const [heartbeatStopped, heartbeatLastSeenAt] = await Promise.all([
+    heartbeatControl.getNodeHeartbeatStopped(node.id),
+    heartbeatControl.getNodeLastSeenAt(node.id),
+  ]);
+  return { ...node, heartbeatStopped, heartbeatLastSeenAt };
 }
 
 // Resolved group name joined in, not a separate per-row fetch - the list
@@ -37,8 +57,8 @@ function isUniqueViolation(err: unknown): boolean {
 
 export async function nodeRoutes(app: FastifyInstance): Promise<void> {
   app.get("/nodes", async () => {
-    const result = await pool.query(`${SELECT_NODE} ORDER BY n.name`);
-    return result.rows;
+    const result = await pool.query<NodeRow>(`${SELECT_NODE} ORDER BY n.name`);
+    return Promise.all(result.rows.map(withLiveHeartbeat));
   });
 
   app.get<{ Params: { id: string } }>("/nodes/:id", async (request, reply) => {
@@ -50,7 +70,16 @@ export async function nodeRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const devicesResult = await pool.query("SELECT * FROM devices WHERE node_id = $1 ORDER BY name", [id]);
-    return { ...node, devices: devicesResult.rows };
+    return { ...(await withLiveHeartbeat(node)), devices: devicesResult.rows };
+  });
+
+  // Node-side counterpart of POST /processes/heartbeat (routes/
+  // processes.ts) - the control-node's own permanent process calls this
+  // once per tick, only when that node's `Heartbeat` device resource
+  // actually changed since the last tick (AGENTS_TO_DO.md, 2026-08-09).
+  app.post<{ Body: { nodeIds: number[] } }>("/nodes/heartbeat", async (request) => {
+    await heartbeatControl.touchNodeHeartbeats(request.body.nodeIds);
+    return { status: "ok" };
   });
 
   // A Node is a physical workplace served locally by exactly one group of

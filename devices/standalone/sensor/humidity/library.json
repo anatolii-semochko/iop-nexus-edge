@@ -1,0 +1,5 @@
+{
+  "id": "device-humidity",
+  "name": "Humidity",
+  "description": "Relative humidity sensor - single Float32 reading (%RH), read-only."
+}

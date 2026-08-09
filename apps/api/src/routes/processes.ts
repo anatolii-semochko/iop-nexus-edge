@@ -226,10 +226,13 @@ export async function processRoutes(app: FastifyInstance): Promise<void> {
 
   // Orchestrator-driven only, same as /critical above - a resource-monitor
   // process pushes its latest CPU/RAM/disk readings here every tick
-  // (AGENTS.md section 21). Published on the message bus unconditionally
+  // (AGENTS.md section 21); the control-node process (2026-08-09,
+  // AGENTS_TO_DO.md "НОДА КОНТРОЛЮ") pushes {temperature, humidity}
+  // instead - hence the generic body type, not a fixed cpu/ram/disk
+  // shape. Published on the message bus unconditionally
   // (processRegistry.setMetrics) - the UI subscribes to the live feed for
   // these now, the same as status/critical/warning, not a separate poll.
-  app.post<{ Params: { id: string }; Body: { cpu: number; ram: number; disk: number } }>(
+  app.post<{ Params: { id: string }; Body: Record<string, number> }>(
     "/processes/:id/metrics",
     async (request, reply) => {
       const process = await findProcess(request.params.id);

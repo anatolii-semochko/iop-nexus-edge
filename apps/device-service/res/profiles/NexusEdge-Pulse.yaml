@@ -1,0 +1,19 @@
+# Loaded copy of devices/standalone/actuator/pulse/edgex-device-profile.yaml
+# (source of truth) - kept in sync by hand (AGENTS.md section 7).
+name: "NexusEdge-Pulse"
+manufacturer: "NexusEdge"
+model: "pulse"
+labels:
+  - "actuator"
+description: >
+  Written once/sec by the orchestrator - atomic device, one Bool value
+
+deviceResources:
+  - name: "Pulse"
+    isHidden: false
+    description: "Written true every tick - proves NexusEdge is alive"
+    properties:
+      valueType: "Bool"
+      readWrite: "RW"
+
+deviceCommands: []

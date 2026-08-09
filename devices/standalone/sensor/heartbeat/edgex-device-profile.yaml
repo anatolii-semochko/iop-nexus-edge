@@ -1,0 +1,28 @@
+# Source of truth for this device type's EdgeX-facing shape. The copy
+# actually loaded by apps/device-service lives at
+# apps/device-service/res/profiles/NexusEdge-Heartbeat.yaml - there is no
+# provisioning flow yet that reads this file directly (AGENTS.md section
+# 7), so the two must be kept in sync by hand. Identical content.
+name: "NexusEdge-Heartbeat"
+manufacturer: "NexusEdge"
+model: "heartbeat"
+labels:
+  - "sensor"
+description: >
+  Free-running Uint32 counter, incremented once/sec by the node's own
+  firmware - atomic device, one Uint32 value
+
+deviceResources:
+  - name: "Heartbeat"
+    isHidden: false
+    description: "Firmware-side counter, increments once/sec while the node is alive"
+    properties:
+      valueType: "Uint32"
+      # RW at the EdgeX/core-command level for the same reason as every
+      # other read-only sensor in this library (see ../temperature's
+      # profile comment) - Devices API's capabilities.readOnly is what
+      # actually enforces "no ordinary command surface", and a real CAN
+      # write path needs "RW" here to exist at all at the EdgeX layer.
+      readWrite: "RW"
+
+deviceCommands: []

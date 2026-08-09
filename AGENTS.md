@@ -3606,9 +3606,12 @@ and visibly stops if they do.
 
 ### The pulse itself
 
-`apps/ui/src/scss/style.scss`'s `@keyframes system-tick-pulse` (~450ms:
-long enough to register at a glance, short enough to have fully settled
-before the next tick arrives a second later) - scale 1 -> 1.25 -> 1,
+`apps/ui/src/scss/style.scss`'s `@keyframes system-tick-pulse` (100ms,
+shortened 2026-08-09 from an initial 450ms - see AGENTS_TO_DO.md's
+"НОДА КОНТРОЛЮ" thread, which picked this same pulse duration for its
+firmware LED and found 450ms too long/laggy for a quick flash; 100ms
+still registers at a glance and stays well clear of the next tick a
+second later) - scale 1 -> 1.25 -> 1,
 opacity 1 -> 1 -> 0.35, a `currentColor` glow (`box-shadow`) that
 blooms then vanishes. `color: var(--cui-success)` on the base
 `.system-tick-dot` (not a hardcoded hex) so both the fill and the glow
@@ -4528,3 +4531,161 @@ Logger settings popup confirms the rename displays correctly there too
 ("Message Casting Groups" with real checkboxes). Devices list expansion
 shows live LED/buzzer indicators for the relevant device types. Both
 tabs' consoles clean throughout.
+
+## 47. Control Node - Raspberry Pi watchdog board (CORE library + first real CAN backend + Heartbeating Control for nodes)
+
+`devices/nodes/control-node/` (AGENTS_TO_DO.md, 2026-08-09 "НОДА
+КОНТРОЛЮ", spread across several rounds of Q&A - read that thread for
+the full requirement derivation, this section is the distilled result).
+An STM32F103C8T6 ("Blue Pill") + MCP2551 board, mounted in the same
+enclosure as the Raspberry Pi running NexusEdge, on the enclosure's own
+CAN bus. Two entirely independent heartbeat directions, both real for
+the first time in this platform:
+
+- **Node -> NexusEdge** (does the board's firmware/link work?): a new
+  `sensor/heartbeat` device type (a free-running `Uint32` counter,
+  incremented once/sec by firmware) is the first real producer
+  Heartbeating Control (section 28) has ever had for a *node* - that
+  feature was process-only until now (its own runner's comment used to
+  say so explicitly). Closing this gap needed real backend work, not
+  just a config value: `apps/api/src/heartbeatControl.ts` gained
+  `touchNodeHeartbeats`/`getNodeLastSeenAt`/`getNodeHeartbeatStopped`
+  (node-typed siblings of the process-only functions already there),
+  `routes/nodes.ts` gained `POST /nodes/heartbeat` (node-side
+  counterpart of `POST /processes/heartbeat`) and now merges live
+  `heartbeatStopped`/`heartbeatLastSeenAt` into `GET /nodes` the same
+  way `routes/processes.ts` already did for processes.
+  `apps/orchestrator/src/processes/heartbeatControl.ts`'s `runHeartbeatControl`
+  now evaluates nodes too (refactored its process-only loop into a
+  shared `evaluate()` helper called for both `apiClient.listProcesses()`
+  and the new `apiClient.listNodes()|` - same `skippedTicks`/WEM logic,
+  `stale_process_*`/`stale_node_*` WEM codes keep the two kinds from
+  colliding). Bonus fix along the way: `nodes.last_heartbeat_at` (a
+  legacy column from the original scaffold, already displayed by
+  `NodesList.jsx` but never written by anything - a real pre-existing
+  gap, not introduced here) is now populated by the same
+  `touchNodeHeartbeats` call.
+- **NexusEdge -> node** (does the control system have a pulse?): a new
+  `actuator/pulse` device (`Bool`, written `true` every orchestrator
+  tick) - the node's firmware watches for this arriving over CAN and
+  drives its own 100% autonomous LED/buzzer/reset-attempt escalation
+  entirely independent of NexusEdge, since the whole point is it must
+  keep signaling even after NexusEdge itself has crashed. None of that
+  escalation logic exists anywhere in this repo - it's firmware-only, see
+  `devices/nodes/control-node/firmware/`.
+
+**Why two new device types, not one "environment" device**: the target
+sensor (AHT10/AHT20, chosen over the originally-proposed DHT11 for its
+I2C hardware peripheral vs. DHT's fragile software-bit-bang timing) is
+one physical chip reporting both temperature and humidity, but this
+library's Device is atomic (section 30/32) - `sensor/temperature`
+(reused as-is, its "Example" EdgeX profile branding is cosmetic, not
+shown in nexus-edge's own UI) plus a new `sensor/humidity`, not a
+compound device. A DS18B20 (1-Wire, temperature-only) is a temporary
+bring-up stand-in before AHT10/AHT20 physically arrives - same
+`sensor/temperature` device type, just a different firmware driver
+(`config.h`'s `SENSOR_USE_AHT`), and the humidity device simply isn't
+wired to anything real yet on that instance (`humidityDeviceId` absent/
+null in the process's own config - see below).
+
+**`input/button` graduated** from its catalog-only entry (library.json +
+icon.svg + docs stub, section 44) to the full file set - the "Mute
+Beeper" button is its first real consumer, same graduation `led`/
+`active-buzzer` already went through for Alarm Annunciator (section 45).
+
+**LED/buzzer got real Dev Simulator visuals for the first time** -
+`LedControl`/`LedSimulator` (new) and `ActiveBuzzerSimulator` (new,
+alongside the pre-existing `ActiveBuzzerControl`), registered in
+`builtinDeviceTypes.js`. `led` gained an optional `capabilities.color`
+hex hint (consumed by both `LedControl` and `DevicesList.jsx`'s own
+inline `StatusIndicator` usage) so this node's green/yellow/red trio (and
+any future instance) can render its actual intended color instead of
+every LED in the app looking identical - backward compatible, absent
+`color` still falls back to `StatusIndicator`'s existing default blue
+(Alarm Annunciator's 16 LEDs unaffected). **Real bug found and fixed
+live**: `DevSimulator.jsx`'s `CustomSimulator` branch always called
+`handleSimulate` (the readOnly-only `.../simulate` endpoint) regardless
+of the underlying device's own `readOnly` flag - worked by accident for
+the one prior `CustomSimulator` (`light-regulator`) only because that
+happens to be readOnly; broke immediately (400 "not read-only") the
+moment a non-readOnly type (`led`, `active-buzzer`) got one. Fixed to
+match the same `readOnly ? handleSimulate : handleWrite` branch the
+generic `NumericStepper` path already used.
+
+**`ProcessMetrics` generalized** (`apps/api/src/processRegistry.ts`,
+`Record<string, number>` instead of a hardcoded `{cpu, ram, disk}`) -
+`control-node`'s own `{temperature, humidity}` reading now shares the
+exact same `POST /processes/:id/metrics`/live-broadcast path
+`resource-monitor` (section 21) already established, not a parallel
+mechanism.
+
+**Where the process runner lives**: `nexus-edge-aquarium/plugins/
+control-node/process.ts` (the target project owns the real instance's
+behavior), *not* this repo - same split `temperature-control` already
+established (AGENTS_TO_DO.md, 2026-07-29 "chistiy proekt"). Each tick:
+writes `Pulse`, reads `Heartbeat` and touches the node's liveness only on
+an actual value *change* (EdgeX's CAN transport caches "latest frame"
+with no expiry - a value that never changes would misread as "still
+alive" forever, see `sensor/heartbeat`'s own contract.schema.ts), reads
+Temperature/(optional)Humidity for two-sided min/max/warnMin/warnMax WEM
+checks (unlike resource-monitor's own ceiling-only thresholds - both a
+floor and a ceiling matter for an enclosure reading). Config field names
+are `env`-prefixed (`envTempMin`/`envTempMax`/...) specifically to avoid
+colliding with resource-monitor's own plain `tempMax`/`tempWarnMax` on
+the *same* `ProcessRecord.config` TypeScript type (a real duplicate-key
+compile error caught during this session, not a hypothetical). **This
+process kind's own detail panel** (`ControlNodePanel.jsx`, CORE's
+`KIND_PANELS`) stays in this repo though, same precedent as
+`TemperatureProcessPanel.jsx` - four steppers per metric (Warning/Error
+× Min/Max), humidity row only rendered when the process's own config
+actually has a `humidityDeviceId`.
+
+**CAN backend - first real (non-`virtual`) physical device in this
+project.** `apps/device-service`'s `physical`/`transport: can` backend
+(`internal/driver/backend.go`, `internal/transport/can/`) was already
+fully implemented but had never been exercised by an actual device
+profile before this. This node's 9 devices are still seeded
+`backend: virtual` in `nexus-edge-aquarium/extra-res/devices/
+control-node-devices.yaml` for now (matching `example-thermal-node`/
+Alarm Annunciator's own dev-first precedent) - concrete CAN arbitration
+IDs are assigned and documented in `devices/nodes/control-node/
+firmware/src/config.h` and `devices/nodes/control-node/docs/
+wiring.md`, ready to copy into that device-list's `protocols.transport`
+block once the board and its CAN transceiver are physically wired to the
+enclosure's bus.
+
+**Firmware** (`devices/nodes/control-node/firmware/`, PlatformIO +
+STM32duino/Arduino framework, not raw CMSIS/HAL): `config.h` centralizes
+every timing/pin/CAN-ID constant per explicit instruction ("ВСІ часові
+таймери... ПРОПИШИ В КОНСТАНТИ"); `watchdog.cpp` is the core autonomous
+state machine (`launched` flag latches true forever on first pulse, one
+shared "time since last pulse" clock drives the `>2s` LED-alarm
+threshold, the 1/2/3-minute buzzer escalation, and the 5/15/30-minute
+forced-reset schedule - all as literal constants traceable to the
+user's own spec in AGENTS_TO_DO.md); zero dependency on CAN/NexusEdge
+being reachable, by design. **Written but not yet build/flash-tested
+against real hardware** (Blue Pills hadn't arrived when this was
+written) - see the firmware's own README.md for what to verify once they
+do.
+
+Verified live (the software/backend half only - no physical board
+exists yet): full `nexus-edge-aquarium` stack (`make up-all`, alongside
+nexus-edge's own already-running stack, container names/host ports
+checked for collisions first per this package's own `../CLAUDE.md`
+convention). Migration applied idempotently (`node/9 devices/process`
+inserted, re-run-safe via `ON CONFLICT (edgex_device_name)` - not
+`(name)`, the exact bug class documented on smart-house's own
+`001_seed_thermal.sql` history). `device-service` registered all 9
+devices with `core-metadata`. `GET /processes` showed the resolved
+config (device ids, thresholds) and live `{temperature: 22, humidity:
+45}` metrics. Simulated the `Heartbeat` counter changing twice via
+`PUT /devices/:id/simulate` - `GET /nodes` correctly populated
+`heartbeatLastSeenAt`/`last_heartbeat_at`; left it unchanged afterward
+and confirmed Heartbeating Control correctly raised a critical WEM entry
+("hasn't sent a heartbeat in N ticks") once past its 10-tick error
+threshold, then confirmed it cleared on the next simulated change.
+Dev Simulator: clicking the green LED/buzzer rows now shows the correct
+green/red color (not a generic checkbox, and not a 400 error - the
+readOnly-branch bug above was caught by this exact click). Control
+Node's own detail panel renders both metric rows with the seeded
+threshold defaults. Console clean throughout.

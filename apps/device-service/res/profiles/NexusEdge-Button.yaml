@@ -1,0 +1,18 @@
+# Loaded copy of devices/standalone/input/button/edgex-device-profile.yaml
+# (source of truth) - kept in sync by hand (AGENTS.md section 7).
+name: "NexusEdge-Button"
+manufacturer: "NexusEdge"
+model: "button"
+labels:
+  - "input"
+description: "Momentary pushbutton (normally-open) - atomic device, one Bool value"
+
+deviceResources:
+  - name: "Button"
+    isHidden: false
+    description: "true while physically held, false otherwise"
+    properties:
+      valueType: "Bool"
+      readWrite: "RW"
+
+deviceCommands: []

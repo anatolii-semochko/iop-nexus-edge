@@ -28,6 +28,7 @@ import { useExpandableRows } from '../../hooks/useExpandableRows'
 import { usePagination } from '../../hooks/usePagination'
 import ActiveBuzzerPanel from './ActiveBuzzerPanel'
 import AnnunciatorPanel from './AnnunciatorPanel'
+import ControlNodePanel from './ControlNodePanel'
 import DataLoggerPanel from './DataLoggerPanel'
 import HeartbeatControlPanel from './HeartbeatControlPanel'
 import HeartbeatControlTestPanel from './HeartbeatControlTestPanel'
@@ -50,6 +51,11 @@ export const KIND_PANELS = {
   'active-buzzer': ActiveBuzzerPanel,
   'data-logger': DataLoggerPanel,
   'alarm-annunciator': AnnunciatorPanel,
+  // Runner lives in the target project (nexus-edge-aquarium's own
+  // plugins/control-node/process.ts), panel stays here - same
+  // temperature-control split (AGENTS_TO_DO.md, 2026-08-09 "НОДА
+  // КОНТРОЛЮ").
+  'control-node': ControlNodePanel,
 }
 
 const statusColor = (status) => (status === 'on' ? 'success' : 'secondary')

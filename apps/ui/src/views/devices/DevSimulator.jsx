@@ -146,12 +146,21 @@ const DeviceSimulatorRow = ({ device, onError }) => {
       </CTableDataCell>
       <CTableDataCell>
         {CustomSimulator ? (
+          // Same readOnly branch the generic NumericStepper path below
+          // already uses - a writable (non-readOnly) device's `.../simulate`
+          // call is rejected server-side (400 "not read-only", routes/
+          // devices.ts) - previously always `handleSimulate` here
+          // regardless, which happened to work only because the one prior
+          // CustomSimulator (light-regulator) is readOnly. Surfaced live
+          // 2026-08-09 registering LedSimulator/ActiveBuzzerSimulator for
+          // the (non-readOnly) `led`/`active-buzzer` types.
           <CustomSimulator
             value={currentValue}
             min={detail.capabilities?.min}
             max={detail.capabilities?.max}
             step={detail.capabilities?.step}
-            onChange={handleSimulate}
+            color={detail.capabilities?.color}
+            onChange={detail.capabilities?.readOnly ? handleSimulate : handleWrite}
           />
         ) : detail.valueType === 'Bool' ? (
           <CFormCheck

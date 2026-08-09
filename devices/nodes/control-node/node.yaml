@@ -1,0 +1,38 @@
+nodeType: control-node
+description: >
+  Raspberry Pi watchdog / enclosure monitor board (AGENTS_TO_DO.md,
+  2026-08-09 "НОДА КОНТРОЛЮ") - STM32F103C8T6 ("Blue Pill") + MCP2551 CAN
+  transceiver, mounted in the same enclosure as the Raspberry Pi it
+  watches, on the enclosure's own internal CAN bus (same EdgeX
+  device-service transport every other physical node uses, not a
+  separate USB link). Two entirely independent heartbeat directions:
+  the node watches NexusEdge (via `pulse`, firmware-autonomous LED/
+  buzzer/reset escalation, keeps working even if NexusEdge itself has
+  crashed) and NexusEdge watches the node (via `heartbeat`, through the
+  platform's own Heartbeating Control, AGENTS.md section 28). Also
+  carries an enclosure environment sensor (temperature + humidity,
+  target hardware AHT10/AHT20 - I2C, chosen over DHT11 for the STM32's
+  hardware I2C peripheral vs. DHT's fragile software bit-bang timing;
+  DS18B20, 1-Wire, temperature-only, is a temporary stand-in for early
+  bring-up before AHT10/AHT20 arrives).
+
+  3 status LEDs (green/yellow/red) + 1 passive buzzer + 1 momentary
+  "Mute Beeper" button are physically wired to this board but their
+  escalation logic is 100% autonomous firmware - NexusEdge only mirrors
+  their state as read-only devices for UI visibility, it never drives
+  them. A separate mechanical switch (not modeled as a device - a pure
+  hardware gate, firmware never senses its state) enables or disables a
+  reset-contact line to the Raspberry Pi's own reset pins; after 3
+  missed-pulse-triggered reset attempts firmware gives up permanently
+  for that outage (treats it as a hardware fault), independent of
+  whether Mute Beeper was pressed.
+bus:
+  type: can
+supports:
+  - led
+  - active-buzzer
+  - button
+  - temperature
+  - humidity
+  - pulse
+  - heartbeat

@@ -98,11 +98,14 @@ body {
 
 // System tick indicator (header, left of the Notification icons -
 // AGENTS_TO_DO.md, 2026-08-01) - a short, comfortably visible pulse
-// (~450ms: long enough to actually register at a glance, short enough
-// not to still be mid-pulse when the next tick arrives about a second
-// later) retriggered by SystemTickIndicator.jsx changing the dot's own
-// `key` on every tick. `color`/`currentColor` (not a hardcoded hex) so
-// the glow tracks CoreUI's own success color across light/dark mode.
+// (100ms, shortened 2026-08-09 from an initial 450ms once the
+// "НОДА КОНТРОЛЮ" hardware design picked this same pulse as its
+// firmware LED's on-duration - 450ms read as too long/laggy for a
+// quick flash; 100ms still registers at a glance and is well clear of
+// the next tick a second later) retriggered by SystemTickIndicator.jsx
+// changing the dot's own `key` on every tick. `color`/`currentColor`
+// (not a hardcoded hex) so the glow tracks CoreUI's own success color
+// across light/dark mode.
 @keyframes system-tick-pulse {
   0% {
     transform: scale(1);

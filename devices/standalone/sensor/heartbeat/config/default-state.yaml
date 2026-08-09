@@ -1,0 +1,4 @@
+# Initial value for a `backend: virtual` instance of this device type.
+# Not meaningful for a real physical (CAN) instance, which reports
+# whatever the firmware's own free-running counter currently holds.
+Heartbeat: 0
