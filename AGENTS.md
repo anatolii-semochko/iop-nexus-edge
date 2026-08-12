@@ -4537,10 +4537,12 @@ tabs' consoles clean throughout.
 `devices/nodes/control-node/` (AGENTS_TO_DO.md, 2026-08-09 "НОДА
 КОНТРОЛЮ", spread across several rounds of Q&A - read that thread for
 the full requirement derivation, this section is the distilled result).
-An STM32F103C8T6 ("Blue Pill") + MCP2551 board, mounted in the same
-enclosure as the Raspberry Pi running NexusEdge, on the enclosure's own
-CAN bus. Two entirely independent heartbeat directions, both real for
-the first time in this platform:
+An STM32F103C8T6 ("Blue Pill") + WCMCU-230 (VP230 chip, a pin-compatible
+SN65HVD230 clone, 3.3V-native - corrected 2026-08-11 from an earlier
+MCP2551 speculation once real hardware was in hand) board, mounted in
+the same enclosure as the Raspberry Pi running NexusEdge, on the
+enclosure's own CAN bus. Two entirely independent heartbeat directions,
+both real for the first time in this platform:
 
 - **Node -> NexusEdge** (does the board's firmware/link work?): a new
   `sensor/heartbeat` device type (a free-running `Uint32` counter,
@@ -4852,3 +4854,64 @@ its `Heartbeat` device was still stale correctly re-raised the same
 error immediately; switching back to `simulated` correctly suppressed
 it again, staying clear well past the point it would otherwise have
 tripped.
+
+## 49. Control Node firmware - first real hardware milestone (build + flash succeed)
+
+2026-08-10/11 - the user's Blue Pill and ST-Link V2 (clone, `A73-
+STLINK-V2`) arrived; this is the first point section 47's firmware
+(`devices/nodes/control-node/firmware/`, written untested) actually met
+real silicon.
+
+**Toolchain, from nothing to a working flash, in order:**
+- `stlink-tools` (apt) for `st-info`/basic SWD probing - confirmed the
+  ST-Link enumerates over USB but `st-info --probe` initially failed
+  without `sudo` (`access error`) even though the package's own udev
+  rule (`MODE:="0666"`) was already correct - the board had been
+  plugged in *before* the package installed that rule, so it never
+  retroactively applied; an unplug/replug (or `udevadm control
+  --reload-rules && udevadm trigger`) fixed it. Confirmed device:
+  `STM32F1xx_MD`, chipid `0x410`, 20KB SRAM, **128KB flash** - not the
+  nominal 64KB a "C8T6" implies, a well-documented trait of many C8T6
+  clones actually carrying a CBT6 die underneath; harmless bonus, not
+  something this firmware currently relies on (still builds against
+  the board definition's own 64KB figure).
+- PlatformIO Core, via the official `get-platformio.py` installer
+  (isolated venv at `~/.platformio/penv`, no system Python pollution,
+  no `sudo` needed for the installer itself) - needed `python3.12-venv`
+  (apt, `sudo`) first, the installer fails cleanly with that exact
+  instruction if it's missing.
+
+**Real build bug, found and fixed**: `pio run` failed compiling the
+STM32_CAN library - `CAN_HandleTypeDef`/`CAN_BS2_*TQ`/`HAL_CAN_*`
+symbols all "not declared", `struct stm32_can_t` reported as having no
+`handle` member. Root cause: STM32duino's default HAL config
+(`stm32f1xx_hal_conf_default.h`) does define `HAL_CAN_MODULE_ENABLED`,
+but only when nothing overrides it - this board/library combination
+needed it forced explicitly via `platformio.ini`'s `build_flags`
+(`-D HAL_CAN_MODULE_ENABLED`) rather than relying on the default path;
+the STM32_CAN library's own header (`STM32_CAN.h`) documents this exact
+flag as the fix in a comment, once you know to go looking for it. Not
+a design flaw in this firmware's own code - a real gap in how the
+STM32_CAN library documents its own prerequisites, same "real bug
+caught live" pattern as everything else in this journal.
+
+**Real hardware correction**: the CAN transceiver actually in hand is a
+WCMCU-230 (VP230 chip, pin-compatible SN65HVD230 clone, 3.3V-native) -
+not the MCP2551 (5V part) speculated in section 47/`docs/wiring.md`
+before hardware existed. `docs/wiring.md` and `node.yaml` corrected;
+arguably a better fit for this board than a 5V transceiver would have
+been anyway (no logic-level mismatch to reason about between the Blue
+Pill's own 3.3V I/O and the transceiver's TXD/RXD).
+
+**Verified so far**: `pio run` builds clean (RAM 7.7%/1568B, Flash
+44.5%/29180B against the nominal 64KB figure). `pio run --target
+upload` via `openocd`+`stlink`: "Programming Started" -> "Programming
+Finished" -> "Verify Started" -> "Verified OK" -> "Resetting Target".
+
+**Not yet verified**: the firmware was flashed to an otherwise-unwired
+chip (no LEDs/buzzer/sensor/CAN transceiver connected yet at flash
+time) - only "builds, flashes, resets without hanging" is confirmed,
+not any of `watchdog.cpp`'s actual behavior. Next planned check (not
+yet done): wire a single LED to PA1 (yellow) and confirm a ~1Hz blink,
+proving the state machine genuinely runs in real time before wiring
+the rest of the board.

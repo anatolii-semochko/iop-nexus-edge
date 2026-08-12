@@ -1,7 +1,8 @@
 nodeType: control-node
 description: >
   Raspberry Pi watchdog / enclosure monitor board (AGENTS_TO_DO.md,
-  2026-08-09 "НОДА КОНТРОЛЮ") - STM32F103C8T6 ("Blue Pill") + MCP2551 CAN
+  2026-08-09 "НОДА КОНТРОЛЮ") - STM32F103C8T6 ("Blue Pill") + WCMCU-230
+  (VP230 chip, SN65HVD230-compatible, 3.3V-native) CAN
   transceiver, mounted in the same enclosure as the Raspberry Pi it
   watches, on the enclosure's own internal CAN bus (same EdgeX
   device-service transport every other physical node uses, not a

@@ -1,9 +1,13 @@
 # Control Node - wiring (text schematic)
 
-STM32F103C8T6 ("Blue Pill") + MCP2551 CAN transceiver, mounted in the
-same enclosure as the Raspberry Pi it watches (AGENTS_TO_DO.md,
-2026-08-09 "НОДА КОНТРОЛЮ"). Simplified/text-format per the original
-request - not a real schematic capture, just "which line/pin goes where".
+STM32F103C8T6 ("Blue Pill") + WCMCU-230 (VP230 chip, a pin-compatible
+SN65HVD230 clone) CAN transceiver, mounted in the same enclosure as the
+Raspberry Pi it watches (AGENTS_TO_DO.md, 2026-08-09/11 "НОДА
+КОНТРОЛЮ"). Simplified/text-format per the original request - not a
+real schematic capture, just "which line/pin goes where". (Originally
+speculated as an MCP2551 before real hardware was in hand - VP230 is
+what actually got used; it is also a better fit here regardless, being
+a native 3.3V part like the Blue Pill itself, not a 5V one.)
 
 Firmware source: `../firmware/` (PlatformIO, STM32duino) - pin `#define`s
 below match `../firmware/src/config.h` exactly; if either changes, update
@@ -30,21 +34,30 @@ both.
 
 ```
                  +-------------------+
-   enclosure     |   MCP2551 (or     |
-   CAN bus  <---> |   TJA1050) CAN    | <--- PA11 (RX) / PA12 (TX)
-   (shared with   |   transceiver     |
+   enclosure     |  WCMCU-230/VP230  |
+   CAN bus  <---> |   CAN transceiver | <--- PA11 (RX) / PA12 (TX)
+   (shared with   |   (3.3V native)   |
    other nodes)   +-------------------+
 ```
 
 The Blue Pill's own STM32F103 has a built-in CAN controller (bxCAN) but
 **no transceiver on the board itself** - PA11/PA12 are logic-level
-TX/RX only. The MCP2551 (already in hand per AGENTS_TO_DO.md) converts
-those to the bus's real differential CANH/CANL pair. Standard wiring:
-transceiver `TXD`/`RXD` to PA12/PA11, `CANH`/`CANL` to the enclosure's
-existing bus, `VCC`/`GND` to this board's own supply. A 120Ω termination
-resistor across CANH/CANL is only needed if this node sits at a physical
-end of the bus - match whatever the enclosure's existing CAN wiring
-already does.
+TX/RX only. The WCMCU-230 module (VP230 chip, in hand per
+AGENTS_TO_DO.md 2026-08-11 - pin-compatible SN65HVD230 clone) converts
+those to the bus's real differential CANH/CANL pair. Wiring:
+
+| WCMCU-230 pin | Blue Pill pin | Notes |
+|----------------|----------------|-------|
+| `3V3`          | 3.3V           | a real 3.3V part - do not feed it 5V |
+| `GND`          | GND            | |
+| `TXD`          | PA12 (CAN1 TX) | |
+| `RXD`          | PA11 (CAN1 RX) | |
+| `CANH`/`CANL`  | enclosure CAN bus | shared differential pair with other nodes |
+| `RS`/`S` (if broken out) | GND | forces normal/high-speed mode - most WCMCU-230 boards already tie this to GND on-board, nothing to wire if there's no such pin exposed |
+
+A 120Ω termination resistor across CANH/CANL is only needed if this
+node sits at a physical end of the bus - match whatever the enclosure's
+existing CAN wiring already does.
 
 CAN bit rate and arbitration IDs: see `../firmware/src/config.h`'s own
 `CAN_BITRATE`/`CAN_ID_*` block - reproduced here for reference:
