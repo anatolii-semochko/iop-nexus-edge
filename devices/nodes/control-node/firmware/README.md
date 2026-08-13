@@ -41,21 +41,32 @@ against real CAN hardware, not just theoretically per the source. No
 `CAN_ID_ENV` frames seen yet, as expected - no sensor wired, and
 `sensorUpdate()` only sends on a successful read (`main.cpp:75`).
 
-**Not yet verified**: the physical LED/buzzer/button/reset outputs
-themselves - everything confirmed above went through the CAN mirror
-frames only, no peripheral has actually been wired to the board yet.
-Next steps, in order:
+**LEDs and buzzer verified live on real peripherals as of 2026-08-14**
+(physical CAN loop closed the same day - see nexus-edge's AGENTS.md
+section 50 for the container/CAN-bus side of that) - user-confirmed:
+LEDs behave correctly, "функціонал STM32 працюють супер".
 
-1. Wire a single LED (PA1/yellow, see wiring.md) and confirm it
-   visually blinks ~1Hz in `Booting` state - the CAN mirror already
-   proves `leds.cpp`'s internal state is correct, this step confirms
-   the physical GPIO/wiring matches it.
-2. Bench-test each remaining module in isolation before combining:
-   buzzer via `tone()`, the AHT20/DS18B20 sensor read, mute button,
-   reset-line pulse - before trusting the full watchdog loop end to
-   end on real peripherals.
-3. Confirm the AHT20 vs AHT10 init command byte (`sensor.cpp`'s own
+**One real runtime bug found and fixed**: the buzzer crackled/broke up
+periodically on every stage (short beep, long beep, continuous alarm).
+Root cause was in `buzzer.cpp`, not the hardware - `tone()`/`noTone()`
+were being called unconditionally on every single `buzzerUpdate()` call
+(i.e. every `loop()` iteration, with no throttling), and STM32duino's
+`tone()` resets the underlying timer each time it's called. At
+`loop()`'s effectively-unbounded call rate this reset the waveform
+hundreds/thousands of times a second, audible as a crackle layered over
+the actual tone. Fixed by tracking the currently-playing frequency and
+only calling `tone()`/`noTone()` again when it actually changes (0 Hz =
+silent) - confirmed live, crackle gone on all three stages.
+
+**Not yet verified**: the mute button, the enclosure sensor (AHT10/
+AHT20 or DS18B20), and the reset-line pulse. Next steps, in order:
+
+1. Bench-test the mute button and the sensor read in isolation.
+2. Confirm the AHT20 vs AHT10 init command byte (`sensor.cpp`'s own
    comment) against whichever chip actually arrives.
+3. Reset-line pulse - last, since it's the one step with real
+   consequences if it misfires (it pulses the Raspberry Pi's own reset
+   contact).
 
 ## Layout
 

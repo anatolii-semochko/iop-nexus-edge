@@ -5060,3 +5060,46 @@ never retroactively touches a row that already exists - the same
 "editing the source doesn't touch an already-seeded/already-created
 thing" shape as the EdgeX profile/device gotcha above, just one layer
 further out (Postgres, not EdgeX metadata).
+
+## 51. Control Node - buzzer crackle bug, LEDs/buzzer live-verified, passwordless attach-can-bus
+
+2026-08-14 - LEDs and the buzzer wired to real peripherals and
+confirmed working ("Світлодіоди і функціонал STM32 працюють супер").
+
+**Real firmware bug found and fixed**: the buzzer crackled/broke up
+periodically while sounding, on every stage. Not a hardware quirk -
+`buzzer.cpp`'s `buzzerUpdate()` called `tone()`/`noTone()`
+unconditionally every time it ran, and it runs every `loop()`
+iteration with no throttling (`main.cpp` calls it unconditionally each
+pass). STM32duino's `tone()` resets the underlying hardware timer on
+every call; at `loop()`'s effectively-unbounded rate that reset the
+waveform hundreds to thousands of times a second, audible as a crackle
+riding on top of the actual tone. Fixed by tracking the currently-
+playing frequency in a static and only calling `tone()`/`noTone()`
+again when the target actually changes (0 Hz = silent) - one small
+`setTone()` helper, same idea in all three stages (short beep, long
+beep, the two-tone continuous alarm). Rebuilt, reflashed via ST-Link,
+user-confirmed crackle gone on all three stages.
+
+**Passwordless `make attach-can-bus`**: the script from section 50
+needed the user to type a sudo password on every single invocation
+(every device-service restart, per that section's own correction).
+Split it in two rather than granting blanket `NOPASSWD` on raw `ip`/
+`nsenter` (a much coarser grant - any local process could then remap
+network namespaces without a password): `scripts/attach-can-bus.sh`
+stays unprivileged (resolves the container PID, no sudo of its own),
+`scripts/attach-can-bus-root.sh` is the entire privileged surface (the
+actual `ip link .../nsenter` calls), invoked via exactly one `sudo`
+call. A `/etc/sudoers.d/attach-can-bus` drop-in
+(`visudo -f /etc/sudoers.d/attach-can-bus`, never edit sudoers files
+directly - a syntax error there can break `sudo` system-wide) grants
+`NOPASSWD` for that one script path only:
+
+```
+anatolii ALL=(root) NOPASSWD: /home/anatolii/Projects/iot/nexus-edge-aquarium/scripts/attach-can-bus-root.sh
+```
+
+The sudoers rule is per-machine/per-user setup, not something committed
+anywhere - `visudo` catches syntax errors before saving (confirmed live:
+a `NOPASWD` typo, missing the second S, was caught and re-prompted for
+a fix rather than silently breaking sudo).
