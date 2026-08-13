@@ -4915,3 +4915,148 @@ not any of `watchdog.cpp`'s actual behavior. Next planned check (not
 yet done): wire a single LED to PA1 (yellow) and confirm a ~1Hz blink,
 proving the state machine genuinely runs in real time before wiring
 the rest of the board.
+
+## 50. Control Node - pulse/heartbeat switched to real CAN, container CAN access, a profile/device update gotcha
+
+2026-08-13 - continuing from section 49, with the board now on a real
+CAN bus reachable from the dev host via a Y4126-CAN-PRO-2 USB-CAN
+adapter (enumerates as `0c72:000c PEAK System PCAN-USB`, a compatible
+clone; picked up by the kernel's own `peak_usb` driver, exposed as
+plain SocketCAN `can0` - no vendor software needed).
+
+**Two of the node's nine devices switched from `virtual` to
+`physical`/CAN** - `control-node-pulse` and `control-node-heartbeat`
+only (`nexus-edge-aquarium/extra-res/devices/control-node-devices.yaml`),
+deliberately not the other seven (LEDs/buzzer/sensor/button), whose own
+physical wiring/bench-testing hasn't happened yet. Each device now
+carries `protocols.transport: {type: can, bus: can0}`; the CAN
+arbitration ID itself (`canId: "0x300"`/`"0x301"`) was added to the
+`NexusEdge-Pulse`/`NexusEdge-Heartbeat` **profiles**
+(`devices/standalone/actuator/pulse/`,
+`devices/standalone/sensor/heartbeat/`, plus their baked
+`apps/device-service/res/profiles/` copies) - confirmed by reading
+`internal/transport/can/mapping.go`/`transport.go` directly that
+`canId`/`byteOffset` resolve from the EdgeX device **profile's**
+resource attributes (`req.Attributes`, populated by device-sdk-go from
+`DeviceResource.Attributes`), not from anything per-device-instance.
+This is a real, load-bearing limitation worth flagging: **a profile
+shared by multiple device instances can only ever have one CAN mapping
+for all of them.** `NexusEdge-Pulse`/`NexusEdge-Heartbeat` are safe
+today (control-node is the only device using either profile anywhere in
+the package), but `NexusEdge-Led` is not - it's shared by all three of
+control-node's own LEDs (green/yellow/red), which the real firmware
+distinguishes only by `byteOffset` within one shared CAN ID (`0x303`).
+Going physical for the LEDs as currently modeled would make all three
+resolve to the same mapping. Not fixed now (LEDs are still virtual) -
+whoever does that migration will need either per-instance profiles
+(`NexusEdge-Led-Green`/`-Yellow`/`-Red`) or a code change letting
+`protocols.transport` on the device instance override/supplement the
+profile's attributes. The `control-node-devices.yaml` file's own
+original comment claiming `canId`/`byteOffset` belonged on the
+per-device `protocols.transport` block (written before this transport
+code existed) was simply wrong and has been corrected in place.
+
+**Gotcha found live: editing a profile/device YAML on disk does nothing
+to an already-seeded EdgeX instance.** device-sdk-go's own bootstrap
+only creates a profile/device if the name doesn't already exist yet -
+restarting `device-service` after editing `NexusEdge-Pulse.yaml` logged
+`"Device Profile NexusEdge-Pulse exists, using the existing one"` and
+genuinely left the live profile (verified via `GET
+/api/v3/deviceprofile/name/NexusEdge-Pulse` against core-metadata,
+`127.0.0.1:59982` on this dev host) with no `canId` attribute at all.
+Same story for the device's own `protocols` block. Fixed by pushing the
+change directly against core-metadata's own API instead of relying on
+device-service's own seed-on-boot path:
+
+```
+curl -X PUT -F "file=@apps/device-service/res/profiles/NexusEdge-Pulse.yaml" \
+  http://127.0.0.1:59982/api/v3/deviceprofile/uploadfile
+
+curl -X PATCH http://127.0.0.1:59982/api/v3/device -H "Content-Type: application/json" \
+  -d '[{"apiVersion":"v3","device":{"name":"control-node-pulse","protocols":{...}}}]'
+```
+
+(`PATCH /api/v3/device` needed a top-level `"apiVersion":"v3"` sibling
+of `"device"` - EdgeX's `Versionable` embed - a 400 without it, easy to
+miss.) Worth remembering for any future edit to an already-seeded
+device/profile, not just this one - the "safe" path of just editing the
+YAML and restarting the container only actually works for a *brand
+new* device/profile name that's never existed before.
+
+**Container access to the real CAN bus**: discussed two options with
+the user - `network_mode: host` for the `device-service` container
+(the textbook Docker+SocketCAN pattern) vs. moving just the `can0`
+interface into that container's own network namespace. Investigating
+`device-service`'s actual startup path
+(`CMD ["./device-service", "-cp=keeper.http://edgex-core-keeper:59890",
+"--registry"]`, `docker-compose.edgex.yml`) showed `network_mode: host`
+would be far more invasive than it first looked: it resolves
+`edgex-core-keeper` (and, via keeper's own shared config, core-metadata/
+core-data/core-command/the message bus) purely by compose-network DNS
+name, none of which exist under host networking - fixing it would mean
+republishing several currently-internal-only ports across at least
+four other compose services (one, `edgex-core-metadata`, is already
+published but on a *remapped* host port, `59982`, which would need to
+become `59881` to line up) plus `extra_hosts` entries pointing every
+one of those names back at `127.0.0.1`. The netns-move option touches
+none of that - `device-service` keeps its normal compose network for
+everything else, gains only the one interface. Chosen. Implemented as
+`nexus-edge-aquarium/scripts/attach-can-bus.sh` (+ `make
+attach-can-bus`) - `sudo ip link set can0 netns <device-service's PID>`
+then bitrate/up inside that namespace via `nsenter`. Deliberately not
+wired into `up-all`/`edgex-up` - CAN hardware isn't present on every
+dev machine or every target project.
+
+**Correction, live-verified same day**: the "a plain `docker restart`
+reuses the existing netns" assumption above turned out to be wrong for
+this container - restarting `device-service` returned `can0` to the
+*host*'s root namespace (confirmed by seeing it reappear there), not
+just any full recreate. So `make attach-can-bus` needs re-running after
+*any* container restart, not only `--force-recreate`/rebuild/`down`+
+`up` as originally guessed - a smaller but real correction to the
+tradeoff that led to picking this approach; still meaningfully less
+invasive than `network_mode: host` would have been.
+
+**A second gotcha found during the same live test**: `device-service`'s
+`busConn` (one cached raw CAN socket per interface name, opened lazily
+on first use, "no expiry" by design - see `internal/transport/can/
+bus.go`) went stale after `can0` was moved out of and back into the
+container's namespace for diagnostics (to isolate a wiring problem from
+a container problem - see below). The cached socket kept accepting
+writes into a void and errored on send with `no such device or
+address`, silently, until `device-service` itself was restarted to open
+a fresh socket against the now-stable interface. Anything that
+manipulates `can0`'s namespace after `device-service` has already
+opened it needs a `docker restart nexus-edge-aquarium-device-service`
+afterward, every time - not just once at initial attach.
+
+**End-to-end live verification, 2026-08-13**: with `control-node-pulse`/
+`control-node-heartbeat` on `physical`/CAN and `can0` correctly attached
+to the container's namespace, `candump` inside the container showed
+NexusEdge's own `CAN_ID_PULSE` (0x300) writes reaching the bus
+continuously and the board's `CAN_ID_LEDS` mirror (0x303) settling into
+`00 00 00` (green blinking/off between blinks) rather than cycling back
+to `Booting`/`PulseLost` - the full physical loop closed with no manual
+`cansend` involved, matching section 49's "next step" exactly. One
+red herring along the way, worth remembering for next time: an
+apparent zero-RX/zero-errors dead bus (rx_packets stuck at 0, no
+errors at all) turned out to be a real loose/miswired CAN connection on
+the user's bench, not a software problem - confirmed by testing `can0`
+directly on the host (bypassing the container/netns entirely) before
+and after the physical fix, which is a good general bisection technique
+for "is this the software or the wire" on this kind of setup.
+
+**Also found stale and fixed**: `nexus-edge-aquarium/migrations/
+001_seed_control_node.sql`'s own `backend` column for these two devices
+(hardcoded `'virtual'` at INSERT time) - purely informational/UI-facing
+(the actual EdgeX-side switch is what's described above), but was
+showing `virtual` in the Devices API/UI despite the real backend now
+being physical. Fixed in the migration file for future/fresh
+deployments, and via a direct `UPDATE devices SET backend = 'physical'
+WHERE edgex_device_name IN (...)` against the already-seeded row, since
+this migration's own `ON CONFLICT DO NOTHING` idempotency (by design,
+see the migration's own header) means editing the migration file alone
+never retroactively touches a row that already exists - the same
+"editing the source doesn't touch an already-seeded/already-created
+thing" shape as the EdgeX profile/device gotcha above, just one layer
+further out (Postgres, not EdgeX metadata).

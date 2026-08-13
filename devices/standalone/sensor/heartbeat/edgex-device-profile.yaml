@@ -24,5 +24,11 @@ deviceResources:
       # actually enforces "no ordinary command surface", and a real CAN
       # write path needs "RW" here to exist at all at the EdgeX layer.
       readWrite: "RW"
+    attributes:
+      # CAN transport mapping (internal/transport/can/mapping.go) - see
+      # ../../actuator/pulse's own profile comment for the same
+      # single-instance-only caveat (canId lives on the shared profile,
+      # not per-device).
+      canId: "0x301"
 
 deviceCommands: []

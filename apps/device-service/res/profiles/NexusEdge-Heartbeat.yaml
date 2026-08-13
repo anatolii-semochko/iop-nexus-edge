@@ -16,5 +16,7 @@ deviceResources:
     properties:
       valueType: "Uint32"
       readWrite: "RW"
+    attributes:
+      canId: "0x301"
 
 deviceCommands: []

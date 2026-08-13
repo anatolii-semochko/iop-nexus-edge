@@ -15,5 +15,7 @@ deviceResources:
     properties:
       valueType: "Bool"
       readWrite: "RW"
+    attributes:
+      canId: "0x300"
 
 deviceCommands: []
