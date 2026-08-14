@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
 import {
   CAlert,
   CBadge,
@@ -17,7 +16,8 @@ import {
   CTableHeaderCell,
   CTableRow,
 } from '@coreui/react'
-import { cilSettings } from '@coreui/icons'
+import CIcon from '@coreui/icons-react'
+import { cilCheck, cilLibrary, cilSettings, cilX } from '@coreui/icons'
 import { api } from '../../api/client'
 import GroupsConfigModal from '../../components/GroupsConfigModal'
 import IconButton from '../../components/IconButton'
@@ -26,6 +26,7 @@ import Switch from '../../components/Switch'
 import ExpandAllToggleButton from '../../components/table/ExpandAllToggleButton'
 import ExpandToggleButton from '../../components/table/ExpandToggleButton'
 import { useExpandableRows } from '../../hooks/useExpandableRows'
+import { useNow } from '../../hooks/useNow'
 import { usePagination } from '../../hooks/usePagination'
 import { usePersistedState } from '../../hooks/usePersistedState'
 import { useDeviceLiveState } from '../../api/useLiveDevice'
@@ -58,31 +59,79 @@ const StatusBadge = ({ device }) => {
   )
 }
 
+// Devices list redesign (AGENTS_TO_DO.md, 2026-08-14): icon column, with
+// an optional colored-circle background when this device's own boolean
+// value is true (device.capabilities.color, editable via
+// DeviceSettingsModal) - same "circle behind the icon" visual language
+// StatusIndicator/BuzzerIndicator already use in the expanded row.
+const iconUrl = (iconPath) => (iconPath ? `/api${iconPath}` : null)
+
+const DeviceIcon = ({ iconPath, activeColor, active }) => {
+  const url = iconUrl(iconPath)
+  const showBackground = active && Boolean(activeColor)
+  return (
+    <div
+      style={{
+        width: 32,
+        height: 32,
+        borderRadius: '50%',
+        backgroundColor: showBackground ? activeColor : 'transparent',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      {url ? (
+        <img src={url} alt="" style={{ width: 20, height: 20, objectFit: 'contain' }} />
+      ) : (
+        <CIcon icon={cilLibrary} className="text-body-secondary" />
+      )}
+    </div>
+  )
+}
+
+// Value column - number as-is, a green/red circle+check/x for Bool (same
+// idiom as the icon's own active-color circle, just fixed colors since
+// this one isn't user-configurable), "JSON" for anything compound (a
+// Device is meant to be atomic - AGENTS.md section 30 - this is a
+// display-safety fallback, not an expected case), "-" when no value is
+// known yet.
+const ValueCell = ({ value }) => {
+  if (value === undefined || value === null) return <span className="text-body-secondary">-</span>
+  if (typeof value === 'boolean') {
+    return (
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 22,
+          height: 22,
+          borderRadius: '50%',
+          backgroundColor: value ? '#2eb85c' : '#e55353',
+        }}
+      >
+        <CIcon icon={value ? cilCheck : cilX} style={{ color: '#fff', width: 12, height: 12 }} />
+      </span>
+    )
+  }
+  if (typeof value === 'number') return <span>{value}</span>
+  if (typeof value === 'object') return <CBadge color="secondary">JSON</CBadge>
+  return <span>{String(value)}</span>
+}
+
 // Detail row (AGENTS_TO_DO.md, 2026-08-02) - live indicators for the two
 // kinds Alarm Annunciator/Active Zummer already use (same 48px
 // StatusIndicator/BuzzerIndicator as Processes -> Active Zummer's own
 // panel), raw value for everything else for now ("Показуй поки що сире
-// значення") - one REST fetch on expand (same "get once, then overlay
-// live" shape ActiveBuzzerPanel.jsx already uses) plus the live overlay,
-// so the value is correct immediately rather than waiting for this
-// device's next WS event.
-const DeviceDetailRow = ({ device }) => {
-  const [fetched, setFetched] = useState(null)
-  const live = useDeviceLiveState(device.id)
-
-  useEffect(() => {
-    api
-      .getDevice(device.id)
-      .then(setFetched)
-      .catch(() => {})
-  }, [device.id])
-
-  const value = live.value !== undefined ? live.value : fetched?.value
+// значення"). `value` now comes from the parent DeviceRow (2026-08-14 -
+// the collapsed row needs the exact same fetch+live overlay, so it's
+// owned once per row instead of fetched twice).
+const DeviceDetailRow = ({ device, value }) => {
   const active = value === true
-
   return (
     <div className="p-3 pt-0">
-      {device.type === 'active-buzzer' ? (
+      {device.type === 'active-buzzer' || device.type === 'passive-buzzer' ? (
         <BuzzerIndicator active={active} />
       ) : device.type === 'led' ? (
         // `color` (2026-08-09, "control-node" node type) - optional
@@ -97,6 +146,125 @@ const DeviceDetailRow = ({ device }) => {
   )
 }
 
+// One device's own row - owns the single fetch-once-then-overlay-live
+// value (moved up from DeviceDetailRow, 2026-08-14, since the collapsed
+// row now shows the value too, not just the expanded one) and the
+// overdue/staleness check.
+const DeviceRow = ({
+  device,
+  expanded,
+  onToggleExpand,
+  onToggleSimulated,
+  onOpenSettings,
+  effectivelySimulated,
+}) => {
+  const [fetched, setFetched] = useState(null)
+  const live = useDeviceLiveState(device.id)
+  const now = useNow()
+
+  useEffect(() => {
+    api
+      .getDevice(device.id)
+      .then(setFetched)
+      .catch(() => {})
+  }, [device.id])
+
+  const value = live.value !== undefined ? live.value : fetched?.value
+  // Reading timestamp: prefer a live WebSocket event (freshest, if one
+  // has arrived this session) over the one-time fetch's own
+  // `readingOrigin` (EdgeX's own reading timestamp - correct even on a
+  // page that just loaded and hasn't seen a live event yet). `live.
+  // timestamp` is an ISO string (dualDevicesModel.ts's own
+  // `new Date().toISOString()`), not the ms-epoch number `readingOrigin`
+  // already is - normalized to ms here so the two are comparable.
+  const lastReadingAt = live.timestamp
+    ? new Date(live.timestamp).getTime()
+    : (fetched?.readingOrigin ?? null)
+
+  // Overdue/staleness (AGENTS_TO_DO.md, 2026-08-14: "danger, якщо
+  // прострочений") - reuses the same data_logger_control config
+  // (periodSeconds + error.numberSkippedPeriods) the Data Logger process
+  // already tracks server-side (AGENTS.md section 21-adjacent), rather
+  // than inventing a separate threshold. Only evaluated when that config
+  // is actually set and a reading time is known - a device with no
+  // logging cadence configured, or one this page hasn't managed to read
+  // yet, is simply not flagged either way.
+  const dlc = device.data_logger_control
+  const maxAgeMs =
+    dlc?.periodSeconds && dlc?.error?.numberSkippedPeriods
+      ? dlc.periodSeconds * dlc.error.numberSkippedPeriods * 1000
+      : null
+  const isOverdue =
+    maxAgeMs !== null && lastReadingAt !== null && now > 0 && now - lastReadingAt > maxAgeMs
+
+  // Overdue (danger) wins over simulated (warning) - same "highest
+  // severity wins, never both at once" precedence ProcessesTable.jsx's
+  // own row color already uses.
+  const rowColor = isOverdue ? 'danger' : effectivelySimulated ? 'warning' : undefined
+  const noBorderWhenExpanded = expanded ? 'border-bottom-0' : undefined
+
+  return (
+    <React.Fragment>
+      <CTableRow color={rowColor}>
+        <CTableDataCell className={noBorderWhenExpanded}>
+          <DeviceIcon
+            iconPath={device.icon_path}
+            activeColor={device.capabilities?.color}
+            active={value === true}
+          />
+        </CTableDataCell>
+        <CTableDataCell className={noBorderWhenExpanded}>
+          <ValueCell value={value} />
+        </CTableDataCell>
+        <CTableDataCell className={noBorderWhenExpanded}>{device.name}</CTableDataCell>
+        <CTableDataCell className={noBorderWhenExpanded}>{device.type}</CTableDataCell>
+        <CTableDataCell className={noBorderWhenExpanded}>{device.node_name ?? '-'}</CTableDataCell>
+        <CTableDataCell className={noBorderWhenExpanded}>
+          <CBadge color={backendColor(device.backend)}>{device.backend}</CBadge>
+        </CTableDataCell>
+        <CTableDataCell className={noBorderWhenExpanded}>
+          <StatusBadge device={device} />
+        </CTableDataCell>
+        <CTableDataCell className={`text-end ${noBorderWhenExpanded ?? ''}`}>
+          <div className="d-flex justify-content-end align-items-center gap-1 flex-nowrap">
+            <IconButton
+              icon={cilSettings}
+              size="sm"
+              center
+              onClick={onOpenSettings}
+              ariaLabel={`${device.name} settings`}
+            />
+            {device.node_id === null && (
+              <Switch
+                checked={device.simulated}
+                onChange={onToggleSimulated}
+                disabled={!device.simulated && !device.edgex_device_name_simulated}
+                activeColor="#e55353"
+                inactiveColor="#d3d3d3"
+                ariaLabel={
+                  device.simulated
+                    ? `${device.name} is simulated - switch to physical`
+                    : device.edgex_device_name_simulated
+                      ? `${device.name} is physical - switch to simulated`
+                      : `${device.name} has no simulated twin provisioned`
+                }
+              />
+            )}
+            <ExpandToggleButton expanded={expanded} onClick={onToggleExpand} />
+          </div>
+        </CTableDataCell>
+      </CTableRow>
+      {expanded && (
+        <CTableRow color={rowColor}>
+          <CTableDataCell colSpan={8} className="p-0">
+            <DeviceDetailRow device={device} value={value} />
+          </CTableDataCell>
+        </CTableRow>
+      )}
+    </React.Fragment>
+  )
+}
+
 const matchesSearch = (device, search) => {
   if (!search) return true
   const needle = search.toLowerCase()
@@ -104,13 +272,15 @@ const matchesSearch = (device, search) => {
 }
 
 /**
- * Devices list (AGENTS_TO_DO.md, 2026-08-01) - now with Device Group and
- * Node filters, a page-level Config button (left of Clear Filters) that
- * manages the Device Group list itself, and a per-row Settings popup that
- * edits *this* device's group memberships (multiple - shared devices) and
- * Node assignment (single, nullable) together. Also fixes a pre-existing
- * bug: the Node column showed the raw `node_id` FK instead of the
- * resolved node name.
+ * Devices list (AGENTS_TO_DO.md, 2026-08-01, redesigned 2026-08-14) - Device
+ * Group and Node filters, a page-level Config button (left of Clear
+ * Filters) that manages the Device Group list itself, and a per-row
+ * Settings popup that edits *this* device's group memberships (multiple -
+ * shared devices), Node assignment (single, nullable), and capabilities
+ * (Physical ID placeholder, active-background-color) together. Name is
+ * plain text now, not a link - the old dedicated /devices/:id page was
+ * removed (2026-08-14, "У нас є розгортка" - the expand row already
+ * covers it).
  */
 const DevicesList = () => {
   const [devices, setDevices] = useState(null)
@@ -245,6 +415,8 @@ const DevicesList = () => {
                 <CTable hover responsive>
                   <CTableHead>
                     <CTableRow>
+                      <CTableHeaderCell scope="col" style={{ width: 40 }}></CTableHeaderCell>
+                      <CTableHeaderCell scope="col">Value</CTableHeaderCell>
                       <CTableHeaderCell scope="col">Name</CTableHeaderCell>
                       <CTableHeaderCell scope="col">Type</CTableHeaderCell>
                       <CTableHeaderCell scope="col">Node</CTableHeaderCell>
@@ -264,72 +436,25 @@ const DevicesList = () => {
                   </CTableHead>
                   <CTableBody>
                     {pageItems.map((device) => {
-                      // Same `border-bottom-0` idiom ProcessesTable.jsx's own
-                      // expanded row already uses (AGENTS_TO_DO.md, 2026-08-10
-                      // "візуальна консистентність"). `effectivelySimulated`
-                      // - a node-attached device has no switch of its own
-                      // (see below) but is still visually "simulated" right
-                      // now whenever its parent node is (`node_simulated`,
-                      // from SELECT_DEVICE_LIST_BASE's own join) - the row
+                      // `effectivelySimulated` - a node-attached device has
+                      // no switch of its own (see below) but is still
+                      // visually "simulated" right now whenever its parent
+                      // node is (`node_simulated`, from
+                      // SELECT_DEVICE_LIST_BASE's own join) - the row
                       // highlight should reflect what's actually resolving,
                       // not just this row's own `simulated` column.
-                      const expandedRow = isExpanded(device.id)
-                      const noBorderWhenExpanded = expandedRow ? 'border-bottom-0' : undefined
-                      const effectivelySimulated = device.node_id === null ? device.simulated : device.node_simulated
+                      const effectivelySimulated =
+                        device.node_id === null ? device.simulated : device.node_simulated
                       return (
-                      <React.Fragment key={device.id}>
-                        <CTableRow color={effectivelySimulated ? 'warning' : undefined}>
-                          <CTableDataCell className={noBorderWhenExpanded}>
-                            <Link to={`/devices/${device.id}`}>{device.name}</Link>
-                          </CTableDataCell>
-                          <CTableDataCell className={noBorderWhenExpanded}>{device.type}</CTableDataCell>
-                          <CTableDataCell className={noBorderWhenExpanded}>{device.node_name ?? '-'}</CTableDataCell>
-                          <CTableDataCell className={noBorderWhenExpanded}>
-                            <CBadge color={backendColor(device.backend)}>{device.backend}</CBadge>
-                          </CTableDataCell>
-                          <CTableDataCell className={noBorderWhenExpanded}>
-                            <StatusBadge device={device} />
-                          </CTableDataCell>
-                          <CTableDataCell className={`text-end ${noBorderWhenExpanded ?? ''}`}>
-                            <div className="d-flex justify-content-end align-items-center gap-1 flex-nowrap">
-                              <IconButton
-                                icon={cilSettings}
-                                size="sm"
-                                center
-                                onClick={() => setSettingsDevice(device)}
-                                ariaLabel={`${device.name} settings`}
-                              />
-                              {device.node_id === null && (
-                                <Switch
-                                  checked={device.simulated}
-                                  onChange={() => handleToggleSimulated(device)}
-                                  disabled={!device.simulated && !device.edgex_device_name_simulated}
-                                  activeColor="#e55353"
-                                  inactiveColor="#d3d3d3"
-                                  ariaLabel={
-                                    device.simulated
-                                      ? `${device.name} is simulated - switch to physical`
-                                      : device.edgex_device_name_simulated
-                                        ? `${device.name} is physical - switch to simulated`
-                                        : `${device.name} has no simulated twin provisioned`
-                                  }
-                                />
-                              )}
-                              <ExpandToggleButton
-                                expanded={isExpanded(device.id)}
-                                onClick={() => toggleOne(device.id)}
-                              />
-                            </div>
-                          </CTableDataCell>
-                        </CTableRow>
-                        {expandedRow && (
-                          <CTableRow color={effectivelySimulated ? 'warning' : undefined}>
-                            <CTableDataCell colSpan={6} className="p-0">
-                              <DeviceDetailRow device={device} />
-                            </CTableDataCell>
-                          </CTableRow>
-                        )}
-                      </React.Fragment>
+                        <DeviceRow
+                          key={device.id}
+                          device={device}
+                          expanded={isExpanded(device.id)}
+                          onToggleExpand={() => toggleOne(device.id)}
+                          onToggleSimulated={() => handleToggleSimulated(device)}
+                          onOpenSettings={() => setSettingsDevice(device)}
+                          effectivelySimulated={effectivelySimulated}
+                        />
                       )
                     })}
                   </CTableBody>

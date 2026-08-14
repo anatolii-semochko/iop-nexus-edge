@@ -30,6 +30,15 @@ interface DeviceCapabilities {
   min?: number;
   max?: number;
   step?: number;
+  // UI redesign (AGENTS_TO_DO.md, 2026-08-14) - `color` (LED's own
+  // pre-existing per-instance hint) already meant "which color to show
+  // when this boolean device is active"; DevicesList.jsx's new icon
+  // column reuses that exact same field for every boolean device type,
+  // not just `led`. `physicalId` is a placeholder field only - not read
+  // or written by anything yet (DeviceSettingsModal.jsx renders it
+  // disabled), reserved for a future real hardware-address concept.
+  color?: string;
+  physicalId?: string;
 }
 
 interface DeviceRow {
@@ -89,6 +98,7 @@ interface DeviceListRow extends DeviceRow {
   node_name: string | null;
   node_simulated: boolean | null;
   device_group_ids: number[];
+  icon_path: string | null;
 }
 
 // Resolved node name plus every Device Group this device belongs to
@@ -96,13 +106,19 @@ interface DeviceListRow extends DeviceRow {
 // than the per-row N+1 idiom used elsewhere (withDeletable/withProcessIds)
 // - this powers the Devices list page's node-name column and group
 // filter for every row on every load, a hotter path than an admin
-// group-list screen's tens-of-rows fetch.
+// group-list screen's tens-of-rows fetch. `icon_path` (2026-08-14, UI
+// redesign) joins the Library Catalog by `type_name` - the same key
+// `usedInProject` (routes/library.ts) already matches against - so the
+// list's own icon column stays in sync with whatever the Library
+// currently has for this device's type, no separate fetch needed.
 const SELECT_DEVICE_LIST_BASE = `
   SELECT d.*, n.name AS node_name, n.simulated AS node_simulated,
-    COALESCE(array_agg(dg.device_group_id) FILTER (WHERE dg.device_group_id IS NOT NULL), '{}') AS device_group_ids
+    COALESCE(array_agg(dg.device_group_id) FILTER (WHERE dg.device_group_id IS NOT NULL), '{}') AS device_group_ids,
+    li.icon_path
   FROM devices d
   LEFT JOIN nodes n ON n.id = d.node_id
   LEFT JOIN device_device_groups dg ON dg.device_id = d.id
+  LEFT JOIN library_items li ON li.type_name = d.type AND li.kind = 'device'
 `;
 
 // Same node-join every other device query needs to resolve which EdgeX
@@ -119,7 +135,7 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
   // List view: registry metadata plus EdgeX admin/operating state, fetched
   // once for every device.
   app.get("/devices", async () => {
-    const result = await pool.query<DeviceListRow>(`${SELECT_DEVICE_LIST_BASE} GROUP BY d.id, n.name, n.simulated ORDER BY d.name`);
+    const result = await pool.query<DeviceListRow>(`${SELECT_DEVICE_LIST_BASE} GROUP BY d.id, n.name, n.simulated, li.icon_path ORDER BY d.name`);
 
     let edgexByName = new Map<string, EdgeXDeviceStatus>();
     try {
@@ -154,6 +170,12 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
     // per-resource EdgeXReading always carried.
     let valueType: string | null = null;
     let units: string | null = null;
+    // EdgeX's own reading timestamp, ms epoch (AGENTS_TO_DO.md, 2026-08-14
+    // UI redesign) - the Devices list's own overdue/staleness highlight
+    // needs a reading time that's correct even on a fresh page load, not
+    // just "since the WebSocket has been open" (the live overlay's own
+    // `timestamp` only reflects events actually received this session).
+    let readingOrigin: number | null = null;
     let dualState: dualDevicesModel.DeviceState | null = null;
     const resolvedEdgexName = resolveEdgexName(device);
     if (resolvedEdgexName && device.capabilities.edgexResource) {
@@ -164,6 +186,10 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
         value = reading.value;
         valueType = reading.valueType;
         units = reading.units ?? null;
+        // EdgeX's own `origin` is nanoseconds since epoch (confirmed live,
+        // 2026-08-14: a real reading's origin was a 19-digit number) - ms
+        // for every JS Date/arithmetic consumer on this side.
+        readingOrigin = Math.floor(reading.origin / 1e6);
       } catch (err) {
         app.log.warn({ err, device: device.name }, "failed to read device value");
       }
@@ -178,7 +204,7 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
       }
     }
 
-    return { ...device, value, valueType, units, dualState };
+    return { ...device, value, valueType, units, dualState, readingOrigin };
   });
 
   // Write path (UI-driven): Model State Validator, then Dual Devices Model
@@ -488,6 +514,35 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  // Partial jsonb merge onto `capabilities` (AGENTS_TO_DO.md, 2026-08-14
+  // UI redesign) - same "loose config, interpreted by the consumer"
+  // pattern `processes/:id/config` already uses. Deliberately generic
+  // (any capability key, not just `color`/`physicalId`) rather than a
+  // narrow endpoint per field - this is admin-only settings, not a hot
+  // control-loop path.
+  app.patch<{ Params: { id: string }; Body: Record<string, unknown> }>(
+    "/devices/:id/capabilities",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const device = await findDevice(request.params.id);
+      if (!device) return reply.code(404).send({ error: "device not found" });
+
+      const capabilities = { ...device.capabilities, ...request.body };
+      await logCommand({
+        deviceId: device.id,
+        action: "config",
+        value: request.body,
+        source: "api",
+        actorUserId: request.user.sub,
+      });
+      await pool.query("UPDATE devices SET capabilities = $1, updated_at = now() WHERE id = $2", [
+        capabilities,
+        device.id,
+      ]);
+      return findDeviceListRow(request.params.id);
+    },
+  );
+
   // System-wide aggregate of every controllable device's mode (AGENTS.md
   // section 6). The full device list comes from Postgres (the source of
   // truth for what devices exist) - a device untouched in Redis is
@@ -514,7 +569,7 @@ function isUniqueViolation(err: unknown): boolean {
 
 async function findDeviceListRow(id: string): Promise<DeviceListRow | undefined> {
   const result = await pool.query<DeviceListRow>(
-    `${SELECT_DEVICE_LIST_BASE} WHERE d.id = $1 GROUP BY d.id, n.name, n.simulated`,
+    `${SELECT_DEVICE_LIST_BASE} WHERE d.id = $1 GROUP BY d.id, n.name, n.simulated, li.icon_path`,
     [id],
   );
   return result.rows[0];

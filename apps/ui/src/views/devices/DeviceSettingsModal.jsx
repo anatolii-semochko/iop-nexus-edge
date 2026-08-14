@@ -32,6 +32,7 @@ const DeviceSettingsModal = ({ visible, onClose, device, deviceGroups, nodes, on
   const [name, setName] = useState('')
   const [selectedGroupIds, setSelectedGroupIds] = useState(new Set())
   const [nodeId, setNodeId] = useState('')
+  const [activeColor, setActiveColor] = useState('#2eb85c')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
 
@@ -43,6 +44,7 @@ const DeviceSettingsModal = ({ visible, onClose, device, deviceGroups, nodes, on
       setSelectedGroupIds(new Set(device.device_group_ids ?? []))
 
       setNodeId(device.node_id ?? '')
+      setActiveColor(device.capabilities?.color ?? '#2eb85c')
       setError(null)
     }
   }, [visible, device])
@@ -70,6 +72,7 @@ const DeviceSettingsModal = ({ visible, onClose, device, deviceGroups, nodes, on
         api.renameDevice(device.id, trimmedName),
         api.setDeviceGroups(device.id, [...selectedGroupIds]),
         api.setDeviceNode(device.id, nodeId === '' ? null : Number(nodeId)),
+        api.setDeviceCapabilities(device.id, { color: activeColor }),
       ])
       onSaved?.()
       onClose()
@@ -101,6 +104,29 @@ const DeviceSettingsModal = ({ visible, onClose, device, deviceGroups, nodes, on
               </option>
             ))}
           </CFormSelect>
+        </div>
+        <div className="mb-3">
+          <CFormLabel>Physical ID</CFormLabel>
+          <CFormInput
+            value={device?.capabilities?.physicalId ?? ''}
+            disabled
+            placeholder="Not wired up yet"
+          />
+        </div>
+        <div className="mb-3">
+          <CFormLabel>Background color when active</CFormLabel>
+          <div className="d-flex align-items-center gap-2">
+            <CFormInput
+              type="color"
+              value={activeColor}
+              onChange={(e) => setActiveColor(e.target.value)}
+              disabled={busy}
+              style={{ width: 60, padding: 2 }}
+            />
+            <span className="text-body-secondary small">
+              Used behind this device&apos;s icon in the Devices list when its value is true.
+            </span>
+          </div>
         </div>
         <div>
           <div className="text-body-secondary small mb-2">Device Groups</div>

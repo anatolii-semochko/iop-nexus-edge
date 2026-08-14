@@ -1,4 +1,4 @@
-# The Active Zummer device instance (devices/standalone/indicator/active-buzzer/,
+# The Active Zummer device instance (devices/standalone/indicator/speaker/active-buzzer/,
 # AGENTS.md section 7) - separate file from example-devices.yaml, which is
 # the smoke-test fixture only.
 deviceList:

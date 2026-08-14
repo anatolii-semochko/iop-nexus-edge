@@ -21,7 +21,6 @@ const Docs = React.lazy(() => import('./views/docs/Docs'))
 // Devices
 const NodesList = React.lazy(() => import('./views/devices/NodesList'))
 const DevicesList = React.lazy(() => import('./views/devices/DevicesList'))
-const DeviceDetail = React.lazy(() => import('./views/devices/DeviceDetail'))
 const DevSimulator = React.lazy(() => import('./views/devices/DevSimulator'))
 
 // Library
@@ -60,7 +59,6 @@ export const routes = [
   { path: '/docs', name: 'Docs', element: Docs },
   { path: '/nodes', name: 'Nodes', element: NodesList },
   { path: '/devices', name: 'Devices', element: DevicesList, exact: true },
-  { path: '/devices/:id', name: 'Device Detail', element: DeviceDetail },
   { path: '/dev-simulator', name: 'Dev Simulator', element: DevSimulator },
   { path: '/library', name: 'Library', element: LibraryBrowser },
   { path: '/processes', name: 'Processes', element: ProcessesList },

@@ -1,6 +1,6 @@
 import type { MigrationBuilder } from "node-pg-migrate";
 
-// Registers the Active Zummer (devices/standalone/indicator/active-buzzer/, AGENTS.md
+// Registers the Active Zummer (devices/standalone/indicator/speaker/active-buzzer/, AGENTS.md
 // section 7) - a single binary actuator, not a sensor: `readOnly` is
 // deliberately absent from its capability (defaults falsy), unlike
 // light-regulator's read-only `Level`. Provisioned into EdgeX by

@@ -75,6 +75,11 @@ export const api = {
   // instead).
   setDeviceSimulated: (id, simulated) =>
     request(`/devices/${id}/simulated`, { method: 'PATCH', body: JSON.stringify({ simulated }) }),
+  // UI redesign (AGENTS_TO_DO.md, 2026-08-14) - partial merge onto
+  // device.capabilities (color/physicalId for now, generic for any
+  // future key).
+  setDeviceCapabilities: (id, patch) =>
+    request(`/devices/${id}/capabilities`, { method: 'PATCH', body: JSON.stringify(patch) }),
   // A UI write is always a manual override (Dual Devices Model MANUAL mode
   // - see AGENTS.md section 6). No `resource` param anymore (AGENTS_TO_DO.md's
   // 2026-07-27 Device/Node refactor) - a Device is atomic, exactly one value.

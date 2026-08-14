@@ -461,7 +461,7 @@ physical assembly, section 30 already got this half right), not
 duplicated into either device type's.
 
 `devices/standalone/actuator/light-regulator/` and
-`devices/standalone/indicator/active-buzzer/` are real device types
+`devices/standalone/indicator/speaker/active-buzzer/` are real device types
 built to this layout - `runtime/`
 and `firmware/` are deliberately absent for both (nothing for either to
 add over the generic Virtual Node Runtime yet, no hardware to target),
@@ -2362,7 +2362,7 @@ The platform's first physical-alarm device and the first real consumer of
 Message Levels (section 22/23's `message_levels` table, which sat as
 config-storage only until now). A single active buzzer - built-in tone
 generator, driven purely 0/1 - modeled as a real device type under
-`devices/standalone/indicator/active-buzzer/` (same layout as `light-regulator`,
+`devices/standalone/indicator/speaker/active-buzzer/` (same layout as `light-regulator`,
 section 7): `contract.schema.ts`, `edgex-device-profile.yaml` (mirrored
 into `apps/device-service/res/profiles/NexusEdge-ActiveBuzzer.yaml` +
 `res/devices/active-buzzer-devices.yaml`, seeded into Postgres by
@@ -2472,7 +2472,7 @@ entry) - no config to edit (unlike Temperature Control), just a live
 visualization via the shared `BuzzerIndicator` atom (section 26 - built
 ahead of time, unwired, specifically for this) fed by
 `useDeviceLiveState(process.device_id)`, same live-preferred-over-REST
-pattern as `TemperatureProcessPanel`. `devices/standalone/indicator/active-buzzer/
+pattern as `TemperatureProcessPanel`. `devices/standalone/indicator/speaker/active-buzzer/
 ui/control/ActiveBuzzerControl.jsx` (registered in `DeviceDetail.jsx`'s
 `DEVICE_TYPE_CONTROLS`, matching light-regulator's convention) is a
 separate, self-contained lamp - device-type components can't import
@@ -5210,3 +5210,80 @@ used this rarely. `ProcessesTable.jsx`'s `ProcessRow` gained a delete
 (trash icon) button, unconditional, no confirmation dialog - matches
 `NamedListManager.jsx`'s own existing delete-without-confirm
 convention, not a new pattern.
+
+## 53. Devices list redesign - Speaker category, icon/value columns, active-color, overdue highlight
+
+2026-08-14 - a batch of Devices page changes, all confirmed live
+against nexus-edge-aquarium's real control-node instance.
+
+**Library: Speaker category.** `devices/standalone/indicator/speaker/`
+(new `category.json`) now holds `active-buzzer` (moved, `git mv`) and a
+new `passive-buzzer` type - identical single-`Bool` EdgeX contract to
+active-buzzer on purpose (see `passive-buzzer/contract.schema.ts`'s own
+header), the split is a firmware/hardware distinction only: a passive
+buzzer has no built-in oscillator, so producing any sound at all needs
+the driving MCU to generate the waveform itself (PWM/`tone()`).
+control-node's own real buzzer (`control-node-buzzer`,
+nexus-edge-aquarium) was reassigned from `active-buzzer` to
+`passive-buzzer` (migration + a live `UPDATE devices SET type = ...`
+for the already-seeded row, same two-step gotcha as section 50/51) once
+this was noticed - `firmware/src/buzzer.cpp` genuinely drives it via
+`tone()`/`noTone()`, confirmed when section 51's crackle bug was fixed.
+The underlying EdgeX profile/canId (`NexusEdge-ActiveBuzzer`, `0x304`)
+was deliberately left unchanged - this is a NexusEdge-side taxonomy
+correction, not a CAN contract change. `apps/ui/src/builtinDeviceTypes.js`
+registers its own `ui/control`/`ui/simulator` pair (visually identical
+lamp to active-buzzer's own, on purpose).
+
+**Devices list: icon + value columns, Name is plain text now.**
+`GET /devices` (`routes/devices.ts`'s `SELECT_DEVICE_LIST_BASE`) gained
+a `LEFT JOIN library_items li ON li.type_name = d.type AND li.kind =
+'device'`, exposing `icon_path` per row - the same `type_name` key
+`usedInProject` already matched against, so the list's own icon column
+tracks whatever the Library currently has for that type, no separate
+fetch. Value cell: number as-is, a green/red circle+check/x for `Bool`,
+a `JSON` badge for anything compound (Device is meant to be atomic -
+section 30 - this is a display-safety fallback, not an expected case).
+The old `/devices/:id` route/page (`DeviceDetail.jsx`) was removed
+outright - "У нас є розгортка" (the expand row already covers it); Name
+is plain text in the collapsed row now, not a link to anywhere.
+
+**Icon-on-colored-circle when active.** `device.capabilities.color`
+(LED's own pre-existing per-instance hint, `AGENTS.md` sections
+7/9 - "which color to show when active") is now read generically for
+*any* boolean device's icon, not just `led` - `DeviceIcon` in
+`DevicesList.jsx` puts the Library icon on a filled circle of that
+color exactly when `value === true`, otherwise plain/transparent. Newly
+editable through `DeviceSettingsModal.jsx` (a color-input field) via a
+new generic `PATCH /devices/:id/capabilities` (partial jsonb merge,
+`requireAuth`, same pattern as `processes/:id/config`) - previously
+`color` could only be set at seed time. Same modal also gained a
+`physicalId` field, rendered disabled/placeholder-only - reserved for a
+future real hardware-address concept, nothing reads or writes it yet.
+
+**Overdue/staleness row highlight (danger).** Confirmed with the user:
+reuse the *existing* `data_logger_control` config
+(`periodSeconds`/`error.numberSkippedPeriods`) the Data Logger process
+already tracks per device (section 21-adjacent), rather than inventing
+a separate threshold - a device is flagged `danger` when
+`now - lastReadingAt > periodSeconds * error.numberSkippedPeriods *
+1000` and that config is actually set. `lastReadingAt` prefers a live
+WebSocket event's own timestamp (if one has arrived this session) over
+`GET /devices/:id`'s new `readingOrigin` field (EdgeX's own reading
+timestamp - **nanoseconds** since epoch, confirmed live against a real
+reading, converted to ms server-side before it reaches the client) -
+the fetch-once value covers a page that just loaded and hasn't seen a
+live event yet, which a live-only signal can't. `danger` (overdue) wins
+over the pre-existing `warning` (simulated) row tint - same "highest
+severity, never both at once" precedence `ProcessesTable.jsx` already
+uses. New `apps/ui/src/hooks/useNow.js` - a periodically-refreshed
+current-time hook, since calling `Date.now()` directly during render is
+lint-flagged (`react-hooks/purity`); starts at `0` rather than
+`Date.now()` even in its lazy initializer, since that still runs during
+render too.
+
+**Not done, explicitly deferred**: point 5 of the original request
+("В розгортці показуємо") turned out to be an unfinished sentence,
+confirmed with the user - nothing changed in the expanded detail row's
+own content beyond wiring it to the same single fetch+live `value` the
+collapsed row now also uses (previously it fetched independently).
