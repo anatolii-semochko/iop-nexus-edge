@@ -5103,3 +5103,110 @@ The sudoers rule is per-machine/per-user setup, not something committed
 anywhere - `visudo` catches syntax errors before saving (confirmed live:
 a `NOPASWD` typo, missing the second S, was caught and re-prompted for
 a fix rather than silently breaking sudo).
+
+## 52. Process management - a Library catalog for process kinds, live create/delete, "pending restart"
+
+2026-08-14 - two gaps the user raised together: (1) `processes` rows
+could only ever be added/removed via a hand-written seed migration, no
+live management surface at all; (2) there was no discoverable catalog
+of reusable process *kinds* the way `devices/` already is one for
+device/node types - a target project wanting a new process kind had to
+write one from scratch, copy-paste from another target project, or
+know CORE's own `apps/orchestrator/src/processes/*.ts` existed at all.
+
+**Design choice, per the user's own framing ("каталог має бути в
+Library")**: rather than a parallel catalog system, `library_categories`/
+`library_items` (section 32) gained a third `kind = 'process'` value
+alongside the existing `device`/`node`, sourced from a new
+`devices/processes/` tree (same `library.json`/`category.json`/
+`icon.svg` conventions, same sync-on-startup + `POST /library/sync`
+mechanism, `libraryCatalog.ts`'s `walk()` just gained a third top-level
+call) - no new Postgres tables, no new Dockerfile `COPY`, no new static
+mount; `devices/` already gets baked into the api image and already
+serves `/library-assets/library/*`. `usedTypeNames()` for kind
+`"process"` joins against `processes.kind` (already exactly the right
+column) instead of `devices.type`/`nodes.type`.
+
+**One example catalog entry**: `devices/processes/example-threshold-
+monitor/` - a real, working (not fake) starter template: watches one
+Device against a two-sided min/max/warn range, same shape as CORE's own
+`resourceMonitor.ts` and control-node's own `process.ts`, reduced to one
+generic device. Explicitly labeled "(template)" - deliberately not a
+migration of any real target-project process (control-node,
+temperature-control, alarm-annunciator, ...) into the catalog, which
+would be a separate, larger, per-process risk/sign-off decision, not
+bundled into this infrastructure change.
+
+**Live CRUD** (`routes/processes.ts`, both `requireAuth`): `POST
+/processes` (name, groupId, type, kind, actions, deviceId, config) and
+`DELETE /processes/:id` - deliberately unrestricted, no special-casing
+"official"/`permanent` kinds, same "no special-casing" principle
+`processRegistry.register()` itself already follows. Both are fully
+live with no restart needed for a `kind` whose plugin is already
+loaded: `server.ts`'s `tick()` calls `apiClient.listProcesses()` fresh
+every tick (no caching), so a new row starts being ticked, or a deleted
+one stops, within about a second either way.
+
+**What's NOT live**: a `kind` whose plugin code isn't loaded in the
+running orchestrator yet. `registerBuiltinProcessKinds()`/
+`loadProcessPlugins()` (section on extension points, `processPlugins.ts`)
+both run exactly once, right before `setInterval(tick, ...)` starts -
+no periodic re-scan. A row created for a brand-new kind just sits
+inert (`processRegistry.get(kind)` returns `undefined`, `tick()`
+silently skips it, no error) until the orchestrator container restarts.
+
+**"Pending restart" signal**: `processRegistry.list()` (orchestrator,
+new) exposes currently-loaded kind names via a new `GET /process-kinds`
+on orchestrator's own Fastify app (previously only `/health` existed).
+`apps/api` proxies this at `GET /processes/registered-kinds`
+(`config.orchestratorUrl`, defaults to the compose-network hostname:port,
+`http://orchestrator:${ORCHESTRATOR_PORT}`) - tolerant of orchestrator
+being briefly unreachable (mid-restart is exactly when this gets
+called), returns `{kinds: [], unreachable: true}` rather than failing.
+`ProcessesList.jsx` polls it every 10s (`REGISTERED_KINDS_POLL_MS`,
+independent of orchestrator's own 1s tick) and passes `registeredKinds`
+down to `ProcessesTable.jsx`'s `ProcessRow` - a row whose `kind` isn't
+in that list gets the same `warning` row tint the Devices/Nodes pages
+already use for simulated mode, plus a "Pending restart" badge next to
+its status. Clears itself within one poll interval of the actual
+restart, no manual page reload needed.
+
+**Real bug found live, not obvious in advance**: the very first attempt
+at `GET /processes/registered-kinds` consistently timed out (2s, then
+5s) with `TimeoutError`, even though a bare `node -e` fetch to the
+exact same URL from inside the same running container resolved in
+~50ms every time. Root cause: Node's default libuv threadpool (4
+threads) - `getaddrinfo` (what a hostname-based `fetch()` needs)
+queues on it same as filesystem I/O, and `apps/orchestrator`'s own
+steady per-second tick traffic hitting this same `apps/api` process
+(dozens of concurrent requests/sec, `critical`/`warning`/`metrics`/
+`messages`/heartbeat calls from 4+ CORE processes alone) was enough to
+starve that queue under real load - a standalone script with no other
+threadpool contention never saw it. Fixed with `UV_THREADPOOL_SIZE: 64`
+on the `api` service (nexus-edge's own `docker-compose.yml`, the
+`templates/target-project/` template, and nexus-edge-aquarium's already
+existing compose file - all three, confirmed live only in the first).
+Not unique to this one route - any future outbound `fetch()`-by-hostname
+added to `apps/api` would have hit the identical queueing under the
+same load; this fix covers all of them, not just this one call.
+
+**Tooling**: `scripts/add-process-kind.sh` (+ `make add-process-kind
+KIND=... TARGET=... [NEW_KIND=...]`) copies a catalog entry's
+`process.ts` into a target project's own `plugins/<kind>/`, best-effort
+renaming the `register("...")` call's own kind string when a
+`NEW_KIND` is given. Filesystem-only - the `processes` row itself is
+created separately (the Library page's own "Add process" modal, or
+`POST /processes` directly), and an orchestrator restart is still
+needed afterward, same as always.
+
+**UI**: `LibraryBrowser.jsx` gained a third `Processes` tab (`KINDS`
+array, otherwise generic/unchanged) plus an `AddProcessModal` shown for
+process-kind items only - name/group/type/deviceId/config(JSON) form,
+`POST /processes` on submit. Config is a raw JSON textarea, not a
+per-kind dynamic form - each kind's own `docs/README.md` documents its
+own shape (see the example entry's), and building a generic
+jsonb-schema-driven form editor would be real extra work for something
+used this rarely. `ProcessesTable.jsx`'s `ProcessRow` gained a delete
+(trash icon) button, unconditional, no confirmation dialog - matches
+`NamedListManager.jsx`'s own existing delete-without-confirm
+convention, not a new pattern.

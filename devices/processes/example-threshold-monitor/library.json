@@ -1,0 +1,5 @@
+{
+  "id": "process-example-threshold-monitor",
+  "name": "Example Threshold Monitor (template)",
+  "description": "Starter template for a target-project process kind - watches one Device against a configurable min/max/warn range and raises WEM warning/error. Copy this folder, rename the kind, and adapt process.ts."
+}

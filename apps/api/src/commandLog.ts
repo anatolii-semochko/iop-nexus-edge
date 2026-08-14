@@ -23,7 +23,11 @@ export type DeviceCommandAction =
   // Partial physical network (AGENTS_TO_DO.md, 2026-08-09/10) - toggling
   // a node's or standalone device's simulated redirect.
   | "simulated-on"
-  | "simulated-off";
+  | "simulated-off"
+  // Process management (AGENTS_TO_DO.md, 2026-08-14) - live create/delete
+  // of a `processes` row through routes/processes.ts's new POST/DELETE.
+  | "create"
+  | "delete";
 
 export interface CommandLogEntry {
   // Exactly one of deviceId/processId in practice (device actions vs

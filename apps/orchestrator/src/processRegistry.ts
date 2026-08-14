@@ -20,4 +20,13 @@ export const processRegistry = {
   get(kind: string): ProcessRunner | undefined {
     return runners.get(kind);
   },
+  // Currently-loaded kind names (AGENTS_TO_DO.md, 2026-08-14 process
+  // management) - exposed via GET /process-kinds so apps/api/UI can tell
+  // a `processes` row whose kind was just added to the Postgres table
+  // apart from one whose plugin code is actually loaded in this running
+  // orchestrator (the latter only happens at startup - processPlugins.ts's
+  // own loadProcessPlugins() runs once, not on a timer).
+  list(): string[] {
+    return [...runners.keys()];
+  },
 };

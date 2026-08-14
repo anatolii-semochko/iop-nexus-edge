@@ -68,4 +68,12 @@ export const config = {
     builtinDevicesDir: process.env.BUILTIN_DEVICES_DIR ?? "/workspace/devices",
     extraDir: process.env.EXTRA_API_PLUGINS_DIR,
   },
+  // AGENTS_TO_DO.md, 2026-08-14 process management - internal compose-
+  // network URL, not a host-published port (see ORCHESTRATOR_PORT in
+  // docker-compose.yml, which is a different, host-facing concern).
+  // Used only for GET /process-kinds (routes/processes.ts's own
+  // registered-kinds proxy) - a "which processes rows are pending an
+  // orchestrator restart" signal, nothing else reaches into orchestrator
+  // from this service.
+  orchestratorUrl: process.env.ORCHESTRATOR_URL ?? `http://orchestrator:${process.env.ORCHESTRATOR_PORT ?? 3000}`,
 };

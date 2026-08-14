@@ -7,6 +7,15 @@ import {
   CCard,
   CCardBody,
   CCardHeader,
+  CFormInput,
+  CFormLabel,
+  CFormSelect,
+  CFormTextarea,
+  CModal,
+  CModalBody,
+  CModalFooter,
+  CModalHeader,
+  CModalTitle,
   CSpinner,
   CTable,
   CTableBody,
@@ -24,7 +33,132 @@ import upIcon from '../../assets/images/up.png'
 const KINDS = [
   { value: 'device', label: 'Devices' },
   { value: 'node', label: 'Nodes' },
+  { value: 'process', label: 'Processes' },
 ]
+
+// Process management (AGENTS_TO_DO.md, 2026-08-14) - a process-kind
+// catalog item's own "Add process" action, only shown for kind ===
+// 'process'. Config is a raw JSON textarea rather than a per-kind
+// dynamic form - each kind's own docs/README.md (see devices/processes/
+// example-threshold-monitor/docs/README.md) documents its own config
+// shape; building a generic dynamic form for arbitrary jsonb config
+// would be real extra work for something this rarely used.
+const AddProcessModal = ({ item, visible, onClose, onCreated }) => {
+  const [name, setName] = useState('')
+  const [groupId, setGroupId] = useState('')
+  const [type, setType] = useState('controllable')
+  const [deviceId, setDeviceId] = useState('')
+  const [configText, setConfigText] = useState('{}')
+  const [groups, setGroups] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    if (!visible) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setName(item?.name ?? '')
+
+    setError(null)
+    api
+      .listProcessGroups()
+      .then(setGroups)
+      .catch((err) => setError(err.message))
+  }, [visible, item])
+
+  const handleSubmit = async () => {
+    setError(null)
+    let config
+    try {
+      config = configText.trim() ? JSON.parse(configText) : {}
+    } catch {
+      setError('Config must be valid JSON.')
+      return
+    }
+    setBusy(true)
+    try {
+      await api.createProcess({
+        name,
+        groupId: Number(groupId),
+        type,
+        kind: item.typeName,
+        deviceId: deviceId ? Number(deviceId) : null,
+        config,
+      })
+      onCreated()
+      onClose()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <CModal visible={visible} onClose={onClose}>
+      <CModalHeader>
+        <CModalTitle>Add process - {item?.name}</CModalTitle>
+      </CModalHeader>
+      <CModalBody>
+        {error && <CAlert color="danger">{error}</CAlert>}
+        <div className="mb-3">
+          <CFormLabel>Name</CFormLabel>
+          <CFormInput value={name} onChange={(e) => setName(e.target.value)} disabled={busy} />
+        </div>
+        <div className="mb-3">
+          <CFormLabel>Group</CFormLabel>
+          <CFormSelect value={groupId} onChange={(e) => setGroupId(e.target.value)} disabled={busy}>
+            <option value="">Select a group...</option>
+            {(groups ?? []).map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name}
+              </option>
+            ))}
+          </CFormSelect>
+        </div>
+        <div className="mb-3">
+          <CFormLabel>Type</CFormLabel>
+          <CFormSelect value={type} onChange={(e) => setType(e.target.value)} disabled={busy}>
+            <option value="controllable">Controllable</option>
+            <option value="permanent">Permanent</option>
+          </CFormSelect>
+        </div>
+        <div className="mb-3">
+          <CFormLabel>Device id (optional)</CFormLabel>
+          <CFormInput
+            value={deviceId}
+            onChange={(e) => setDeviceId(e.target.value)}
+            disabled={busy}
+          />
+        </div>
+        <div className="mb-3">
+          <CFormLabel>Config (JSON - see this kind&apos;s own docs/README.md)</CFormLabel>
+          <CFormTextarea
+            rows={4}
+            value={configText}
+            onChange={(e) => setConfigText(e.target.value)}
+            disabled={busy}
+          />
+        </div>
+        {item?.typeName && (
+          <div className="text-body-secondary small">
+            This creates a `processes` row with kind=&quot;{item.typeName}&quot;. If no plugin file
+            for this kind is loaded in the running orchestrator yet (e.g. you haven&apos;t run `make
+            add-process-kind` and restarted it), the new row will show as pending restart and
+            won&apos;t tick until then.
+          </div>
+        )}
+      </CModalBody>
+      <CModalFooter>
+        <CButton color="secondary" variant="outline" onClick={onClose} disabled={busy}>
+          Cancel
+        </CButton>
+        <CButton color="primary" onClick={handleSubmit} disabled={busy || !name || !groupId}>
+          {busy ? <CSpinner size="sm" /> : 'Create'}
+        </CButton>
+      </CModalFooter>
+    </CModal>
+  )
+}
 
 // Breadcrumb strip (AGENTS_TO_DO.md, 2026-08-01 discussion) - modeled on
 // sevenstime-backoffice's web-interface/src/views/base-elements/
@@ -106,6 +240,8 @@ const LibraryBrowser = () => {
   const [error, setError] = useState(null)
   const [syncing, setSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState(null)
+  const [addProcessItem, setAddProcessItem] = useState(null)
+  const [createdMessage, setCreatedMessage] = useState(null)
 
   const loadBrowse = (nextKind, nextCategoryId) => {
     setError(null)
@@ -209,7 +345,7 @@ const LibraryBrowser = () => {
           <TableSearchInput
             value={search}
             onSearch={setSearch}
-            placeholder={`Search ${kind === 'device' ? 'devices' : 'nodes'} by name or description...`}
+            placeholder={`Search ${kind === 'device' ? 'devices' : kind === 'node' ? 'nodes' : 'processes'} by name or description...`}
           />
         </div>
 
@@ -227,6 +363,7 @@ const LibraryBrowser = () => {
                 <CTableHeaderCell>Name</CTableHeaderCell>
                 <CTableHeaderCell>Description</CTableHeaderCell>
                 <CTableHeaderCell>Used in project</CTableHeaderCell>
+                {kind === 'process' && <CTableHeaderCell></CTableHeaderCell>}
               </CTableRow>
             </CTableHead>
             <CTableBody>
@@ -261,12 +398,45 @@ const LibraryBrowser = () => {
                       <CBadge color="secondary">Not used</CBadge>
                     )}
                   </CTableDataCell>
+                  {kind === 'process' && (
+                    <CTableDataCell>
+                      {row.type === 'item' && (
+                        <CButton
+                          size="sm"
+                          color="primary"
+                          variant="outline"
+                          onClick={() => setAddProcessItem(row)}
+                        >
+                          Add process
+                        </CButton>
+                      )}
+                    </CTableDataCell>
+                  )}
                 </CTableRow>
               ))}
             </CTableBody>
           </CTable>
         )}
       </CCardBody>
+
+      <AddProcessModal
+        item={addProcessItem}
+        visible={Boolean(addProcessItem)}
+        onClose={() => setAddProcessItem(null)}
+        onCreated={() =>
+          setCreatedMessage(`Process "${addProcessItem?.name}" created - see the Processes page.`)
+        }
+      />
+      {createdMessage && (
+        <CAlert
+          color="success"
+          dismissible
+          onClose={() => setCreatedMessage(null)}
+          className="m-3 mt-0"
+        >
+          {createdMessage}
+        </CAlert>
+      )}
     </CCard>
   )
 }

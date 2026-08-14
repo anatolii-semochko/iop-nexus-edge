@@ -87,6 +87,13 @@ export async function startOrchestrator(): Promise<FastifyInstance> {
 
   const app = Fastify({ logger: true });
   app.get("/health", async () => ({ status: "ok", service: "orchestrator" }));
+  // AGENTS_TO_DO.md, 2026-08-14 process management - lets apps/api (and,
+  // through it, the UI) tell a `processes` row whose kind was just added
+  // to Postgres apart from one whose plugin code this specific running
+  // orchestrator actually has loaded (registerBuiltinProcessKinds()/
+  // loadProcessPlugins() above run once at startup, not on a timer - a
+  // kind copied in after that needs a restart before it shows up here).
+  app.get("/process-kinds", async () => ({ kinds: processRegistry.list() }));
   await app.listen({ port: config.port, host: config.host });
   return app;
 }

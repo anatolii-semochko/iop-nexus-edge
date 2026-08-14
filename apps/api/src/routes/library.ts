@@ -3,7 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { pool } from "../db.js";
 import { syncLibrary } from "../libraryCatalog.js";
 
-type Kind = "device" | "node";
+type Kind = "device" | "node" | "process";
 
 interface CategoryRow {
   id: number;
@@ -26,6 +26,13 @@ interface ItemRow {
 }
 
 async function usedTypeNames(kind: Kind): Promise<Set<string>> {
+  // processes has no "type" column - its own equivalent identity column
+  // is "kind" (processRegistry's registration key, e.g. "resource-monitor",
+  // "control-node") - matches library_items.type_name for kind "process".
+  if (kind === "process") {
+    const { rows } = await pool.query<{ kind: string }>(`SELECT DISTINCT kind FROM processes`);
+    return new Set(rows.map((r) => r.kind));
+  }
   const table = kind === "device" ? "devices" : "nodes";
   const { rows } = await pool.query<{ type: string }>(`SELECT DISTINCT type FROM ${table}`);
   return new Set(rows.map((r) => r.type));
@@ -60,8 +67,8 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
   // trees, AGENTS.md section 32).
   app.get<{ Querystring: { kind: Kind; categoryId?: string } }>("/library/browse", async (request, reply) => {
     const { kind } = request.query;
-    if (kind !== "device" && kind !== "node") {
-      return reply.code(400).send({ error: "kind must be 'device' or 'node'" });
+    if (kind !== "device" && kind !== "node" && kind !== "process") {
+      return reply.code(400).send({ error: "kind must be 'device', 'node', or 'process'" });
     }
     const categoryId = request.query.categoryId ? Number(request.query.categoryId) : null;
 
@@ -109,8 +116,8 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
   // folder.
   app.get<{ Querystring: { kind: Kind; q?: string } }>("/library/search", async (request, reply) => {
     const { kind, q } = request.query;
-    if (kind !== "device" && kind !== "node") {
-      return reply.code(400).send({ error: "kind must be 'device' or 'node'" });
+    if (kind !== "device" && kind !== "node" && kind !== "process") {
+      return reply.code(400).send({ error: "kind must be 'device', 'node', or 'process'" });
     }
     if (!q) return [];
 

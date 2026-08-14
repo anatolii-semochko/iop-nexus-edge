@@ -14,7 +14,7 @@ import {
   CTableHeaderCell,
   CTableRow,
 } from '@coreui/react'
-import { cilSettings } from '@coreui/icons'
+import { cilSettings, cilTrash } from '@coreui/icons'
 import { api } from '../../api/client'
 import { useProcessLiveState } from '../../api/useLiveProcess'
 import IconButton from '../../components/IconButton'
@@ -84,6 +84,7 @@ const ProcessRow = ({
   messageGroups,
   onGroupsChange,
   extraAction,
+  registeredKinds,
 }) => {
   const live = useProcessLiveState(process.id)
   // `status` is a deliberately non-urgent, timer-only broadcast field
@@ -108,9 +109,33 @@ const ProcessRow = ({
   const status = pendingOptimisticStatus ?? live.status ?? process.status
   const critical = live.critical ?? process.critical
   const warning = live.warning ?? process.warning
-  // Error always wins over warning (AGENTS.md section 21) - a row is never
-  // both, so this is a simple precedence pick, not two independent styles.
-  const rowColor = critical ? 'danger' : warning ? 'warning' : undefined
+  // Process management (AGENTS_TO_DO.md, 2026-08-14) - a row whose kind
+  // isn't in the running orchestrator's own registered-kinds list yet
+  // (registeredKinds === null while that fetch is still in flight, in
+  // which case this deliberately reads as "not pending" rather than
+  // flashing every row warning for a moment on every page load).
+  const pendingRestart = registeredKinds !== null && !registeredKinds.includes(process.kind)
+  // Error always wins over warning (AGENTS.md section 21), which wins over
+  // pending-restart - a row is never more than one of these styles at
+  // once, same "highest severity wins" precedence used everywhere else.
+  const rowColor = critical
+    ? 'danger'
+    : warning
+      ? 'warning'
+      : pendingRestart
+        ? 'warning'
+        : undefined
+  const [deleteBusy, setDeleteBusy] = useState(false)
+  const handleDelete = async () => {
+    setDeleteBusy(true)
+    try {
+      await api.deleteProcess(process.id)
+      onReload()
+    } catch (err) {
+      onError(err.message)
+      setDeleteBusy(false)
+    }
+  }
   // Only actually rendered once the row is expanded (AGENTS.md section
   // 22) - see WemRow below, nested at the end of the detail panel.
   const messages = live.messages ?? process.messages ?? []
@@ -155,6 +180,15 @@ const ProcessRow = ({
           ) : (
             <CBadge color="info">Running</CBadge>
           )}
+          {pendingRestart && (
+            <CBadge
+              color="warning"
+              className="ms-1"
+              title="This kind isn't loaded in the running orchestrator yet - restart it to activate."
+            >
+              Pending restart
+            </CBadge>
+          )}
         </CTableDataCell>
         <CTableDataCell className={`text-end ${noBorderWhenExpanded ?? ''}`}>
           {/* Single row, right-aligned, left-to-right: on/off, settings,
@@ -195,6 +229,14 @@ const ProcessRow = ({
               center
               onClick={() => setSettingsVisible(true)}
               ariaLabel="Process settings"
+            />
+            <IconButton
+              icon={cilTrash}
+              size="sm"
+              center
+              disabled={deleteBusy}
+              onClick={handleDelete}
+              ariaLabel={`Delete ${process.name}`}
             />
             {extraAction?.(process)}
             {Panel && <ExpandToggleButton expanded={expanded} onClick={onToggleExpand} />}
@@ -279,6 +321,7 @@ const ProcessesTable = ({
   onResetFilters,
   renderExtraRowAction,
   emptyMessage = 'No processes match this filter.',
+  registeredKinds = null,
 }) => {
   const { isExpanded, toggleOne } = useExpandableRows(expandedIds, setExpandedIds)
 
@@ -416,6 +459,7 @@ const ProcessesTable = ({
                   messageGroups={messageGroups}
                   onGroupsChange={onGroupsChange}
                   extraAction={renderExtraRowAction}
+                  registeredKinds={registeredKinds}
                 />
               ))}
             </CTableBody>

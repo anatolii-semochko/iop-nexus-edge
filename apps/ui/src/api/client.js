@@ -101,6 +101,14 @@ export const api = {
     request(`/processes/${id}/config`, { method: 'PATCH', body: JSON.stringify(config) }),
   doProcessAction: (id, action) =>
     request(`/processes/${id}/action`, { method: 'POST', body: JSON.stringify({ action }) }),
+  // Process management (AGENTS_TO_DO.md, 2026-08-14) - live create/delete,
+  // plus which kinds the running orchestrator actually has loaded right
+  // now (a row whose kind isn't in this list needs an orchestrator
+  // restart before it does anything - see ProcessesList.jsx's own
+  // "pending restart" badge).
+  createProcess: (data) => request('/processes', { method: 'POST', body: JSON.stringify(data) }),
+  deleteProcess: (id) => request(`/processes/${id}`, { method: 'DELETE' }),
+  getRegisteredProcessKinds: () => request('/processes/registered-kinds'),
   // WEM (AGENTS.md section 22/25) - global dismiss (who/when is recorded
   // server-side from the session cookie, not sent here). `/log-messages`
   // (renamed from `/process-messages`, AGENTS_TO_DO.md's 2026-07-27 Device/Node

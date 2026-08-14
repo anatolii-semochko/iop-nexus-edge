@@ -37,6 +37,12 @@ const PERSISTED_DEFAULTS = {
   perTab: {},
 }
 
+// Process management (AGENTS_TO_DO.md, 2026-08-14) - how often the
+// "pending restart" badge re-checks the orchestrator's own live registered-
+// kinds list. 10s, not tied to TICK_INTERVAL_MS (orchestrator-side,
+// 1s) - this is a UI convenience poll, not a control loop.
+const REGISTERED_KINDS_POLL_MS = 10000
+
 const DEFAULT_TAB_STATE = {
   search: '',
   pageSize: 10,
@@ -68,6 +74,7 @@ const filtersFor = (tabKey) => TAB_FILTERS[tabKey] ?? TAB_FILTERS.all
  */
 const ProcessesList = () => {
   const [processes, setProcesses] = useState(null)
+  const [registeredKinds, setRegisteredKinds] = useState(null)
   const [groups, setGroups] = useState([])
   const [tabGroups, setTabGroups] = useState([])
   const [messageGroups, setMessageGroups] = useState([])
@@ -135,6 +142,27 @@ const ProcessesList = () => {
   useEffect(reloadTabGroups, [])
   useEffect(reloadMessageGroups, [])
 
+  // Process management (AGENTS_TO_DO.md, 2026-08-14) - polled, not
+  // fetched once, so a row's "pending restart" badge (ProcessesTable.jsx)
+  // clears on its own within REGISTERED_KINDS_POLL_MS of the orchestrator
+  // actually restarting, without the operator needing to reload the page.
+  useEffect(() => {
+    const reloadRegisteredKinds = () => {
+      api
+        .getRegisteredProcessKinds()
+        .then((res) => setRegisteredKinds(res.kinds))
+        .catch(() => {
+          // Tolerated silently - registeredKinds staying at its last-known
+          // value (or null, pre-first-load) just means the "pending
+          // restart" badge is momentarily stale, not worth surfacing as a
+          // page-level error toast.
+        })
+    }
+    reloadRegisteredKinds()
+    const interval = setInterval(reloadRegisteredKinds, REGISTERED_KINDS_POLL_MS)
+    return () => clearInterval(interval)
+  }, [])
+
   if (error && !processes) return <CAlert color="danger">{error}</CAlert>
   if (!processes) return <CSpinner color="primary" />
 
@@ -177,6 +205,7 @@ const ProcessesList = () => {
     messageGroups,
     onGroupsChange: reloadGroupMemberships,
     onResetFilters: () => handleResetFilters(tabKey),
+    registeredKinds,
   })
 
   // A tab's own base scope (which processes it means in the first place) -
