@@ -5432,3 +5432,32 @@ reload. A real live event remains the more correct long-term fix if
 this class of gap shows up again for something latency-sensitive -
 not built now, this specific case tolerates a ~10s convergence window
 fine.
+
+**Follow-up, same day**: the user reported their physically-connected,
+actively-heartbeating control-node still showing `Health: unknown` in
+the Nodes table. Root cause - `nodes.health` (migration
+`1690000000000_create-nodes-table.ts`, `default: "unknown"`) is a
+column that is READ everywhere but **never written anywhere** - no
+route, process, or orchestrator logic updates it, ever, for any node,
+confirmed by grepping the whole backend for any assignment to it. It's
+permanently stuck at its schema default regardless of real
+connectivity. This also meant section 56's own Nodes `isError` (based
+on `health !== 'ok' && health !== 'unknown'`) was **unreachable dead
+code** from the moment it shipped - `health` can structurally never be
+anything but `'unknown'` today.
+
+Rather than wiring `health` itself up to something real, the user
+asked the sharper question first: given the new unified "Status"
+column already exists, does a separate "Health" column - one that has
+only ever shown `"unknown"` for every node, ever - carry any
+information at all? No. Removed the standalone Health column entirely
+(`healthColor`/its `<CBadge>` cell/header gone), same "fold into
+Status, don't duplicate" reasoning as Devices' own EdgeX-status column
+removal. `isError` now reads `node.heartbeatStopped` directly - the
+real, already-computed Heartbeating Control signal every `GET /nodes`
+row already carries (`heartbeatControl.ts`'s `getNodeHeartbeatStopped`)
+- instead of the inert `health` field. The raw (still-unused)
+`health` value remains visible in `NodeDetailRow`'s own JSON dump for
+anyone who wants to see it - nothing is actually hidden, just not
+promoted to its own top-level column anymore. `colSpan` dropped from 8
+to 7 to match.

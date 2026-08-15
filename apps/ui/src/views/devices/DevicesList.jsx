@@ -519,7 +519,7 @@ const DevicesList = () => {
                     <CTableRow>
                       <CTableHeaderCell scope="col">Status</CTableHeaderCell>
                       <CTableHeaderCell scope="col">Backend</CTableHeaderCell>
-                      <CTableHeaderCell scope="col" style={{ width: 40 }}></CTableHeaderCell>
+                      <CTableHeaderCell scope="col"></CTableHeaderCell>
                       <CTableHeaderCell scope="col">Value</CTableHeaderCell>
                       <CTableHeaderCell scope="col">Name</CTableHeaderCell>
                       <CTableHeaderCell scope="col">Type</CTableHeaderCell>

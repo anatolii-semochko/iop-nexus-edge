@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import {
   CAlert,
-  CBadge,
   CCard,
   CCardBody,
   CCardHeader,
@@ -54,17 +53,6 @@ const NodeDetailRow = ({ node }) => (
     <pre className="mb-0 small">{JSON.stringify(node, null, 2)}</pre>
   </div>
 )
-
-const healthColor = (health) => {
-  switch (health) {
-    case 'ok':
-      return 'success'
-    case 'unknown':
-      return 'secondary'
-    default:
-      return 'warning'
-  }
-}
 
 const matchesSearch = (node, search) => {
   if (!search) return true
@@ -196,7 +184,6 @@ const NodesList = () => {
                   <CTableHead>
                     <CTableRow>
                       <CTableHeaderCell scope="col">Status</CTableHeaderCell>
-                      <CTableHeaderCell scope="col">Health</CTableHeaderCell>
                       <CTableHeaderCell scope="col">Name</CTableHeaderCell>
                       <CTableHeaderCell scope="col">Type</CTableHeaderCell>
                       <CTableHeaderCell scope="col">Location</CTableHeaderCell>
@@ -225,22 +212,29 @@ const NodesList = () => {
                       const noBorderWhenExpanded = expandedRow ? 'border-bottom-0' : undefined
                       // Background-color rule (AGENTS_TO_DO.md, 2026-08-15,
                       // same as DevicesList.jsx's own): error -> danger,
-                      // simulation -> info. `'unknown'` health is
-                      // deliberately NOT treated as an error - it means
-                      // "not determined yet", not "confirmed bad", so a
-                      // freshly-registered node doesn't show up red before
-                      // anything has actually gone wrong.
-                      const isError =
-                        node.health && node.health !== 'ok' && node.health !== 'unknown'
+                      // simulation -> info. `isError` is `heartbeatStopped`
+                      // (Heartbeating Control's own live signal, already
+                      // fetched into every GET /nodes row) - NOT the
+                      // schema's own `health` column, which turned out to
+                      // be permanently stuck at its "unknown" default with
+                      // nothing anywhere ever writing to it (found live,
+                      // 2026-08-15 - the user noticed a physically-connected,
+                      // actively-heartbeating node still showing "unknown").
+                      // The standalone "Health" column is gone too, same
+                      // reasoning as DevicesList.jsx dropping its own
+                      // redundant EdgeX-status column (section 54/56) - it
+                      // never showed anything but "unknown" for any node,
+                      // ever, so it carried zero information; the raw
+                      // `health` field (unused as it is) is still visible
+                      // in NodeDetailRow's own JSON dump below if anyone
+                      // needs it.
+                      const isError = node.heartbeatStopped === true
                       const rowColor = isError ? 'danger' : node.simulated ? 'info' : undefined
                       return (
                         <React.Fragment key={node.id}>
                           <CTableRow color={rowColor}>
                             <CTableDataCell className={noBorderWhenExpanded}>
                               <RowStatusBadge rowColor={rowColor} />
-                            </CTableDataCell>
-                            <CTableDataCell className={noBorderWhenExpanded}>
-                              <CBadge color={healthColor(node.health)}>{node.health}</CBadge>
                             </CTableDataCell>
                             <CTableDataCell className={noBorderWhenExpanded}>
                               {node.name}
@@ -289,7 +283,7 @@ const NodesList = () => {
                           </CTableRow>
                           {expandedRow && (
                             <CTableRow color={rowColor}>
-                              <CTableDataCell colSpan={8} className="p-0">
+                              <CTableDataCell colSpan={7} className="p-0">
                                 <NodeDetailRow node={node} />
                               </CTableDataCell>
                             </CTableRow>
