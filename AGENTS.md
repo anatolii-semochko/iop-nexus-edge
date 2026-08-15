@@ -5332,3 +5332,38 @@ Also: the user removed the `hover` prop from `DevicesList.jsx`'s and
 `NodesList.jsx`'s own main `CTable`s locally before this session
 picked back up - kept as-is, not reverted (their own explicit
 "add to the next commit").
+
+## 55. "Last reading"/"Expires" as relative time, not absolute timestamps
+
+2026-08-15 - two small follow-ups on section 54's Value/Device tables.
+
+**`KeyValueTable` no longer renders its own `title`** - the user
+removed that line locally ("Я прибрав title, саму проперю давай поки
+залишимо") - the `title` prop itself is still passed in from
+`DeviceDetailRow`'s two call sites, just unused for now, in case a
+later change wants it back without re-threading the prop.
+
+**"Last reading" is relative time now** ("5 minutes ago"/"just now"),
+not `toLocaleString()` - reusing `formatRelativeTime`
+(`apps/ui/src/utils/format.js`, already used by `NodesList.jsx`'s own
+last-heartbeat column) rather than inventing a second helper. It's
+typed for an ISO string but really just does `new Date(x)` internally,
+so `readingOrigin`'s epoch-ms number works identically without
+conversion.
+
+**New "Expires" row** - the user noticed the overdue/staleness
+threshold (section 53's `maxAgeMs`/`isOverdue`, `data_logger_control`-
+based) was only ever visible indirectly, as the row turning
+danger-red, never as an actual value. `DeviceRow` now also computes
+`expiresAt = lastReadingAt + maxAgeMs` and passes it down to
+`DeviceDetailRow`, rendered via the same `formatRelativeTime`.
+
+This needed `formatRelativeTime` itself to grow future-timestamp
+support - the old version computed `diffMs = Date.now() - target`,
+which is negative for anything in the future, and its own "count >= 1"
+loop never fires on a negative count, so every future timestamp
+regardless of distance silently fell through to "just now". Fixed by
+taking `Math.abs(diffMs)` and tracking the sign separately, rendering
+`"in X <unit>(s)"` for a future target - past-timestamp callers
+(`NodesList.jsx`'s own usage included) are unaffected, since the
+`future` branch only ever fires when `diffMs < 0`.

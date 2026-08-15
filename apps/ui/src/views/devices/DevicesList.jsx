@@ -32,6 +32,7 @@ import { usePersistedState } from '../../hooks/usePersistedState'
 import { useDeviceLiveState } from '../../api/useLiveDevice'
 import TablePagination from '../../components/table/TablePagination'
 import TableSearchInput from '../../components/table/TableSearchInput'
+import { formatRelativeTime } from '../../utils/format'
 import DeviceSettingsModal from './DeviceSettingsModal'
 
 // Registration for usePersistedState (AGENTS_TO_DO.md, 2026-08-01, joined
@@ -149,7 +150,6 @@ const formatDate = (value) => (value ? new Date(value).toLocaleString() : undefi
 // two tables stacked vertically instead of side by side).
 const KeyValueTable = ({ title, rows }) => (
   <div style={{ flex: '0 1 420px', minWidth: 280 }}>
-    <div className="text-body-secondary small mb-1">{title}</div>
     <CTable small borderless className="mb-0 w-auto">
       <CTableBody>
         {rows
@@ -174,7 +174,7 @@ const KeyValueTable = ({ title, rows }) => (
 // node/backend/EdgeX identity/capabilities/...). Replaces the old
 // LED/buzzer-specific big indicator entirely - the collapsed row's own
 // icon+value cell already covers that at-a-glance role now (section 53).
-const DeviceDetailRow = ({ device, fetched }) => {
+const DeviceDetailRow = ({ device, fetched, expiresAt }) => {
   const dualState = fetched?.dualState
   return (
     <div className="p-3 pt-0 d-flex flex-wrap gap-4">
@@ -187,7 +187,20 @@ const DeviceDetailRow = ({ device, fetched }) => {
           { label: 'Mode', value: dualState?.mode },
           { label: 'Auto value', value: dualState?.valueAuto },
           { label: 'Manual value', value: dualState?.valueManual },
-          { label: 'Last reading', value: formatDate(fetched?.readingOrigin) },
+          // formatRelativeTime (utils/format.js, already used by
+          // NodesList.jsx's own last-heartbeat column) is typed for an
+          // ISO string but really just does `new Date(x)` - an epoch-ms
+          // number (readingOrigin/expiresAt) works identically.
+          {
+            label: 'Last reading',
+            value: fetched?.readingOrigin ? formatRelativeTime(fetched.readingOrigin) : undefined,
+          },
+          // Same overdue threshold DeviceRow's own row-color check uses
+          // (data_logger_control's periodSeconds * error.
+          // numberSkippedPeriods) - previously only visible indirectly as
+          // the row turning danger-red, not as an actual value (AGENTS_TO_DO.md,
+          // 2026-08-15: "не бачу значення expiration").
+          { label: 'Expires', value: expiresAt ? formatRelativeTime(expiresAt) : undefined },
         ]}
       />
       <KeyValueTable
@@ -262,6 +275,10 @@ const DeviceRow = ({
       : null
   const isOverdue =
     maxAgeMs !== null && lastReadingAt !== null && now > 0 && now - lastReadingAt > maxAgeMs
+  // Surfaced as an actual value in the expand row (AGENTS_TO_DO.md,
+  // 2026-08-15) - previously this threshold only showed up indirectly,
+  // as the row turning danger-red.
+  const expiresAt = maxAgeMs !== null && lastReadingAt !== null ? lastReadingAt + maxAgeMs : null
 
   // Overdue (danger) wins over simulated (warning) - same "highest
   // severity wins, never both at once" precedence ProcessesTable.jsx's
@@ -323,7 +340,7 @@ const DeviceRow = ({
       {expanded && (
         <CTableRow color={rowColor}>
           <CTableDataCell colSpan={8} className="p-0">
-            <DeviceDetailRow device={device} fetched={fetched} />
+            <DeviceDetailRow device={device} fetched={fetched} expiresAt={expiresAt} />
           </CTableDataCell>
         </CTableRow>
       )}
