@@ -5602,3 +5602,73 @@ structurally `false` for these devices regardless of how honest
 seeing a device row turn red still needs `periodSeconds` configured
 per-device (via the existing Data Logger settings, already wired up -
 no code gap), which nobody has done yet for this node's own devices.
+
+## 60. Devices list: per-row value/timestamp is now polled, not fetched once - a live-verified §59 follow-up
+
+2026-08-15, same day, closing the loop on §59's own live-verification
+gap. `periodSeconds` was set live for `control-node-heartbeat`/
+`control-node-pulse` (AGENTS_TO_DO.md) so the user could actually watch
+§59's fix react to a real disconnect/reconnect. Two more real bugs
+turned up in the process, both found by the user testing live and both
+fixed the same session:
+
+**Bug 1 - a row that went Error never came back to OK.** Each
+`DeviceRow` (`DevicesList.jsx`) fetches its own value/`readingOrigin`
+via `api.getDevice(device.id)` in a `useEffect` keyed only on
+`[device.id]` - mount-once, never on an interval, unlike the list-level
+`DEVICES_POLL_MS` poll (section 56) which only refreshes the *list*
+(name/type/node/etc), not each row's own value. This was harmless
+before section 59 - `readingOrigin` was always "now" anyway regardless
+of true freshness, so a row's own staleness could never meaningfully
+persist either way. Once section 59 made `readingOrigin` honest, the
+gap became real: a row that happened to cross its overdue threshold
+after mount would stay red forever, since nothing ever fetched a newer
+value/timestamp for it again - confirmed live: the user reconnected a
+node after its device row had gone red, and it stayed red. Fixed by
+giving each row's own fetch the same `DEVICES_POLL_MS` interval as the
+list poll, re-fetching (not just fetching once) `api.getDevice`.
+
+**Bug 2 - the same row then flickered Error/OK/Error/OK while
+connected, rather than settling.** Root cause was the periodSeconds
+value chosen when configuring these two devices live, not a code bug:
+`periodSeconds=1, error.numberSkippedPeriods=2` (a 2s staleness
+window) is tighter than `DEVICES_POLL_MS` itself (10s) - between polls,
+`lastReadingAt` sits fixed while the ticking clock (`useNow`) keeps
+advancing, so the row necessarily reads "overdue" for most of each 10s
+window and only briefly recovers right after each poll lands. Not
+something bug-1's fix could address - it's a threshold-vs-poll-cadence
+mismatch, and would reproduce for any device configured with a
+staleness window shorter than roughly 2x the poll interval. Fixed by
+raising `error.numberSkippedPeriods` to 20 (a 20s window, comfortable
+margin over the 10s poll) for both devices, live via the same
+`PATCH /data-logger-controls/:deviceId` used originally - a config
+correction, not a code change. General guidance for configuring any
+device's Data Logger thresholds going forward: keep the effective
+window (`periodSeconds x numberSkippedPeriods`) meaningfully larger
+than `DEVICES_POLL_MS`, or the UI will flicker regardless of real
+hardware health.
+
+Verified live in nexus-edge-aquarium: `control-node-heartbeat` stayed
+stably OK for 10+ seconds after the threshold fix, actively-incrementing
+value visible the whole time.
+
+`control-node-pulse` remains open, separately - it is fundamentally
+write-only (NexusEdge writes it to the node every tick, "proves
+NexusEdge is alive," not the reverse) and is never actually receivable
+back off the bus (no `CAN_RAW_RECV_OWN_MSGS` on our own socket, and the
+node's firmware doesn't echo it) - `bus.Latest()` for its arbitration
+ID (`0x300`) is permanently empty, confirmed via continuous
+`"no data received yet"` in `device-service`'s own logs regardless of
+connection state. Its "OK"/checkmark in the UI reflects the Dual
+Devices Model's own live-published *auto value* (`dualDevicesModel.ts`'s
+`publishState`, whose own doc comment already says "not a
+heartbeat/liveness signal") - i.e. what NexusEdge is commanding, not a
+confirmed physical read - refreshed every tick unconditionally,
+regardless of bus state, so it can never structurally show stale. Not
+a bug in today's fixes; a pre-existing, one-directional design
+property of this specific resource. Proposed fix (a `writeOnly`
+capability flag, mirroring the existing `readOnly` one, so `GET
+/devices/:id` stops attempting - and logging - a read that can never
+succeed, and the UI renders it distinctly rather than implying a
+confirmed reading) - not yet actioned, awaiting the user's choice of
+display treatment.

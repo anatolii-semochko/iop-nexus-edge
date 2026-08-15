@@ -240,11 +240,22 @@ const DeviceRow = ({
   const live = useDeviceLiveState(device.id)
   const now = useNow()
 
+  // AGENTS_TO_DO.md, 2026-08-15 - was mount-only (`[device.id]`, no
+  // interval) until now. Harmless while `readingOrigin` was always "now"
+  // regardless of true CAN freshness (section 53's original bug), but
+  // section 59's fix made it honest - which meant a row's own staleness
+  // knowledge, once fetched, then froze forever: `now` (useNow) keeps
+  // ticking so a row could still flip *into* Error on its own, but it
+  // could never flip back to OK after the node came back, since nothing
+  // ever re-fetched this device's value/readingOrigin again. Found live:
+  // the user reconnected a node after this row had gone red and it
+  // stayed red. Now re-fetched on the same poll cadence as the list
+  // itself (DEVICES_POLL_MS) rather than only once.
   useEffect(() => {
-    api
-      .getDevice(device.id)
-      .then(setFetched)
-      .catch(() => {})
+    const fetchOnce = () => api.getDevice(device.id).then(setFetched).catch(() => {})
+    fetchOnce()
+    const interval = setInterval(fetchOnce, DEVICES_POLL_MS)
+    return () => clearInterval(interval)
   }, [device.id])
 
   const value = live.value !== undefined ? live.value : fetched?.value
