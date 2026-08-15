@@ -19,6 +19,7 @@ import { api } from '../../api/client'
 import { useProcessLiveState } from '../../api/useLiveProcess'
 import IconButton from '../../components/IconButton'
 import ResetFiltersButton from '../../components/ResetFiltersButton'
+import RowStatusBadge from '../../components/table/RowStatusBadge'
 import Switch from '../../components/Switch'
 import ExpandAllToggleButton from '../../components/table/ExpandAllToggleButton'
 import ExpandToggleButton from '../../components/table/ExpandToggleButton'
@@ -172,8 +173,9 @@ const ProcessRow = ({
   return (
     <>
       <CTableRow color={rowColor}>
-        <CTableDataCell className={noBorderWhenExpanded}>{process.name}</CTableDataCell>
-        <CTableDataCell className={noBorderWhenExpanded}>{process.group_name}</CTableDataCell>
+        <CTableDataCell className={noBorderWhenExpanded}>
+          <RowStatusBadge rowColor={rowColor} />
+        </CTableDataCell>
         <CTableDataCell className={noBorderWhenExpanded}>
           {status ? (
             <CBadge color={statusColor(status)}>{status.toUpperCase()}</CBadge>
@@ -190,6 +192,8 @@ const ProcessRow = ({
             </CBadge>
           )}
         </CTableDataCell>
+        <CTableDataCell className={noBorderWhenExpanded}>{process.name}</CTableDataCell>
+        <CTableDataCell className={noBorderWhenExpanded}>{process.group_name}</CTableDataCell>
         <CTableDataCell className={`text-end ${noBorderWhenExpanded ?? ''}`}>
           {/* Single row, right-aligned, left-to-right: on/off, settings,
               remove-from-dashboard, expand toggle - i.e. right-to-left
@@ -245,7 +249,7 @@ const ProcessRow = ({
       </CTableRow>
       {expanded && Panel && (
         <CTableRow color={rowColor}>
-          <CTableDataCell colSpan={4} className="p-0">
+          <CTableDataCell colSpan={5} className="p-0">
             <Panel process={process} onConfigChange={onReload} />
             <WemRow messages={messages} />
           </CTableDataCell>
@@ -431,9 +435,15 @@ const ProcessesTable = ({
           <CTable responsive>
             <CTableHead>
               <CTableRow>
+                {/* "Status" (col 1, OK/Warning/Error) vs "Power" (col 2,
+                    ON/OFF/Running) - named "Power" rather than a second
+                    "Status" to avoid the obvious collision, matching this
+                    file's own existing `power` terminology (see the
+                    ON/OFF Switch's own `ariaLabel` below). */}
+                <CTableHeaderCell scope="col">Status</CTableHeaderCell>
+                <CTableHeaderCell scope="col">Power</CTableHeaderCell>
                 <CTableHeaderCell scope="col">Name</CTableHeaderCell>
                 <CTableHeaderCell scope="col">Group</CTableHeaderCell>
-                <CTableHeaderCell scope="col">Status</CTableHeaderCell>
                 <CTableHeaderCell scope="col" className="text-end">
                   <div className="d-flex justify-content-end align-items-center gap-2">
                     <span>Actions</span>

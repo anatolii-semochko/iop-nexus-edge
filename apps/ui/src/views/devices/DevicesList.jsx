@@ -30,6 +30,7 @@ import { useNow } from '../../hooks/useNow'
 import { usePagination } from '../../hooks/usePagination'
 import { usePersistedState } from '../../hooks/usePersistedState'
 import { useDeviceLiveState } from '../../api/useLiveDevice'
+import RowStatusBadge from '../../components/table/RowStatusBadge'
 import TablePagination from '../../components/table/TablePagination'
 import TableSearchInput from '../../components/table/TableSearchInput'
 import { formatRelativeTime } from '../../utils/format'
@@ -45,18 +46,11 @@ const PERSISTED_DEFAULTS = {
   expandedIds: [],
 }
 
-const backendColor = (backend) => (backend === 'physical' ? 'primary' : 'info')
+// AGENTS_TO_DO.md, 2026-08-15 - see the poll's own useEffect comment
+// below for why this is a plain interval rather than a live event.
+const DEVICES_POLL_MS = 10000
 
-const StatusBadge = ({ device }) => {
-  if (!device.edgex) {
-    return <CBadge color="secondary">not provisioned</CBadge>
-  }
-  return (
-    <CBadge color={device.edgex.operatingState === 'UP' ? 'success' : 'danger'}>
-      {device.edgex.operatingState}
-    </CBadge>
-  )
-}
+const backendColor = (backend) => (backend === 'physical' ? 'primary' : 'info')
 
 // Devices list redesign (AGENTS_TO_DO.md, 2026-08-14): icon column, with
 // an optional colored-circle background when this device's own boolean
@@ -156,10 +150,15 @@ const KeyValueTable = ({ title, rows }) => (
           .filter((row) => row.value !== undefined)
           .map((row) => (
             <CTableRow key={row.label}>
-              <CTableDataCell className="text-body-secondary py-1" style={{ width: 150 }}>
+              <CTableDataCell
+                className="text-body-secondary bg-transparent py-1"
+                style={{ width: 150 }}
+              >
                 {row.label}
               </CTableDataCell>
-              <CTableDataCell className="py-1">{formatFieldValue(row.value)}</CTableDataCell>
+              <CTableDataCell className="bg-transparent py-1">
+                {formatFieldValue(row.value)}
+              </CTableDataCell>
             </CTableRow>
           ))}
       </CTableBody>
@@ -280,15 +279,26 @@ const DeviceRow = ({
   // as the row turning danger-red.
   const expiresAt = maxAgeMs !== null && lastReadingAt !== null ? lastReadingAt + maxAgeMs : null
 
-  // Overdue (danger) wins over simulated (warning) - same "highest
-  // severity wins, never both at once" precedence ProcessesTable.jsx's
-  // own row color already uses.
-  const rowColor = isOverdue ? 'danger' : effectivelySimulated ? 'warning' : undefined
+  // Background-color rule (AGENTS_TO_DO.md, 2026-08-15, applied across
+  // Devices/Nodes/Processes tables): error -> danger, simulation -> info
+  // (not warning - a device has no separate "warning" tier of its own
+  // today, only overdue/error and simulated). Overdue wins over
+  // simulated - same "highest severity wins, never both at once"
+  // precedence ProcessesTable.jsx's own row color already uses.
+  // RowStatusBadge (column 1 below) derives its label from this exact
+  // value, not a second parallel condition, so the two can't drift.
+  const rowColor = isOverdue ? 'danger' : effectivelySimulated ? 'info' : undefined
   const noBorderWhenExpanded = expanded ? 'border-bottom-0' : undefined
 
   return (
     <React.Fragment>
       <CTableRow color={rowColor}>
+        <CTableDataCell className={noBorderWhenExpanded}>
+          <RowStatusBadge rowColor={rowColor} />
+        </CTableDataCell>
+        <CTableDataCell className={noBorderWhenExpanded}>
+          <CBadge color={backendColor(device.backend)}>{device.backend}</CBadge>
+        </CTableDataCell>
         <CTableDataCell className={noBorderWhenExpanded}>
           <DeviceIcon
             iconPath={device.icon_path}
@@ -302,12 +312,6 @@ const DeviceRow = ({
         <CTableDataCell className={noBorderWhenExpanded}>{device.name}</CTableDataCell>
         <CTableDataCell className={noBorderWhenExpanded}>{device.type}</CTableDataCell>
         <CTableDataCell className={noBorderWhenExpanded}>{device.node_name ?? '-'}</CTableDataCell>
-        <CTableDataCell className={noBorderWhenExpanded}>
-          <CBadge color={backendColor(device.backend)}>{device.backend}</CBadge>
-        </CTableDataCell>
-        <CTableDataCell className={noBorderWhenExpanded}>
-          <StatusBadge device={device} />
-        </CTableDataCell>
         <CTableDataCell className={`text-end ${noBorderWhenExpanded ?? ''}`}>
           <div className="d-flex justify-content-end align-items-center gap-1 flex-nowrap">
             <IconButton
@@ -412,6 +416,21 @@ const DevicesList = () => {
       .catch((err) => setError(err.message))
   }, [])
 
+  // AGENTS_TO_DO.md, 2026-08-15 - toggling a node's own simulated flag
+  // from a DIFFERENT tab (e.g. NodesList.jsx there) doesn't push any
+  // live event this page could subscribe to (no `node` domain exists in
+  // the live WebSocket protocol at all today - see AGENTS.md's own
+  // writeup on why polling was chosen over adding one). Periodic
+  // refetch is the same "UI convenience poll, not a control loop"
+  // precedent ProcessesList.jsx's own registered-kinds poll already
+  // established, applied here to converge `node_simulated`/`simulated`
+  // (and everything else GET /devices returns) within one interval of
+  // a change made anywhere else.
+  useEffect(() => {
+    const interval = setInterval(reloadDevices, DEVICES_POLL_MS)
+    return () => clearInterval(interval)
+  }, [])
+
   const filtered = (devices ?? [])
     .filter((device) => matchesSearch(device, search))
     .filter(
@@ -498,13 +517,13 @@ const DevicesList = () => {
                 <CTable responsive>
                   <CTableHead>
                     <CTableRow>
+                      <CTableHeaderCell scope="col">Status</CTableHeaderCell>
+                      <CTableHeaderCell scope="col">Backend</CTableHeaderCell>
                       <CTableHeaderCell scope="col" style={{ width: 40 }}></CTableHeaderCell>
                       <CTableHeaderCell scope="col">Value</CTableHeaderCell>
                       <CTableHeaderCell scope="col">Name</CTableHeaderCell>
                       <CTableHeaderCell scope="col">Type</CTableHeaderCell>
                       <CTableHeaderCell scope="col">Node</CTableHeaderCell>
-                      <CTableHeaderCell scope="col">Backend</CTableHeaderCell>
-                      <CTableHeaderCell scope="col">Status</CTableHeaderCell>
                       <CTableHeaderCell scope="col" className="text-end">
                         <div className="d-flex justify-content-end align-items-center gap-2">
                           <span>Actions</span>

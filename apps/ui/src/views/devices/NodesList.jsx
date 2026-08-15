@@ -29,6 +29,7 @@ import TableSearchInput from '../../components/table/TableSearchInput'
 import { useExpandableRows } from '../../hooks/useExpandableRows'
 import { usePagination } from '../../hooks/usePagination'
 import { usePersistedState } from '../../hooks/usePersistedState'
+import RowStatusBadge from '../../components/table/RowStatusBadge'
 import { formatRelativeTime } from '../../utils/format'
 import NodeSettingsModal from './NodeSettingsModal'
 
@@ -194,11 +195,12 @@ const NodesList = () => {
                 <CTable responsive>
                   <CTableHead>
                     <CTableRow>
+                      <CTableHeaderCell scope="col">Status</CTableHeaderCell>
+                      <CTableHeaderCell scope="col">Health</CTableHeaderCell>
                       <CTableHeaderCell scope="col">Name</CTableHeaderCell>
                       <CTableHeaderCell scope="col">Type</CTableHeaderCell>
                       <CTableHeaderCell scope="col">Location</CTableHeaderCell>
                       <CTableHeaderCell scope="col">Group</CTableHeaderCell>
-                      <CTableHeaderCell scope="col">Health</CTableHeaderCell>
                       <CTableHeaderCell scope="col">Last heartbeat</CTableHeaderCell>
                       <CTableHeaderCell scope="col" className="text-end">
                         <div className="d-flex justify-content-end align-items-center gap-2">
@@ -221,57 +223,78 @@ const NodesList = () => {
                       // actually expanded.
                       const expandedRow = isExpanded(node.id)
                       const noBorderWhenExpanded = expandedRow ? 'border-bottom-0' : undefined
+                      // Background-color rule (AGENTS_TO_DO.md, 2026-08-15,
+                      // same as DevicesList.jsx's own): error -> danger,
+                      // simulation -> info. `'unknown'` health is
+                      // deliberately NOT treated as an error - it means
+                      // "not determined yet", not "confirmed bad", so a
+                      // freshly-registered node doesn't show up red before
+                      // anything has actually gone wrong.
+                      const isError =
+                        node.health && node.health !== 'ok' && node.health !== 'unknown'
+                      const rowColor = isError ? 'danger' : node.simulated ? 'info' : undefined
                       return (
-                      <React.Fragment key={node.id}>
-                        <CTableRow color={node.simulated ? 'warning' : undefined}>
-                          <CTableDataCell className={noBorderWhenExpanded}>{node.name}</CTableDataCell>
-                          <CTableDataCell className={noBorderWhenExpanded}>{node.type}</CTableDataCell>
-                          <CTableDataCell className={noBorderWhenExpanded}>{node.location ?? '-'}</CTableDataCell>
-                          <CTableDataCell className={noBorderWhenExpanded}>{node.group_name ?? '-'}</CTableDataCell>
-                          <CTableDataCell className={noBorderWhenExpanded}>
-                            <CBadge color={healthColor(node.health)}>{node.health}</CBadge>
-                          </CTableDataCell>
-                          <CTableDataCell className={noBorderWhenExpanded}>
-                            {formatRelativeTime(node.last_heartbeat_at)}
-                          </CTableDataCell>
-                          <CTableDataCell className={`text-end ${noBorderWhenExpanded ?? ''}`}>
-                            <div className="d-flex justify-content-end align-items-center gap-1 flex-nowrap">
-                              <IconButton
-                                icon={cilSettings}
-                                size="sm"
-                                center
-                                onClick={() => setSettingsNode(node)}
-                                ariaLabel={`${node.name} settings`}
-                              />
-                              <Switch
-                                checked={node.simulated}
-                                onChange={() => handleToggleSimulated(node)}
-                                disabled={!node.simulated && !node.has_simulated_twin}
-                                activeColor="#e55353"
-                                inactiveColor="#d3d3d3"
-                                ariaLabel={
-                                  node.simulated
-                                    ? `${node.name} is simulated - switch to physical`
-                                    : node.has_simulated_twin
-                                      ? `${node.name} is physical - switch to simulated`
-                                      : `${node.name} has no simulated twin provisioned`
-                                }
-                              />
-                              <ExpandToggleButton
-                                expanded={isExpanded(node.id)}
-                                onClick={() => toggleOne(node.id)}
-                              />
-                            </div>
-                          </CTableDataCell>
-                        </CTableRow>
-                        {expandedRow && (
-                          <CTableRow color={node.simulated ? 'warning' : undefined}>
-                            <CTableDataCell colSpan={7} className="p-0">
-                              <NodeDetailRow node={node} />
+                        <React.Fragment key={node.id}>
+                          <CTableRow color={rowColor}>
+                            <CTableDataCell className={noBorderWhenExpanded}>
+                              <RowStatusBadge rowColor={rowColor} />
+                            </CTableDataCell>
+                            <CTableDataCell className={noBorderWhenExpanded}>
+                              <CBadge color={healthColor(node.health)}>{node.health}</CBadge>
+                            </CTableDataCell>
+                            <CTableDataCell className={noBorderWhenExpanded}>
+                              {node.name}
+                            </CTableDataCell>
+                            <CTableDataCell className={noBorderWhenExpanded}>
+                              {node.type}
+                            </CTableDataCell>
+                            <CTableDataCell className={noBorderWhenExpanded}>
+                              {node.location ?? '-'}
+                            </CTableDataCell>
+                            <CTableDataCell className={noBorderWhenExpanded}>
+                              {node.group_name ?? '-'}
+                            </CTableDataCell>
+                            <CTableDataCell className={noBorderWhenExpanded}>
+                              {formatRelativeTime(node.last_heartbeat_at)}
+                            </CTableDataCell>
+                            <CTableDataCell className={`text-end ${noBorderWhenExpanded ?? ''}`}>
+                              <div className="d-flex justify-content-end align-items-center gap-1 flex-nowrap">
+                                <IconButton
+                                  icon={cilSettings}
+                                  size="sm"
+                                  center
+                                  onClick={() => setSettingsNode(node)}
+                                  ariaLabel={`${node.name} settings`}
+                                />
+                                <Switch
+                                  checked={node.simulated}
+                                  onChange={() => handleToggleSimulated(node)}
+                                  disabled={!node.simulated && !node.has_simulated_twin}
+                                  activeColor="#e55353"
+                                  inactiveColor="#d3d3d3"
+                                  ariaLabel={
+                                    node.simulated
+                                      ? `${node.name} is simulated - switch to physical`
+                                      : node.has_simulated_twin
+                                        ? `${node.name} is physical - switch to simulated`
+                                        : `${node.name} has no simulated twin provisioned`
+                                  }
+                                />
+                                <ExpandToggleButton
+                                  expanded={isExpanded(node.id)}
+                                  onClick={() => toggleOne(node.id)}
+                                />
+                              </div>
                             </CTableDataCell>
                           </CTableRow>
-                        )}
-                      </React.Fragment>
+                          {expandedRow && (
+                            <CTableRow color={rowColor}>
+                              <CTableDataCell colSpan={8} className="p-0">
+                                <NodeDetailRow node={node} />
+                              </CTableDataCell>
+                            </CTableRow>
+                          )}
+                        </React.Fragment>
                       )
                     })}
                   </CTableBody>

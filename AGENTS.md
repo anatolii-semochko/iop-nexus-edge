@@ -5367,3 +5367,68 @@ taking `Math.abs(diffMs)` and tracking the sign separately, rendering
 `"in X <unit>(s)"` for a future target - past-timestamp callers
 (`NodesList.jsx`'s own usage included) are unaffected, since the
 `future` branch only ever fires when `diffMs < 0`.
+
+## 56. Background-color rule + unified status label across Devices/Nodes/Processes, cross-tab simulation fix
+
+2026-08-15.
+
+**The rule, applied consistently**: error -> `danger`, warning ->
+`warning`, simulation -> `info`. Previously each table had its own ad
+hoc row-tint logic (Devices/Nodes both used `warning` for simulated,
+colliding with the concept "warning" ought to actually mean).
+
+**New shared `RowStatusBadge`**
+(`apps/ui/src/components/table/RowStatusBadge.jsx`) - takes the exact
+same `rowColor` value each table already computes for its own
+`<CTableRow color=...>`, not a second parallel condition, so the label
+text and the row's own background can never drift out of sync by
+construction. `danger` -> "Error", `warning` -> "Warning", `info` ->
+"Simulation", anything else -> "OK"/success. One deliberate
+divergence, confirmed with the user: the "Simulation" label itself
+reads `primary`, not `info` - the row background and the badge accent
+are allowed to differ even though they share the same underlying
+`rowColor` value.
+
+**All three tables gained a new leading "Status" column** (this
+badge), with their next-most-important existing column moved to
+position 2 right after it - Devices: **Backend**, then the
+icon/value/name/type/node columns following in their previous order.
+Nodes: **Health**. Processes: the ON/OFF/Running badge, renamed
+**Power** in its own header to avoid colliding with the new "Status"
+column's own name (matches this file's own pre-existing `power`
+terminology, see the Switch's `ariaLabel`).
+
+**Devices' old standalone EdgeX-operatingState "Status" column is
+gone** - its only content (UP/DOWN/not provisioned) is still reachable
+in the expand row's own "Device" table (`EdgeX status`, section 54),
+just no longer duplicated as its own top-level column now that the new
+label already gives an at-a-glance read. `isError` for a device is
+exactly the pre-existing `isOverdue` (section 53) - no new condition
+invented.
+
+**`isError` for a node** is `health` present and neither `'ok'` nor
+`'unknown'` - `'unknown'` deliberately does NOT count as an error
+(means "not determined yet", not "confirmed bad") so a freshly-
+registered node doesn't render red before anything has actually gone
+wrong.
+
+**Real bug found and fixed, reported live by the user**: the Devices
+page never reflected a node's `simulated` flag being toggled from a
+*different* browser tab - no code path re-fetched anything unless the
+toggle happened on that same page. Investigated whether a live
+WebSocket event already existed for this (it does not - the live
+protocol only has `device`/`tick`/`process` domains, confirmed by
+reading every publisher; adding a proper `node`-domain event would
+need a new RabbitMQ-routed publish in `nodes.ts`'s own PATCH route,
+following `dualDevicesModel.ts`'s `publishDeviceEvent` precedent).
+Given the fix needed *some* form of cross-tab convergence and a full
+live-event addition is real, separate scope, went with the same
+polling precedent `ProcessesList.jsx` already established for its own
+registered-kinds check (`DEVICES_POLL_MS = 10000`, plain
+`setInterval(reloadDevices, ...)` in `DevicesList.jsx`) - confirmed
+live: toggled simulation in one tab, watched the other tab's row
+colors/labels update on their own within the poll interval, no manual
+reload. A real live event remains the more correct long-term fix if
+this class of gap shows up again for something latency-sensitive -
+not built now, this specific case tolerates a ~10s convergence window
+fine.
