@@ -41,7 +41,17 @@ async function withLiveHeartbeat(node: NodeRow) {
     heartbeatControl.getNodeHeartbeatStopped(node.id),
     heartbeatControl.getNodeLastSeenAt(node.id),
   ]);
-  return { ...node, heartbeatStopped, heartbeatLastSeenAt };
+  // AGENTS_TO_DO.md, 2026-08-15 - `heartbeatStopped` above is the "monitoring
+  // paused" toggle, not a staleness result (see heartbeatControl.ts's own
+  // doc comment) - it never flips on a real disconnect. `heartbeatStale` is
+  // the actual signal NodesList.jsx's row color should key off of.
+  const heartbeatStale = heartbeatControl.nodeHeartbeatStaleness(
+    node.heartbeat_control,
+    node.simulated,
+    heartbeatStopped,
+    heartbeatLastSeenAt,
+  );
+  return { ...node, heartbeatStopped, heartbeatLastSeenAt, heartbeatStale };
 }
 
 // Resolved group name joined in, not a separate per-row fetch - the list

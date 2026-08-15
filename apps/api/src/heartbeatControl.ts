@@ -176,6 +176,50 @@ export async function getNodeHeartbeatStopped(nodeId: number): Promise<boolean> 
   return isMonitoringStopped("node", nodeId);
 }
 
+export type StalenessLevel = "ok" | "warning" | "error";
+
+// Mirrors apps/orchestrator/src/tickInterval.ts's own constant - kept as a
+// separate local copy rather than a cross-service import, same reasoning
+// as that file's own header comment (a fixed platform interval, not meant
+// to vary independently per service).
+const TICK_INTERVAL_MS = 1000;
+
+function skippedTicks(lastSeenAt: string | null): number | null {
+  if (!lastSeenAt) return null;
+  return Math.floor((Date.now() - new Date(lastSeenAt).getTime()) / TICK_INTERVAL_MS);
+}
+
+/** Request-time replica of apps/orchestrator/src/processes/heartbeatControl.ts's
+ * own evaluate() for a single node - needed so `GET /nodes` can expose a real
+ * staleness signal directly (AGENTS_TO_DO.md, 2026-08-15: the orchestrator's own
+ * evaluate() only ever surfaces this as WEM/critical/warning on the Heartbeating
+ * Control process's own row, never writes anything back onto the node itself,
+ * which left `node.heartbeatStopped` - actually the unrelated "monitoring
+ * paused" toggle - as the only thing NodesList.jsx had to color a row with,
+ * so a real disconnect never showed as anything but "OK"). Pure/sync - takes
+ * the same `heartbeatStopped`/`heartbeatLastSeenAt` values withLiveHeartbeat
+ * already fetches from Redis, rather than re-querying. Devices still have no
+ * real heartbeat producer (see listEntities above), so no analogous helper
+ * for those yet. */
+export function nodeHeartbeatStaleness(
+  config: HeartbeatControlConfig,
+  simulated: boolean,
+  stopped: boolean,
+  lastSeenAt: string | null,
+): StalenessLevel {
+  if (simulated) return "ok";
+  const { stoppable, warning, error } = config;
+  if (stoppable && stopped) return "ok";
+  if (!warning && !error) return "ok";
+
+  const ticks = skippedTicks(lastSeenAt);
+  if (ticks === null) return "ok";
+
+  if (error && ticks >= error.numberSkippedTicks) return "error";
+  if (warning && ticks >= warning.numberSkippedTicks) return "warning";
+  return "ok";
+}
+
 interface EntityRow {
   id: number;
   name: string;

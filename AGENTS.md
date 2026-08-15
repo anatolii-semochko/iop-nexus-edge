@@ -5433,7 +5433,9 @@ this class of gap shows up again for something latency-sensitive -
 not built now, this specific case tolerates a ~10s convergence window
 fine.
 
-**Follow-up, same day**: the user reported their physically-connected,
+## 57. Nodes Health column removed (dead, stuck at "unknown"); follow-up: `heartbeatStopped` itself turned out wrong too
+
+2026-08-15. The user reported their physically-connected,
 actively-heartbeating control-node still showing `Health: unknown` in
 the Nodes table. Root cause - `nodes.health` (migration
 `1690000000000_create-nodes-table.ts`, `default: "unknown"`) is a
@@ -5461,3 +5463,75 @@ row already carries (`heartbeatControl.ts`'s `getNodeHeartbeatStopped`)
 anyone who wants to see it - nothing is actually hidden, just not
 promoted to its own top-level column anymore. `colSpan` dropped from 8
 to 7 to match.
+
+## 58. `node.heartbeatStopped` was ALSO the wrong field - real `heartbeatStale` computation added, Nodes now polls
+
+2026-08-15, same day, one more round. The user physically unplugged
+the CAN bus from the control-node to test §57's fix and reported: the
+Heartbeating Control process's own row/log reacted correctly (turned
+red, logged "hasn't sent a heartbeat in N ticks"), but the Nodes table
+- now driven by `node.heartbeatStopped` per §57 - still showed "OK".
+
+Root cause, found by tracing what `heartbeatStopped` actually is
+(`apps/api/src/heartbeatControl.ts`'s own doc comment, re-read
+carefully this time): it's `isMonitoringStopped`, the Redis-backed
+**manual "Stop monitoring" toggle** from the Heartbeating Control
+panel (`PATCH /heartbeat-controls/:type/:id/stopped`) - a human
+on/off switch, never written by anything staleness-related. §57's own
+fix swapped one wrong field (`health`, always `"unknown"`) for another
+wrong field (`heartbeatStopped`, always `false` unless a human paused
+it) - neither was ever the actual "has this node's heartbeat gone
+stale" result. That real computation happens in
+`apps/orchestrator/src/processes/heartbeatControl.ts`'s `evaluate()`
+every tick, comparing `heartbeatLastSeenAt` against the node's own
+`heartbeat_control.warning`/`error` skipped-tick thresholds - but it
+only ever writes the result onto the Heartbeating Control **process's**
+own row (WEM + `critical`/`warning` via `apiClient.setCritical`/
+`setWarning`), never back onto the node itself. Nothing else in the
+codebase ever computed this per-node and exposed it.
+
+**Fix**: added `nodeHeartbeatStaleness(config, simulated, stopped,
+lastSeenAt)` to `apps/api/src/heartbeatControl.ts` - a pure, sync
+request-time replica of the orchestrator's own `evaluate()` logic for
+a single node (same skip rules: `simulated` skips entirely, a
+`stoppable && stopped` node skips, no `warning`/`error` configured
+skips, no `lastSeenAt` yet skips; error takes precedence over
+warning). Takes the same `heartbeatStopped`/`heartbeatLastSeenAt`
+values `withLiveHeartbeat` (`routes/nodes.ts`) already fetches from
+Redis per request - no extra Redis round-trip, no caching layer of its
+own, so it's exactly as fresh as `heartbeatStopped` always was, just
+computing the right thing. `GET /nodes` now returns a third field,
+`heartbeatStale: "ok" | "warning" | "error"`, alongside the
+still-present `heartbeatStopped` (kept - it's real info, "is
+monitoring paused", just not what a row's error state should be keyed
+on).
+
+`NodesList.jsx`'s `isError` is now `node.heartbeatStale === 'error'`.
+Deliberately not also coloring the row `warning` for the `"warning"`
+tier (unlike Processes, which does use its own warning color) - kept
+to the simpler two-state Devices/Nodes precedent (danger/info/ok, no
+warning) already established in section 56, matching what
+`DevicesList.jsx`'s own `isOverdue` does today. The `heartbeatStale`
+field itself does carry the warning tier if a future pass wants to
+surface it.
+
+**Second bug in the same table, found while reading `NodesList.jsx`
+end to end for this fix**: it had no polling interval at all - only a
+mount-time fetch, unlike `DevicesList.jsx` (`DEVICES_POLL_MS`) and
+`ProcessesList.jsx`. Even with the field fixed, the table would only
+ever reflect a live disconnect on next navigation/reload. Added
+`NODES_POLL_MS = 10000` with the same plain `setInterval(reloadNodes,
+...)` idiom as `DevicesList.jsx`.
+
+Verified live in nexus-edge-aquarium with the node still physically
+unplugged: `GET /nodes` returned `heartbeatStale: "error"` for "Main
+node control" (`heartbeatLastSeenAt` ~20 minutes stale), and the Nodes
+page rendered it with a red "Error" badge and `danger` row, "Last
+heartbeat: 20 minutes ago" - no manual reload needed once the poll
+fires. `apps/device-service`'s own CAN transport still has the
+non-expiring last-frame cache described in the diagnosis for this same
+investigation (Devices' `isOverdue` still gets fooled into looking
+"fresh" on every on-demand EdgeX read) - out of scope for this pass,
+deferred as a separate, larger fix (Go changes in
+`apps/device-service/internal/transport/can/bus.go`, needs a
+configurable max-frame-age, would touch every CAN device's read path).

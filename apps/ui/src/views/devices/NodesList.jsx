@@ -28,6 +28,13 @@ import TableSearchInput from '../../components/table/TableSearchInput'
 import { useExpandableRows } from '../../hooks/useExpandableRows'
 import { usePagination } from '../../hooks/usePagination'
 import { usePersistedState } from '../../hooks/usePersistedState'
+
+// AGENTS_TO_DO.md, 2026-08-15 - same "UI convenience poll, not a control
+// loop" precedent as DevicesList.jsx's own DEVICES_POLL_MS: no `node`
+// domain exists in the live WebSocket protocol, so a heartbeat that goes
+// stale (or a simulated toggle flipped from another tab) only converges
+// within one interval of this poll rather than never.
+const NODES_POLL_MS = 10000
 import RowStatusBadge from '../../components/table/RowStatusBadge'
 import { formatRelativeTime } from '../../utils/format'
 import NodeSettingsModal from './NodeSettingsModal'
@@ -114,6 +121,11 @@ const NodesList = () => {
   useEffect(() => {
     reloadNodes()
     reloadNodeGroups()
+  }, [])
+
+  useEffect(() => {
+    const interval = setInterval(reloadNodes, NODES_POLL_MS)
+    return () => clearInterval(interval)
   }, [])
 
   const filtered = (nodes ?? [])
@@ -212,23 +224,25 @@ const NodesList = () => {
                       const noBorderWhenExpanded = expandedRow ? 'border-bottom-0' : undefined
                       // Background-color rule (AGENTS_TO_DO.md, 2026-08-15,
                       // same as DevicesList.jsx's own): error -> danger,
-                      // simulation -> info. `isError` is `heartbeatStopped`
-                      // (Heartbeating Control's own live signal, already
-                      // fetched into every GET /nodes row) - NOT the
-                      // schema's own `health` column, which turned out to
-                      // be permanently stuck at its "unknown" default with
-                      // nothing anywhere ever writing to it (found live,
-                      // 2026-08-15 - the user noticed a physically-connected,
-                      // actively-heartbeating node still showing "unknown").
-                      // The standalone "Health" column is gone too, same
-                      // reasoning as DevicesList.jsx dropping its own
-                      // redundant EdgeX-status column (section 54/56) - it
-                      // never showed anything but "unknown" for any node,
-                      // ever, so it carried zero information; the raw
-                      // `health` field (unused as it is) is still visible
+                      // simulation -> info. `isError` is `heartbeatStale ===
+                      // 'error'` - a real, request-time staleness check
+                      // (apps/api/src/heartbeatControl.ts's
+                      // nodeHeartbeatStaleness, a replica of the
+                      // orchestrator's own threshold comparison) - NOT
+                      // `heartbeatStopped`, which despite its name is only
+                      // the "monitoring paused" toggle and never flips on a
+                      // real disconnect (found live, 2026-08-15: the user
+                      // disconnected a physical node from the CAN bus and
+                      // both Nodes and Devices stayed "OK" - Heartbeating
+                      // Control's own process row reacted correctly since it
+                      // computes staleness itself, but nothing surfaced that
+                      // result back onto the node row until this fix). The
+                      // standalone "Health" column stays gone (`nodes.health`
+                      // is still permanently stuck at "unknown", unrelated to
+                      // this fix) - the raw `health` field is still visible
                       // in NodeDetailRow's own JSON dump below if anyone
                       // needs it.
-                      const isError = node.heartbeatStopped === true
+                      const isError = node.heartbeatStale === 'error'
                       const rowColor = isError ? 'danger' : node.simulated ? 'info' : undefined
                       return (
                         <React.Fragment key={node.id}>
