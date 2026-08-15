@@ -5535,3 +5535,70 @@ investigation (Devices' `isOverdue` still gets fooled into looking
 deferred as a separate, larger fix (Go changes in
 `apps/device-service/internal/transport/can/bus.go`, needs a
 configurable max-frame-age, would touch every CAN device's read path).
+
+## 59. CAN transport reports a frame's true receipt time, not read time - fixes Devices' staleness check at the root
+
+2026-08-15, picking up §58's deferred item. The actual fix turned out
+smaller than anticipated there: no new config value (no "max frame
+age" threshold) was needed at all.
+
+**Root cause, precisely**: `busConn.Latest()` (`bus.go`) has always
+correctly never expired its per-arbitration-ID cache - a physical node
+may legitimately go long stretches between broadcasting a given
+signal, so that part was never wrong. The actual bug was one layer up,
+in `transport.go`'s `Read()`: it built every `CommandValue` with
+`sdkModels.NewCommandValue(...)`, which the EdgeX SDK stamps with
+`Origin: time.Now()` - i.e. "when this value was read", not "when
+this value was last true". A cached-but-ancient frame therefore always
+produced a brand-new, current-looking `Reading.origin` on every
+on-demand read, which `devices.ts` already faithfully carries through
+as `readingOrigin` (section 53) - and `DevicesList.jsx`'s own
+`isOverdue` (section 53/56) is a correct, honest diff against that
+timestamp. The staleness *check* was never broken; the timestamp *fed*
+into it was a lie.
+
+**Fix**: `bus.go`'s cache now stores `cachedFrame{frame, receivedAt}`
+per arbitration ID (`receivedAt` set once, in `readLoop`, when the
+frame actually arrives). `Latest()`'s signature grew a third return
+value, `time.Time`. `transport.go`'s `Read()` now calls
+`sdkModels.NewCommandValueWithOrigin(name, type, value,
+receivedAt.UnixNano())` - the SDK constructor that lets a driver
+report a reading's *true* origin instead of defaulting to now (found
+by fetching the SDK's own `pkg/models/commandvalue.go` source for
+`v4.0.2`, the version pinned in `go.mod`). `Write()`'s own unrelated
+`Latest()` call (merging existing byte layout before sending a frame)
+just ignores the new time value - staleness is meaningless there.
+
+Net effect: once a physical node goes silent, every read of one of its
+devices now reports the age it actually has - no code changes needed
+in `apps/api` or `apps/ui` at all, since `isOverdue` was already
+correct and just needed an honest input. Verified: `go build` (via
+the actual Dockerfile build stage - no local Go toolchain available on
+this host) and a manual `gofmt -l`/`go vet` pass both clean;
+`nexus-edge-aquarium-device-service` rebuilt and restarted.
+
+**Known gap, found while trying to verify this live against the still-
+unplugged control-node**: restarting `device-service` empties
+`bus.go`'s in-memory cache (it was never meant to survive a restart),
+so the two real physical resources on that node
+(`control-node-heartbeat`, `control-node-pulse`) came back with no
+cached frame at all (`ok=false`, the pre-existing "no data received
+yet" error path - unrelated to and unaffected by this fix) rather than
+demonstrably showing an old, honestly-aged timestamp. Confirming the
+full effect end-to-end needs the node reconnected briefly (to seed one
+cached frame) and then disconnected again, without an intervening
+device-service restart - not done this session.
+
+**Separate, pre-existing gap noticed along the way, not fixed here**:
+neither of those two devices (nor most of this node's other devices,
+which are `backend: "virtual"` anyway, e.g. Temperature/Humidity/LEDs
+- this control-node only has two real physically-wired CAN resources,
+consistent with the "partial physical network" design, AGENTS_TO_DO.md
+2026-08-09/10) has `data_logger_control.periodSeconds` set - it's
+`null` on every one of them. `DevicesList.jsx`'s `maxAgeMs` requires
+`periodSeconds` to be non-null (section 53), so `isOverdue` stays
+structurally `false` for these devices regardless of how honest
+`readingOrigin` now is. This fix makes the *input* correct; actually
+seeing a device row turn red still needs `periodSeconds` configured
+per-device (via the existing Data Logger settings, already wired up -
+no code gap), which nobody has done yet for this node's own devices.
