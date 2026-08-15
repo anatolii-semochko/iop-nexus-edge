@@ -461,7 +461,7 @@ physical assembly, section 30 already got this half right), not
 duplicated into either device type's.
 
 `devices/standalone/actuator/light-regulator/` and
-`devices/standalone/indicator/speaker/active-buzzer/` are real device types
+`devices/standalone/speaker/active-buzzer/` are real device types
 built to this layout - `runtime/`
 and `firmware/` are deliberately absent for both (nothing for either to
 add over the generic Virtual Node Runtime yet, no hardware to target),
@@ -2362,7 +2362,7 @@ The platform's first physical-alarm device and the first real consumer of
 Message Levels (section 22/23's `message_levels` table, which sat as
 config-storage only until now). A single active buzzer - built-in tone
 generator, driven purely 0/1 - modeled as a real device type under
-`devices/standalone/indicator/speaker/active-buzzer/` (same layout as `light-regulator`,
+`devices/standalone/speaker/active-buzzer/` (same layout as `light-regulator`,
 section 7): `contract.schema.ts`, `edgex-device-profile.yaml` (mirrored
 into `apps/device-service/res/profiles/NexusEdge-ActiveBuzzer.yaml` +
 `res/devices/active-buzzer-devices.yaml`, seeded into Postgres by
@@ -2472,7 +2472,7 @@ entry) - no config to edit (unlike Temperature Control), just a live
 visualization via the shared `BuzzerIndicator` atom (section 26 - built
 ahead of time, unwired, specifically for this) fed by
 `useDeviceLiveState(process.device_id)`, same live-preferred-over-REST
-pattern as `TemperatureProcessPanel`. `devices/standalone/indicator/speaker/active-buzzer/
+pattern as `TemperatureProcessPanel`. `devices/standalone/speaker/active-buzzer/
 ui/control/ActiveBuzzerControl.jsx` (registered in `DeviceDetail.jsx`'s
 `DEVICE_TYPE_CONTROLS`, matching light-regulator's convention) is a
 separate, self-contained lamp - device-type components can't import
@@ -5216,7 +5216,7 @@ convention, not a new pattern.
 2026-08-14 - a batch of Devices page changes, all confirmed live
 against nexus-edge-aquarium's real control-node instance.
 
-**Library: Speaker category.** `devices/standalone/indicator/speaker/`
+**Library: Speaker category.** `devices/standalone/speaker/`
 (new `category.json`) now holds `active-buzzer` (moved, `git mv`) and a
 new `passive-buzzer` type - identical single-`Bool` EdgeX contract to
 active-buzzer on purpose (see `passive-buzzer/contract.schema.ts`'s own
@@ -5287,3 +5287,48 @@ render too.
 confirmed with the user - nothing changed in the expanded detail row's
 own content beyond wiring it to the same single fetch+live `value` the
 collapsed row now also uses (previously it fetched independently).
+
+## 54. Speaker category promoted to root, Devices expand row redesigned as two key/value tables
+
+2026-08-15, two quick follow-ups on section 53.
+
+**Speaker is a top-level standalone category now**, not nested under
+Indicator - `devices/standalone/speaker/` (sibling to `actuator/`,
+`indicator/`, `input/`, `sensor/`), `git mv`'d from
+`devices/standalone/indicator/speaker/`. Every reference to the old
+path (imports in `apps/ui/src/builtinDeviceTypes.js`, comments in
+`AGENTS.md`, the active-buzzer seed migration, device-service's own
+profile/device-list YAML) was updated to match - no functional change
+beyond the one real import path, everything else was descriptive.
+
+**Devices list expand row - two borderless key/value tables**,
+replacing the old LED/buzzer-specific big indicator entirely (the
+collapsed row's own icon+value cell already covers that at-a-glance
+role since section 53, making the indicator redundant). Left table
+("Value") is the live reading side - `value`/`valueType`/`units`/
+`dualState.mode`/`valueAuto`/`valueManual`/`readingOrigin` (formatted
+via `toLocaleString()`), all from the same single `GET /devices/:id`
+fetch `DeviceRow` already owns. Right table ("Device") is the
+permanent/registry side - id/type/node/backend/EdgeX name+status/
+simulated(+twin)/capabilities/data_logger_control/heartbeat_control/
+created/updated. A field whose own value is compound (`capabilities`,
+`data_logger_control`, `heartbeat_control`) renders as inline
+monospace JSON rather than being recursively flattened - the simplest
+option that stays readable, matching the user's own "якщо глибше -
+можливо json" suggestion; rows whose value is `undefined` are dropped
+entirely rather than showing an empty dash (a read-only sensor simply
+has no `dualState`, for instance).
+
+Real layout bug found live: a plain flex row (`d-flex flex-wrap`)
+around two `<div>`s each wrapping a Bootstrap `CTable` stacked them
+vertically instead of side by side, regardless of `flex-wrap` - a
+`CTable` defaults to `width: 100%`, which stretches its wrapping flex
+item to fill the entire flex container on its own (no room left for a
+second item on the same line). Fixed by giving each `KeyValueTable`
+wrapper an explicit `flex: '0 1 420px'` and adding `w-auto` to the
+table itself, overriding the 100% default.
+
+Also: the user removed the `hover` prop from `DevicesList.jsx`'s and
+`NodesList.jsx`'s own main `CTable`s locally before this session
+picked back up - kept as-is, not reverted (their own explicit
+"add to the next commit").

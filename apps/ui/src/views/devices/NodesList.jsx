@@ -191,7 +191,7 @@ const NodesList = () => {
               </CAlert>
             ) : (
               <>
-                <CTable hover responsive>
+                <CTable responsive>
                   <CTableHead>
                     <CTableRow>
                       <CTableHeaderCell scope="col">Name</CTableHeaderCell>

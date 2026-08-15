@@ -30,8 +30,6 @@ import { useNow } from '../../hooks/useNow'
 import { usePagination } from '../../hooks/usePagination'
 import { usePersistedState } from '../../hooks/usePersistedState'
 import { useDeviceLiveState } from '../../api/useLiveDevice'
-import BuzzerIndicator from '../../components/indicators/BuzzerIndicator'
-import StatusIndicator from '../../components/indicators/StatusIndicator'
 import TablePagination from '../../components/table/TablePagination'
 import TableSearchInput from '../../components/table/TableSearchInput'
 import DeviceSettingsModal from './DeviceSettingsModal'
@@ -62,8 +60,7 @@ const StatusBadge = ({ device }) => {
 // Devices list redesign (AGENTS_TO_DO.md, 2026-08-14): icon column, with
 // an optional colored-circle background when this device's own boolean
 // value is true (device.capabilities.color, editable via
-// DeviceSettingsModal) - same "circle behind the icon" visual language
-// StatusIndicator/BuzzerIndicator already use in the expanded row.
+// DeviceSettingsModal).
 const iconUrl = (iconPath) => (iconPath ? `/api${iconPath}` : null)
 
 const DeviceIcon = ({ iconPath, activeColor, active }) => {
@@ -120,28 +117,97 @@ const ValueCell = ({ value }) => {
   return <span>{String(value)}</span>
 }
 
-// Detail row (AGENTS_TO_DO.md, 2026-08-02) - live indicators for the two
-// kinds Alarm Annunciator/Active Zummer already use (same 48px
-// StatusIndicator/BuzzerIndicator as Processes -> Active Zummer's own
-// panel), raw value for everything else for now ("Показуй поки що сире
-// значення"). `value` now comes from the parent DeviceRow (2026-08-14 -
-// the collapsed row needs the exact same fetch+live overlay, so it's
-// owned once per row instead of fetched twice).
-const DeviceDetailRow = ({ device, value }) => {
-  const active = value === true
+// A field whose own value is compound (capabilities, data_logger_control,
+// heartbeat_control, dualState...) renders as inline JSON rather than
+// being recursively flattened into more rows - simplest option that
+// stays readable, per the user's own "якщо глибше - можливо json"
+// suggestion (AGENTS_TO_DO.md, 2026-08-15).
+const formatFieldValue = (value) => {
+  if (value === undefined || value === null || value === '') {
+    return <span className="text-body-secondary">-</span>
+  }
+  if (typeof value === 'boolean') return value ? 'true' : 'false'
+  if (typeof value === 'object') {
+    return (
+      <code className="small text-body-secondary" style={{ wordBreak: 'break-all' }}>
+        {JSON.stringify(value)}
+      </code>
+    )
+  }
+  return String(value)
+}
+
+// Accepts either an epoch-ms number (readingOrigin) or an ISO string
+// (created_at/updated_at) - both are already Date-constructible as-is.
+const formatDate = (value) => (value ? new Date(value).toLocaleString() : undefined)
+
+// Borderless label/value table, one per side of the expand row (below).
+// `flex: '0 1 420px'` (not just a plain block) - a plain <div> wrapping
+// a Bootstrap table (which defaults to width: 100%) otherwise stretches
+// to fill the whole flex container on its own, pushing the second table
+// onto its own line regardless of `flex-wrap` (found live, 2026-08-15 -
+// two tables stacked vertically instead of side by side).
+const KeyValueTable = ({ title, rows }) => (
+  <div style={{ flex: '0 1 420px', minWidth: 280 }}>
+    <div className="text-body-secondary small mb-1">{title}</div>
+    <CTable small borderless className="mb-0 w-auto">
+      <CTableBody>
+        {rows
+          .filter((row) => row.value !== undefined)
+          .map((row) => (
+            <CTableRow key={row.label}>
+              <CTableDataCell className="text-body-secondary py-1" style={{ width: 150 }}>
+                {row.label}
+              </CTableDataCell>
+              <CTableDataCell className="py-1">{formatFieldValue(row.value)}</CTableDataCell>
+            </CTableRow>
+          ))}
+      </CTableBody>
+    </CTable>
+  </div>
+)
+
+// Detail row (AGENTS_TO_DO.md, 2026-08-02, redesigned 2026-08-15) - two
+// borderless tables: live/reading data on the left (from `fetched`, the
+// same GET /devices/:id DeviceRow already fetches once), permanent/
+// registry data on the right (from `device`, the list row - id/type/
+// node/backend/EdgeX identity/capabilities/...). Replaces the old
+// LED/buzzer-specific big indicator entirely - the collapsed row's own
+// icon+value cell already covers that at-a-glance role now (section 53).
+const DeviceDetailRow = ({ device, fetched }) => {
+  const dualState = fetched?.dualState
   return (
-    <div className="p-3 pt-0">
-      {device.type === 'active-buzzer' || device.type === 'passive-buzzer' ? (
-        <BuzzerIndicator active={active} />
-      ) : device.type === 'led' ? (
-        // `color` (2026-08-09, "control-node" node type) - optional
-        // per-instance hint (device.capabilities.color), StatusIndicator
-        // falls back to its own default blue when absent, so every
-        // pre-existing LED (e.g. Alarm Annunciator's 16) is unaffected.
-        <StatusIndicator active={active} color={device.capabilities?.color} />
-      ) : (
-        <span className="text-body-secondary">{value !== undefined ? String(value) : '-'}</span>
-      )}
+    <div className="p-3 pt-0 d-flex flex-wrap gap-4">
+      <KeyValueTable
+        title="Value"
+        rows={[
+          { label: 'Value', value: fetched?.value },
+          { label: 'Value type', value: fetched?.valueType },
+          { label: 'Units', value: fetched?.units },
+          { label: 'Mode', value: dualState?.mode },
+          { label: 'Auto value', value: dualState?.valueAuto },
+          { label: 'Manual value', value: dualState?.valueManual },
+          { label: 'Last reading', value: formatDate(fetched?.readingOrigin) },
+        ]}
+      />
+      <KeyValueTable
+        title="Device"
+        rows={[
+          { label: 'ID', value: device.id },
+          { label: 'Type', value: device.type },
+          { label: 'Node', value: device.node_name },
+          { label: 'Backend', value: device.backend },
+          { label: 'EdgeX name', value: device.edgex_device_name },
+          { label: 'EdgeX status', value: device.edgex?.operatingState },
+          { label: 'Simulated', value: device.simulated },
+          { label: 'Simulated twin', value: device.edgex_device_name_simulated },
+          { label: 'Capabilities', value: device.capabilities },
+          { label: 'Data Logger', value: device.data_logger_control },
+          { label: 'Heartbeat Control', value: device.heartbeat_control },
+          { label: 'Created', value: formatDate(device.created_at) },
+          { label: 'Updated', value: formatDate(device.updated_at) },
+        ]}
+      />
     </div>
   )
 }
@@ -257,7 +323,7 @@ const DeviceRow = ({
       {expanded && (
         <CTableRow color={rowColor}>
           <CTableDataCell colSpan={8} className="p-0">
-            <DeviceDetailRow device={device} value={value} />
+            <DeviceDetailRow device={device} fetched={fetched} />
           </CTableDataCell>
         </CTableRow>
       )}
@@ -412,7 +478,7 @@ const DevicesList = () => {
               </CAlert>
             ) : (
               <>
-                <CTable hover responsive>
+                <CTable responsive>
                   <CTableHead>
                     <CTableRow>
                       <CTableHeaderCell scope="col" style={{ width: 40 }}></CTableHeaderCell>

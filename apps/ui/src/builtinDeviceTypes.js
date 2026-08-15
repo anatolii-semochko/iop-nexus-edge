@@ -2,12 +2,12 @@
 // deviceTypeRegistry - imported once for its side effect (index.jsx),
 // before anything reads the registry. See deviceTypeRegistry.js.
 import LightRegulatorControl from 'devices/standalone/actuator/light-regulator/ui/control/LightRegulatorControl.jsx'
-import ActiveBuzzerControl from 'devices/standalone/indicator/speaker/active-buzzer/ui/control/ActiveBuzzerControl.jsx'
-import PassiveBuzzerControl from 'devices/standalone/indicator/speaker/passive-buzzer/ui/control/PassiveBuzzerControl.jsx'
+import ActiveBuzzerControl from 'devices/standalone/speaker/active-buzzer/ui/control/ActiveBuzzerControl.jsx'
+import PassiveBuzzerControl from 'devices/standalone/speaker/passive-buzzer/ui/control/PassiveBuzzerControl.jsx'
 import LedControl from 'devices/standalone/indicator/led/ui/control/LedControl.jsx'
 import LightRegulatorSimulator from 'devices/standalone/actuator/light-regulator/ui/simulator/LightRegulatorSimulator.jsx'
-import ActiveBuzzerSimulator from 'devices/standalone/indicator/speaker/active-buzzer/ui/simulator/ActiveBuzzerSimulator.jsx'
-import PassiveBuzzerSimulator from 'devices/standalone/indicator/speaker/passive-buzzer/ui/simulator/PassiveBuzzerSimulator.jsx'
+import ActiveBuzzerSimulator from 'devices/standalone/speaker/active-buzzer/ui/simulator/ActiveBuzzerSimulator.jsx'
+import PassiveBuzzerSimulator from 'devices/standalone/speaker/passive-buzzer/ui/simulator/PassiveBuzzerSimulator.jsx'
 import LedSimulator from 'devices/standalone/indicator/led/ui/simulator/LedSimulator.jsx'
 import { deviceTypeRegistry } from './deviceTypeRegistry'
 
