@@ -138,26 +138,37 @@ const formatFieldValue = (value) => {
 const formatDate = (value) => (value ? new Date(value).toLocaleString() : undefined)
 
 // Borderless label/value table, one per side of the expand row (below).
-// `flex: '0 1 420px'` (not just a plain block) - a plain <div> wrapping
-// a Bootstrap table (which defaults to width: 100%) otherwise stretches
-// to fill the whole flex container on its own, pushing the second table
-// onto its own line regardless of `flex-wrap` (found live, 2026-08-15 -
-// two tables stacked vertically instead of side by side).
+// Was a flexbox item with a fixed `flex: '0 1 420px'` basis (2026-08-15,
+// to stop a plain 100%-wide Bootstrap table forcing its sibling onto its
+// own line) - that fix over-corrected: the fixed basis reserved 420px
+// regardless of how narrow the table's own content actually was, and
+// capped it at 420px even when the page had far more room to spare, so
+// wide values (Capabilities/Data Logger JSON) wrapped awkwardly into a
+// narrow column while a large blank margin sat unused to the right
+// (found live, 2026-08-16 - "права таблиця має великий відступ
+// справа"). Replaced with a CSS Grid parent (below) instead: each table
+// now fills its own grid column exactly (`w-auto` removed, default
+// Bootstrap `width: 100%` applies within that column), and grid's own
+// `auto-fit`/`minmax` sizing is what decides column count/width, not a
+// per-table flex-basis guess.
 const KeyValueTable = ({ title, rows }) => (
-  <div style={{ flex: '0 1 420px', minWidth: 280 }}>
-    <CTable small borderless className="mb-0 w-auto">
+  <div>
+    <div className="text-body-secondary text-uppercase fw-semibold text-decoration-underline mb-1" style={{ fontSize: '0.6875rem', letterSpacing: '0.04em' }}>
+      {title}
+    </div>
+    <CTable small borderless className="mb-0 small">
       <CTableBody>
         {rows
           .filter((row) => row.value !== undefined)
           .map((row) => (
             <CTableRow key={row.label}>
               <CTableDataCell
-                className="text-body-secondary bg-transparent py-1"
-                style={{ width: 150 }}
+                className="text-body-secondary bg-transparent"
+                style={{ width: 150, padding: '0.125rem 0.5rem 0.125rem 0' }}
               >
                 {row.label}
               </CTableDataCell>
-              <CTableDataCell className="bg-transparent py-1">
+              <CTableDataCell className="bg-transparent" style={{ padding: '0.125rem 0.5rem' }}>
                 {formatFieldValue(row.value)}
               </CTableDataCell>
             </CTableRow>
@@ -167,17 +178,25 @@ const KeyValueTable = ({ title, rows }) => (
   </div>
 )
 
-// Detail row (AGENTS_TO_DO.md, 2026-08-02, redesigned 2026-08-15) - two
-// borderless tables: live/reading data on the left (from `fetched`, the
-// same GET /devices/:id DeviceRow already fetches once), permanent/
-// registry data on the right (from `device`, the list row - id/type/
-// node/backend/EdgeX identity/capabilities/...). Replaces the old
-// LED/buzzer-specific big indicator entirely - the collapsed row's own
-// icon+value cell already covers that at-a-glance role now (section 53).
+// Detail row (AGENTS_TO_DO.md, 2026-08-02, redesigned 2026-08-15,
+// re-laid-out 2026-08-16) - two borderless tables: live/reading data on
+// the left (from `fetched`, the same GET /devices/:id DeviceRow already
+// fetches once), permanent/registry data on the right (from `device`,
+// the list row - id/type/node/backend/EdgeX identity/capabilities/...).
+// Replaces the old LED/buzzer-specific big indicator entirely - the
+// collapsed row's own icon+value cell already covers that at-a-glance
+// role now (section 53). CSS Grid, not flexbox (see KeyValueTable's own
+// comment) - `auto-fit`/`minmax(320px, 1fr)` puts both tables on one row
+// when there's room for two >=320px columns, wraps to one column
+// per row otherwise, and each column claims its own fair share of
+// whatever width is actually available instead of a fixed guess.
 const DeviceDetailRow = ({ device, fetched, expiresAt }) => {
   const dualState = fetched?.dualState
   return (
-    <div className="p-3 pt-0 d-flex flex-wrap gap-4">
+    <div
+      className="p-3 pt-0"
+      style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '0.5rem 2rem' }}
+    >
       <KeyValueTable
         title="Value"
         rows={[

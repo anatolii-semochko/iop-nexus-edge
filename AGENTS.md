@@ -6002,3 +6002,56 @@ entity count dropped on its own once the poll fired, confirming this
 wasn't just "worked because the page happened to be freshly mounted."
 Restored the original thresholds afterward; the reload button was
 also exercised directly.
+
+## 64. Devices expand row - CSS Grid replaces the fixed-flex-basis layout, compacted
+
+2026-08-16. The user asked to make the expand row's two key/value
+tables (`DevicesList.jsx`'s `KeyValueTable`/`DeviceDetailRow`, section
+53) more compact and fix a "large right-side margin" on the right
+table.
+
+Root cause of the margin: section 53's own layout used
+`flex: '0 1 420px'` on each table's wrapper - a fixed flex-basis,
+chosen at the time specifically to stop a 100%-wide Bootstrap table
+from forcing its sibling onto its own line. That fix worked but
+over-corrected two ways at once: it capped BOTH tables at 420px even
+when the page had far more room, and it reserved the full 420px even
+when a table's own content was much narrower - so the right table's
+own wide values (`Capabilities`/`Data Logger`/`Heartbeat Control`
+JSON) wrapped awkwardly into a ~270px column while a large blank
+margin sat unused past both tables entirely.
+
+Replaced the flexbox layout with CSS Grid:
+`gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))'` on the
+row's own wrapper, `w-auto` removed from each `CTable` (default
+Bootstrap `width: 100%` now applies *within* its own grid column,
+which can't force a sibling column to shrink the way a flex sibling
+could). Two columns share the row when there's room for two
+>=320px tracks, otherwise it falls back to one column per row - same
+graceful degradation the old flex-wrap aimed for, without the fixed-
+width guess.
+
+Compactness: row padding tightened from `py-1` (0.25rem top/bottom via
+Bootstrap's own spacing scale) to an explicit `0.125rem` via inline
+style (finer-grained than the closest Bootstrap utility step allows),
+`small` className added to the table itself for smaller text (CoreUI's
+`<CTable small>` *prop* only reduces padding via Bootstrap 5's own
+`.table-sm`, which does not touch font size at all - the separate
+`small` *CSS* class, already used identically for `NodeDetailRow`'s
+own JSON dump in `NodesList.jsx`, is what actually shrinks the font).
+
+Title style: `title` was a real prop since section 53 but never
+actually rendered - an earlier direct edit had removed just the
+render while leaving the prop itself in place. Given the two tables
+now sit in independent grid columns with no visible separator between
+them, added a compact treatment - small, uppercase,
+`text-body-secondary`, letter-spaced - specifically to answer "can
+change title style" by giving the titles an actual style for the
+first time, not simply restoring the old (removed) plain-text one.
+
+Verified live in nexus-edge-aquarium: expanded a device row with rich
+JSON fields (Buzzer 1/active-buzzer) - `Capabilities`/`Data Logger`/
+`Heartbeat Control` now wrap at their own column's real width instead
+of a narrow fixed one, the "VALUE"/"DEVICE" titles render, rows are
+visibly tighter, and no blank margin remains past the right table's
+own content.
