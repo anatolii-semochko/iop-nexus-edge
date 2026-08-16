@@ -238,24 +238,28 @@ const DeviceRow = ({
 }) => {
   const [fetched, setFetched] = useState(null)
   const live = useDeviceLiveState(device.id)
-  const now = useNow()
+  // Still needed even though isOverdue/expiresAt are no longer computed
+  // here (AGENTS.md section 62) - the "Last reading"/"Expires" cells
+  // (formatRelativeTime) read Date.now() internally at render time, so
+  // this hook's own re-render-every-second is what makes "5 seconds ago"
+  // keep ticking over on screen without any of *this* row's own data
+  // actually changing.
+  useNow()
 
-  // AGENTS_TO_DO.md, 2026-08-15 - was mount-only (`[device.id]`, no
-  // interval) until now. Harmless while `readingOrigin` was always "now"
-  // regardless of true CAN freshness (section 53's original bug), but
-  // section 59's fix made it honest - which meant a row's own staleness
-  // knowledge, once fetched, then froze forever: `now` (useNow) keeps
-  // ticking so a row could still flip *into* Error on its own, but it
-  // could never flip back to OK after the node came back, since nothing
-  // ever re-fetched this device's value/readingOrigin again. Found live:
-  // the user reconnected a node after this row had gone red and it
-  // stayed red. Now re-fetched on the same poll cadence as the list
-  // itself (DEVICES_POLL_MS) rather than only once.
+  // AGENTS.md section 62 - one mount-time fetch for this row's own value/
+  // isOverdue, same as NodesList.jsx's per-row state (section 61): both
+  // GET /devices/:id (any on-demand UI read, including this one) and
+  // POST /devices/:id/log (Data Logger's own periodic write-cadence read)
+  // now publish a live `device` event whenever the *computed* overdue
+  // status actually changes, so a passive transition converges without
+  // this row ever polling again itself - useDeviceLiveState above already
+  // subscribes to that. Previously mount-only was a real bug (section 60:
+  // a row that went Error, computed from a stale client-side snapshot,
+  // could never come back to OK) specifically *because* nothing else kept
+  // it current; that's no longer true now that isOverdue is itself a
+  // server-computed, live-pushed field.
   useEffect(() => {
-    const fetchOnce = () => api.getDevice(device.id).then(setFetched).catch(() => {})
-    fetchOnce()
-    const interval = setInterval(fetchOnce, DEVICES_POLL_MS)
-    return () => clearInterval(interval)
+    api.getDevice(device.id).then(setFetched).catch(() => {})
   }, [device.id])
 
   const value = live.value !== undefined ? live.value : fetched?.value
@@ -271,24 +275,13 @@ const DeviceRow = ({
     : (fetched?.readingOrigin ?? null)
 
   // Overdue/staleness (AGENTS_TO_DO.md, 2026-08-14: "danger, якщо
-  // прострочений") - reuses the same data_logger_control config
-  // (periodSeconds + error.numberSkippedPeriods) the Data Logger process
-  // already tracks server-side (AGENTS.md section 21-adjacent), rather
-  // than inventing a separate threshold. Only evaluated when that config
-  // is actually set and a reading time is known - a device with no
-  // logging cadence configured, or one this page hasn't managed to read
-  // yet, is simply not flagged either way.
-  const dlc = device.data_logger_control
-  const maxAgeMs =
-    dlc?.periodSeconds && dlc?.error?.numberSkippedPeriods
-      ? dlc.periodSeconds * dlc.error.numberSkippedPeriods * 1000
-      : null
-  const isOverdue =
-    maxAgeMs !== null && lastReadingAt !== null && now > 0 && now - lastReadingAt > maxAgeMs
-  // Surfaced as an actual value in the expand row (AGENTS_TO_DO.md,
-  // 2026-08-15) - previously this threshold only showed up indirectly,
-  // as the row turning danger-red.
-  const expiresAt = maxAgeMs !== null && lastReadingAt !== null ? lastReadingAt + maxAgeMs : null
+  // прострочений"; moved server-side 2026-08-16, AGENTS.md section 62,
+  // dataLoggerControl.ts's computeOverdue - same math as before, just no
+  // longer duplicated client-side) - `live` wins when a push has arrived
+  // this session (only present on an actual status change, see
+  // useLiveDevice.js), otherwise whatever the last fetch computed.
+  const isOverdue = live.isOverdue ?? fetched?.isOverdue ?? false
+  const expiresAt = live.expiresAt ?? fetched?.expiresAt ?? null
 
   // Background-color rule (AGENTS_TO_DO.md, 2026-08-15, applied across
   // Devices/Nodes/Processes tables): error -> danger, simulation -> info

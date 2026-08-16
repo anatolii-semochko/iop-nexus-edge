@@ -29,6 +29,13 @@ export interface DeviceEventEnvelope {
   mode?: string;
   valueAuto?: unknown;
   valueManual?: unknown;
+  // AGENTS.md section 62 - present only when this event was published
+  // because a fresh read's own computed overdue status actually differs
+  // from what was last known (routes/devices.ts, dataLoggerControl.ts's
+  // computeOverdue) - absent for an ordinary Dual Devices Model write
+  // that isn't itself an overdue-status change.
+  isOverdue?: boolean;
+  expiresAt?: number | null;
   timestamp: string;
   source: string;
 }

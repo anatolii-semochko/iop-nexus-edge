@@ -56,6 +56,38 @@ async function maybeLog(entry: DataLoggerControlEntry, periodSeconds: number): P
   }
 }
 
+// AGENTS.md section 62 - the Devices list's own overdue status (distinct
+// from the write-cadence WEM check below - see routes/devices.ts's
+// publishOverdueIfChanged) needs *some* periodic re-evaluation to converge
+// live rather than freezing at whatever a browser tab's own one-time
+// mount fetch last saw, now that DevicesList.jsx no longer polls each row
+// itself. `writeEnabled` devices already get this for free from maybeLog's
+// own read above; a `!writeEnabled` device (real test case:
+// control-node-heartbeat, periodSeconds set but logging deliberately off)
+// otherwise has nothing to re-read it at all - `listDataLoggerControls`
+// already includes it (its own WHERE clause is `readOnly`-only, not
+// `writeEnabled`), so this loop already sees it, it just never used to
+// read it. Plain `GET /devices/:id` (apiClient.getDevice, already existed)
+// is enough - that route's own publishOverdueIfChanged does the actual
+// diff-and-publish, nothing here needs to know if anything changed.
+// In-memory only (resets on restart, same stance as every other tick-diff
+// map this session) - touching every device again right after a restart
+// is harmless, not worth guarding against.
+const lastTouchedAt = new Map<number, number>();
+
+async function maybeTouch(deviceId: number, periodSeconds: number): Promise<void> {
+  const last = lastTouchedAt.get(deviceId);
+  const due = last === undefined || Date.now() - last >= periodSeconds * 1000;
+  if (!due) return;
+  lastTouchedAt.set(deviceId, Date.now());
+  try {
+    await apiClient.getDevice(deviceId);
+  } catch {
+    // Best-effort, same as maybeLog - a device that keeps failing to read
+    // stays overdue by its true last-success time.
+  }
+}
+
 export async function runDataLogger(process: ProcessRecord): Promise<void> {
   let settings: DataLoggerSettings;
   let entries: DataLoggerControlEntry[];
@@ -72,7 +104,23 @@ export async function runDataLogger(process: ProcessRecord): Promise<void> {
 
   for (const entry of entries) {
     const { writeEnabled, periodSeconds, warning, error } = entry.dataLoggerControl;
-    if (!writeEnabled || periodSeconds === null) continue;
+    if (periodSeconds === null) continue;
+
+    if (!writeEnabled) {
+      // No history write, no WEM (that alert is specifically "logging is
+      // overdue", meaningless for a device that isn't being logged at
+      // all) - just the live-push touch, see maybeTouch's own comment.
+      // Deliberately NOT gated by `tickLoggingEnabled` below - that
+      // switch exists to guard against *write* spam (`log_device` rows
+      // piling up at tick resolution), which doesn't apply here at all -
+      // maybeTouch never writes anything. Found live: control-node-
+      // heartbeat's own `periodSeconds: 1` (matching its real 1s
+      // firmware broadcast rate) was being silently skipped entirely by
+      // this same guard, meant for a different concern.
+      await maybeTouch(entry.id, periodSeconds);
+      continue;
+    }
+
     if (periodSeconds <= TICK_SECONDS && !settings.tickLoggingEnabled) continue;
 
     const lastLoggedAt = await maybeLog(entry, periodSeconds);

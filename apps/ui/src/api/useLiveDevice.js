@@ -30,6 +30,13 @@ export function useDeviceLiveState(deviceId) {
             mode: event.mode,
             valueAuto: event.valueAuto,
             valueManual: event.valueManual,
+            // AGENTS.md section 62 - only present when this event was
+            // published because the overdue status itself changed (an
+            // ordinary Dual Devices Model write doesn't carry these) -
+            // left undefined otherwise so DevicesList.jsx's own `??`
+            // fallback to the last REST fetch's value keeps working.
+            isOverdue: event.isOverdue,
+            expiresAt: event.expiresAt,
             timestamp: event.timestamp,
           },
         }))

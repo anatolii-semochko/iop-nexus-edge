@@ -7,6 +7,7 @@ import { getSystemActorUserId, logCommand } from "../commandLog.js";
 import { logReading } from "../deviceLog.js";
 import * as dataLoggerControl from "../dataLoggerControl.js";
 import { EdgeXError, listEdgeXDevices, readValue, writeValue, type EdgeXDeviceStatus } from "../edgex.js";
+import { publishDeviceEvent } from "../messaging.js";
 import { devicesNeededFor, validateWrite, type ForbiddenRule } from "../validator.js";
 
 /**
@@ -59,6 +60,7 @@ interface DeviceRow {
   simulated: boolean;
   edgex_device_name_simulated: string | null;
   capabilities: DeviceCapabilities;
+  data_logger_control: dataLoggerControl.DataLoggerControlConfig;
   created_at: string;
   updated_at: string;
 }
@@ -131,6 +133,48 @@ const SELECT_DEVICE_WITH_NODE = `
   LEFT JOIN nodes n ON n.id = d.node_id
 `;
 
+/**
+ * Computes this reading's overdue status server-side (AGENTS.md section 62 -
+ * moves what DevicesList.jsx used to compute client-side, mirroring
+ * nodeHeartbeatStaleness's own role for Nodes) and publishes a live `device`
+ * event carrying it plus the reading's own value - so a passing tab that
+ * already has this device open (or another tab entirely) converges without
+ * needing to poll again itself. Always returns the freshly computed values
+ * regardless, for the caller's own HTTP response.
+ *
+ * Publishes unconditionally, not only when isOverdue itself changed - an
+ * earlier version gated on that (avoiding "needless" traffic), which
+ * quietly broke live *value* updates for the common, healthy case where
+ * isOverdue never changes at all: DevicesList.jsx's own live overlay would
+ * then never receive anything after the initial mount fetch, even though
+ * the value was being read fresh every `periodSeconds` the whole time
+ * (found live: a device's displayed value visibly stopped advancing).
+ * Unconditional publishing isn't excessive here specifically because
+ * every caller is already naturally rate-limited to roughly `periodSeconds`
+ * cadence - GET /devices/:id by a page's own one-time mount fetch plus
+ * Data Logger's own periodic touch/write (dataLogger.ts's maybeTouch/
+ * maybeLog), POST /devices/:id/log by the same write cadence - never a
+ * tight per-tick loop.
+ */
+async function publishDeviceReading(
+  device: { id: number; data_logger_control: dataLoggerControl.DataLoggerControlConfig },
+  readingOriginMs: number | null,
+  value: unknown,
+  source: string,
+): Promise<{ isOverdue: boolean; expiresAt: number | null }> {
+  const result = dataLoggerControl.computeOverdue(device.data_logger_control, readingOriginMs, Date.now());
+  await publishDeviceEvent({
+    domain: "device",
+    entityId: device.id,
+    value,
+    isOverdue: result.isOverdue,
+    expiresAt: result.expiresAt,
+    timestamp: new Date().toISOString(),
+    source,
+  });
+  return result;
+}
+
 export async function deviceRoutes(app: FastifyInstance): Promise<void> {
   // List view: registry metadata plus EdgeX admin/operating state, fetched
   // once for every device.
@@ -177,6 +221,8 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
     // `timestamp` only reflects events actually received this session).
     let readingOrigin: number | null = null;
     let dualState: dualDevicesModel.DeviceState | null = null;
+    let isOverdue = false;
+    let expiresAt: number | null = null;
     const resolvedEdgexName = resolveEdgexName(device);
     if (resolvedEdgexName && device.capabilities.edgexResource) {
       const edgexDeviceName = resolvedEdgexName;
@@ -202,9 +248,10 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
           app.log.warn({ err, device: device.name }, "failed to read Dual Devices Model state");
         }
       }
+      ({ isOverdue, expiresAt } = await publishDeviceReading(device, readingOrigin, value, "device-read"));
     }
 
-    return { ...device, value, valueType, units, dualState, readingOrigin };
+    return { ...device, value, valueType, units, dualState, readingOrigin, isOverdue, expiresAt };
   });
 
   // Write path (UI-driven): Model State Validator, then Dual Devices Model
@@ -376,6 +423,12 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
     const reading = await readValue(resolvedEdgexName, device.capabilities.edgexResource);
     await logReading({ deviceId: device.id, value: reading.value, source: "data-logger" });
     await dataLoggerControl.touchLastLoggedAt(device.id);
+    // AGENTS.md section 62 - this is the orchestrator's own periodic
+    // write-cadence read, the other place (besides an on-demand UI GET)
+    // this app ever reads a device's live value - piggybacks the same
+    // overdue-changed check/publish rather than leaving Data Logger's own
+    // reads unable to converge the Devices list live.
+    await publishDeviceReading(device, Math.floor(reading.origin / 1e6), reading.value, "data-logger");
     return { status: "ok", value: reading.value };
   });
 

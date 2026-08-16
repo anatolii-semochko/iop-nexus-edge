@@ -55,6 +55,30 @@ async function getLastLoggedAt(deviceId: number): Promise<string | null> {
   return raw ? new Date(Number(raw)).toISOString() : null;
 }
 
+/** AGENTS_TO_DO.md, 2026-08-16 - moves the Devices list's own overdue/
+ * staleness check (previously computed client-side, DevicesList.jsx)
+ * server-side, mirroring nodeHeartbeatStaleness's own role for Nodes. A
+ * pure function, deliberately - `readingOriginMs`/`nowMs` are both passed
+ * in rather than read here, same reasoning as that function's own
+ * request-time-only stance (no caching, always as fresh as whatever
+ * reading triggered this call). */
+export function computeOverdue(
+  config: DataLoggerControlConfig,
+  readingOriginMs: number | null,
+  nowMs: number,
+): { isOverdue: boolean; expiresAt: number | null } {
+  const maxAgeMs =
+    config.periodSeconds && config.error?.numberSkippedPeriods
+      ? config.periodSeconds * config.error.numberSkippedPeriods * 1000
+      : null;
+  if (maxAgeMs === null || readingOriginMs === null) {
+    return { isOverdue: false, expiresAt: null };
+  }
+  const expiresAt = readingOriginMs + maxAgeMs;
+  return { isOverdue: nowMs > expiresAt, expiresAt };
+}
+
+
 /** Called by the orchestrator runner right after it successfully writes a
  * `log_device` row for this device (AGENTS.md) - deliberately a plain
  * last-write-wins timestamp, not a TTL-expiring key, same reasoning as

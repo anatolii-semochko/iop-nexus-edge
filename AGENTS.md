@@ -5756,3 +5756,121 @@ browser tabs open on Nodes:
   "OK" live the same way - confirms the orchestrator's tick-diff
   correctly detects a transition in *either* direction, not just
   worsening.
+
+## 62. Devices' `isOverdue` moved server-side, same push mechanism as §61 - with a genuinely harder passive case
+
+2026-08-16, same day. §61's own closing line ("Devices' own `isOverdue`
+stays poll-based - it's computed client-side... doing this properly
+there first needs moving that computation server-side") became today's
+task. The parallel to Nodes held for the *discrete* case but broke
+down for the *passive* one, in a way worth recording precisely, since
+it changed the shape of the fix partway through.
+
+**Server-side computation**: `dataLoggerControl.ts` gained
+`computeOverdue(config, readingOriginMs, nowMs)` - a pure function,
+identical math to what `DevicesList.jsx` used to run client-side
+(`periodSeconds x error.numberSkippedPeriods` vs. `now - readingOrigin`),
+just the one place both `GET /devices/:id` and `POST /devices/:id/log`
+now call it from. `DeviceEventEnvelope` (`messaging.ts`) grew optional
+`isOverdue`/`expiresAt` fields, riding the *existing* `device` domain -
+no new domain needed here, unlike `node`.
+
+**Where it diverges from Nodes - the passive case has no existing
+evaluator to piggyback on.** Nodes already had Heartbeating Control
+running every tick across every node, for free. Devices have nothing
+equivalent for "is this sensor's last reading still fresh" - the only
+things that ever read a device's live value are an on-demand `GET
+/devices/:id` (a UI page view) and Data Logger's own periodic
+write-cadence read (`writeEnabled` devices only). Once
+`DevicesList.jsx`'s per-row poll (section 60) was removed on the
+assumption "isOverdue is server-computed and live-pushed now, no poll
+needed" - true only if *something* keeps re-evaluating it - a real gap
+appeared: `control-node-heartbeat` (this session's own real physical
+test device, `writeEnabled: false` by design - periodSeconds is set
+purely for live staleness detection, not history logging) had nothing
+left to re-read it at all. Found by re-deriving the theory before
+touching code, not live this time - but it would have reproduced the
+exact "frozen forever" class of bug section 60 fixed, just in the
+opposite place.
+
+**Fix: `dataLogger.ts`'s loop no longer skips `!writeEnabled` devices
+entirely.** `listDataLoggerControls()`'s own query was never
+`writeEnabled`-scoped to begin with (only `readOnly`) - the gate was
+purely in the orchestrator's own loop. Split the loop: `writeEnabled`
+devices keep their exact existing behavior (`maybeLog`, then WEM if
+configured); `!writeEnabled` devices instead get a new `maybeTouch` -
+same due/cadence bookkeeping as `maybeLog` (in-memory `Map`, resets on
+restart), but calls `apiClient.getDevice(id)` (already existed) purely
+to trigger `GET /devices/:id`'s own read-and-publish, no history write,
+no WEM (that alert is specifically "logging is overdue," meaningless
+for a device that was deliberately configured not to log). One
+additional wrinkle caught before it shipped: the existing
+`periodSeconds <= TICK_SECONDS && !tickLoggingEnabled` guard (built to
+stop *write* spam at tick resolution) was also silently blocking
+`maybeTouch` - a read, not a write, so that guard doesn't apply to it
+at all; moved it to only gate the `writeEnabled` branch.
+
+**Second thing caught before shipping, not live this time either: the
+publish was originally gated on "did `isOverdue` itself change"** (a
+Redis-cached last-known value, diffed each call) - deliberately mirroring
+section 61's own diff-before-publish precedent to avoid "needless"
+traffic. This quietly broke live *value* updates for the overwhelmingly
+common healthy case: a device whose `isOverdue` never changes at all
+would never publish anything after its own initial mount fetch, even
+though the value was being read fresh every `periodSeconds` via
+`maybeTouch`/`maybeLog` the whole time. Removed the diff/cache
+entirely (`getLastKnownOverdue`/`setLastKnownOverdue`, both now
+deleted) - `publishDeviceReading` (renamed from `publishOverdueIfChanged`
+to reflect this) now publishes unconditionally on every call. Not
+excessive: every caller (a page's own one-time mount fetch, Data
+Logger's `periodSeconds`-paced touch/write) is already naturally
+rate-limited to roughly that cadence - nothing calls this every tick.
+
+**`DevicesList.jsx`**: dropped the client-side `dlc`/`maxAgeMs`
+computation entirely; `isOverdue`/`expiresAt` now come from
+`live.isOverdue ?? fetched?.isOverdue ?? false` (same live-over-fetched
+precedence `value`/`lastReadingAt` already used). `useNow()` is kept,
+now purely to force a re-render each second so the "Last reading"/
+"Expires" relative-time text keeps visually ticking - it no longer
+feeds the overdue computation itself. The per-row poll from section 60
+is gone (superseded, not merely redundant, by this).
+
+**Verified live**, node genuinely disconnected/reconnected (not a
+synthetic threshold trick this time, precisely because the touch
+cadence and the threshold interact - see below):
+- `control-node-heartbeat`'s displayed value kept advancing
+  (18438 -> 18451) purely from live pushes, no poll, no reload -
+  confirms the diff-removal fix.
+- Node physically disconnected: row flipped to red "Error" live,
+  value frozen at its last real reading (18481) - confirms a genuinely
+  silent device is detected, not just a config trick.
+- Node reconnected: row flipped back to green "OK" live, value resumed
+  advancing (18539) - confirms recovery, both directions, matching
+  section 61's own Nodes verification.
+
+**A test-methodology note worth keeping**: an early attempt to force a
+transition via `error.numberSkippedPeriods: 0` silently no-opped -
+`0` is falsy in JS, and `computeOverdue`'s own truthy-chain (faithfully
+copied from the original client code) treats a falsy
+`numberSkippedPeriods` as "not configured," same as `null`. Pre-existing,
+not introduced today, and not worth a special case for a threshold that
+never makes practical sense at exactly zero - just something to
+remember when hand-testing this specific config shape again. A second
+attempt (`numberSkippedPeriods: 1`, `periodSeconds: 1`) revealed a
+different, more interesting effect: when the threshold window and the
+touch cadence are the *same* size, the touch keeps arriving just
+before the deadline, so it never trips at all under real operation -
+which is actually correct/desirable, not a bug (a device being read
+right on schedule shouldn't ever appear overdue) - but means forcing a
+clean demonstration needs either a threshold with real margin over the
+touch cadence (as section 59's own "keep the window notably larger
+than the polling/touch interval" lesson already established) or, as
+done here, genuine silence.
+
+**Deliberately not done**: `control-node-pulse` (write-only, never
+receivable off the bus - section 59/60's own writeup) still has no
+`isOverdue` producer and never will via this mechanism - `readingOrigin`
+stays permanently `null` for it regardless of how often anything reads
+it, so `computeOverdue` correctly and permanently returns `false`. This
+was flagged to the user separately as its own open question (server-
+side display treatment for a write-only resource), not addressed here.
