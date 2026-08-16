@@ -13,7 +13,7 @@ import {
   CTableRow,
 } from '@coreui/react'
 import CIcon from '@coreui/icons-react'
-import { cilLibrary, cilSettings } from '@coreui/icons'
+import { cilLibrary, cilReload, cilSettings } from '@coreui/icons'
 import { api } from '../../api/client'
 import IconButton from '../../components/IconButton'
 import ResetFiltersButton from '../../components/ResetFiltersButton'
@@ -41,6 +41,16 @@ const STATUS_FILTER_OPTIONS = [
   { value: 'ok', label: 'OK' },
   { value: 'problem', label: 'Warning or Error' },
 ]
+
+// AGENTS_TO_DO.md, 2026-08-16 - found live: `entries` was fetched once on
+// mount and never again, so an entity going stale *after* that fetch
+// never appeared in the list at all - not just an unhighlighted row, the
+// entity was genuinely absent, and the new status filter (which runs
+// against this same stale `entries`) then looked "broken" (a real
+// problem entity, invisible until a manual page reload). Same "UI
+// convenience poll, not a control loop" precedent as DevicesList.jsx's
+// own DEVICES_POLL_MS/NodesList.jsx's old NODES_POLL_MS.
+const HEARTBEAT_CONTROLS_POLL_MS = 10000
 
 const iconUrl = (iconPath) => (iconPath ? `/api${iconPath}` : null)
 
@@ -79,6 +89,11 @@ const HeartbeatControlPanel = () => {
 
   useEffect(() => {
     reload()
+  }, [])
+
+  useEffect(() => {
+    const interval = setInterval(reload, HEARTBEAT_CONTROLS_POLL_MS)
+    return () => clearInterval(interval)
   }, [])
 
   const handleToggleStopped = async (entry, stopped) => {
@@ -152,7 +167,8 @@ const HeartbeatControlPanel = () => {
         <CCol xs="auto">
           <TableSearchInput value={search} onSearch={setSearch} placeholder="Search by name..." />
         </CCol>
-        <CCol className="d-flex justify-content-end">
+        <CCol className="d-flex justify-content-end gap-2">
+          <IconButton icon={cilReload} size="sm" center onClick={reload} ariaLabel="Reload" />
           <ResetFiltersButton active={hasActiveFilters} onClick={resetFilters} />
         </CCol>
       </CRow>

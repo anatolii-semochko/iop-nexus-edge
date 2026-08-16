@@ -5968,3 +5968,37 @@ had genuinely gone silent for about a minute during this same testing
 session (not a synthetic condition) - with its row highlighted red and
 its own entity icon showing, consistent with what the Nodes page
 itself showed for the same node at the same moment.
+
+**Follow-up, same day**: the user hit exactly the "needs a page reload"
+symptom this section's own verification note above had already run
+into and shrugged off as coincidental timing - it wasn't. Root cause:
+`HeartbeatControlPanel.jsx` fetches `GET /heartbeat-controls` exactly
+once, on mount, and never again - no poll, no live subscription, not
+even the list-level polls `NodesList.jsx`/`DevicesList.jsx` already
+have. An entity going stale *after* that one fetch doesn't just render
+unhighlighted - it's genuinely absent from `entries`, so the new status
+filter (which runs against that same stale array) correctly reports
+"no entities match" even while a real problem exists, and looks broken
+until a manual reload forces a fresh fetch. This panel was never given
+any refresh mechanism at all when it was first built (section 28) -
+today's filter/icon/highlight work just made the pre-existing gap
+externally visible for the first time.
+
+Fixed with the same `HEARTBEAT_CONTROLS_POLL_MS = 10000` precedent as
+`DevicesList.jsx`/the old `NodesList.jsx` poll - not migrated to a live
+push mechanism (this panel spans three entity types across three
+different domains, a bigger unification than this fix warranted).
+Also added a manual reload button (`cilReload`, the same
+`IconButton`/`ariaLabel="Reload"` idiom already used identically in
+`CommandLogsTab.jsx`/`ProcessMessageLogsTab.jsx`/`DeviceLogsTab.jsx`),
+placed left of Reset Filters per the user's own request - useful
+regardless of the poll, for forcing a fresh read on demand.
+
+Verified live: forced node 2's thresholds to an effectively-infinite
+value via `PATCH /heartbeat-controls/node/2` (making it resolve to
+"ok"), watched the same already-open, already-filtered ("Warning or
+Error") tab for 10s with **no reload** - the row disappeared and the
+entity count dropped on its own once the poll fired, confirming this
+wasn't just "worked because the page happened to be freshly mounted."
+Restored the original thresholds afterward; the reload button was
+also exercised directly.
