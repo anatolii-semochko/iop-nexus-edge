@@ -42,6 +42,7 @@ import NodeSettingsModal from './NodeSettingsModal'
 const PERSISTED_DEFAULTS = {
   search: '',
   groupFilter: '',
+  statusFilter: '',
   pageSize: 10,
   expandedIds: [],
 }
@@ -64,6 +65,29 @@ const matchesSearch = (node, search) => {
   )
 }
 
+// Background-color rule (AGENTS_TO_DO.md, 2026-08-15, same as
+// DevicesList.jsx's own): error -> danger, simulation -> info. Factored
+// out of the render loop (AGENTS_TO_DO.md, 2026-08-16) so the new status
+// filter can use the exact same value the row itself is colored by,
+// rather than a second parallel condition that could drift. `isError` is
+// `heartbeatStale === 'error'` - a real, request-time staleness check
+// (apps/api/src/heartbeatControl.ts's nodeHeartbeatStaleness) - NOT
+// `heartbeatStopped`, which despite its name is only the "monitoring
+// paused" toggle and never flips on a real disconnect (found live,
+// 2026-08-15).
+const nodeRowColor = (node) =>
+  node.heartbeatStale === 'error' ? 'danger' : node.simulated ? 'info' : undefined
+
+// Filter dropdown options, keyed by the exact rowColor value above ('' -
+// unset - means OK, the same "anything not danger/info" default
+// RowStatusBadge itself falls back to).
+const STATUS_FILTER_OPTIONS = [
+  { value: '', label: 'All statuses' },
+  { value: 'ok', label: 'OK' },
+  { value: 'danger', label: 'Error' },
+  { value: 'info', label: 'Simulation' },
+]
+
 /**
  * Nodes list (AGENTS_TO_DO.md, 2026-08-01) - now with a Node Group filter
  * and a page-level Config button (left of Clear Filters) that manages the
@@ -77,9 +101,10 @@ const NodesList = () => {
   const [nodeGroups, setNodeGroups] = useState([])
   const [error, setError] = useState(null)
   const [pageState, setPageState] = usePersistedState('nexusedge.nodesPage', PERSISTED_DEFAULTS)
-  const { search, groupFilter, expandedIds } = pageState
+  const { search, groupFilter, statusFilter, expandedIds } = pageState
   const setSearch = (value) => setPageState({ search: value })
   const setGroupFilter = (value) => setPageState({ groupFilter: value })
+  const setStatusFilter = (value) => setPageState({ statusFilter: value })
   const setExpandedIds = (ids) => setPageState({ expandedIds: ids })
   const { isExpanded, toggleOne } = useExpandableRows(expandedIds, setExpandedIds)
   // Bumped on reset to force TableSearchInput to remount with a blank
@@ -145,14 +170,15 @@ const NodesList = () => {
   const filtered = nodesWithLive
     .filter((node) => matchesSearch(node, search))
     .filter((node) => !groupFilter || String(node.group_id) === groupFilter)
+    .filter((node) => !statusFilter || (nodeRowColor(node) || 'ok') === statusFilter)
   const { page, pageSize, pageItems, totalItems, setPage, setPageSize } = usePagination(filtered, {
     pageSize: pageState.pageSize,
     onPageSizeChange: (size) => setPageState({ pageSize: size }),
   })
 
-  const hasActiveFilters = Boolean(search) || Boolean(groupFilter)
+  const hasActiveFilters = Boolean(search) || Boolean(groupFilter) || Boolean(statusFilter)
   const handleResetFilters = () => {
-    setPageState({ search: '', groupFilter: '' })
+    setPageState({ search: '', groupFilter: '', statusFilter: '' })
     setSearchResetToken((token) => token + 1)
   }
 
@@ -167,6 +193,20 @@ const NodesList = () => {
         {!error && nodes && (
           <>
             <CRow className="mb-3 g-2 align-items-center">
+              <CCol xs="auto">
+                <CFormSelect
+                  size="sm"
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  aria-label="Filter by status"
+                >
+                  {STATUS_FILTER_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </CFormSelect>
+              </CCol>
               <CCol xs="auto">
                 <CFormSelect
                   size="sm"
@@ -236,28 +276,7 @@ const NodesList = () => {
                       // actually expanded.
                       const expandedRow = isExpanded(node.id)
                       const noBorderWhenExpanded = expandedRow ? 'border-bottom-0' : undefined
-                      // Background-color rule (AGENTS_TO_DO.md, 2026-08-15,
-                      // same as DevicesList.jsx's own): error -> danger,
-                      // simulation -> info. `isError` is `heartbeatStale ===
-                      // 'error'` - a real, request-time staleness check
-                      // (apps/api/src/heartbeatControl.ts's
-                      // nodeHeartbeatStaleness, a replica of the
-                      // orchestrator's own threshold comparison) - NOT
-                      // `heartbeatStopped`, which despite its name is only
-                      // the "monitoring paused" toggle and never flips on a
-                      // real disconnect (found live, 2026-08-15: the user
-                      // disconnected a physical node from the CAN bus and
-                      // both Nodes and Devices stayed "OK" - Heartbeating
-                      // Control's own process row reacted correctly since it
-                      // computes staleness itself, but nothing surfaced that
-                      // result back onto the node row until this fix). The
-                      // standalone "Health" column stays gone (`nodes.health`
-                      // is still permanently stuck at "unknown", unrelated to
-                      // this fix) - the raw `health` field is still visible
-                      // in NodeDetailRow's own JSON dump below if anyone
-                      // needs it.
-                      const isError = node.heartbeatStale === 'error'
-                      const rowColor = isError ? 'danger' : node.simulated ? 'info' : undefined
+                      const rowColor = nodeRowColor(node)
                       return (
                         <React.Fragment key={node.id}>
                           <CTableRow color={rowColor}>

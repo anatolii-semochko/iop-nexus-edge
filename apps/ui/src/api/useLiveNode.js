@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { api } from './client'
 import { subscribeToLiveEvents } from './liveSocket'
 
 /**
@@ -29,4 +30,26 @@ export function useNodesLiveState() {
   )
 
   return byNode
+}
+
+/**
+ * True whenever at least one node in the whole system is currently
+ * simulated (AGENTS_TO_DO.md, 2026-08-16) - the header's own blinking
+ * "Simulation" badge (AppHeader.jsx), mounted app-wide, not just on the
+ * Nodes page. One own `GET /nodes` fetch on mount (this hook has no other
+ * source for the fleet - NodesList.jsx's own state isn't reachable from
+ * here) layered with the exact same live `node` overlay useNodesLiveState
+ * already provides, so a `simulated` toggle in any tab, on any page,
+ * updates this immediately - the underlying WebSocket connection is
+ * shared app-wide regardless of which page happens to be mounted.
+ */
+export function useAnyNodeSimulated() {
+  const [nodes, setNodes] = useState([])
+  const liveNodes = useNodesLiveState()
+
+  useEffect(() => {
+    api.listNodes().then(setNodes).catch(() => {})
+  }, [])
+
+  return nodes.some((node) => (liveNodes[node.id]?.simulated ?? node.simulated) === true)
 }

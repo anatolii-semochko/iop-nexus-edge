@@ -42,6 +42,7 @@ const PERSISTED_DEFAULTS = {
   search: '',
   groupFilter: '',
   nodeFilter: '',
+  statusFilter: '',
   pageSize: 10,
   expandedIds: [],
 }
@@ -362,6 +363,31 @@ const matchesSearch = (device, search) => {
   return [device.name, device.type].some((field) => field?.toLowerCase().includes(needle))
 }
 
+// A node-attached device has no `simulated` switch of its own - it's
+// visually "simulated" right now whenever its parent node is
+// (`node_simulated`, from SELECT_DEVICE_LIST_BASE's own join). Factored
+// out (AGENTS_TO_DO.md, 2026-08-16) so the new status filter and the row
+// loop's own `effectivelySimulated` prop use the exact same rule.
+const deviceEffectivelySimulated = (device) =>
+  device.node_id === null ? device.simulated : device.node_simulated
+
+// Background-color rule (section 56): error -> danger, simulation -> info.
+// `device.isOverdue` here is the list route's own last-known snapshot
+// (AGENTS_TO_DO.md, 2026-08-16 - GET /devices now includes it), which is
+// what the status filter runs against; each DeviceRow's own rendered
+// color instead uses its live-updated isOverdue (mount fetch + live
+// push) - marginally fresher, but the two agree within one read/push
+// interval of each other.
+const deviceRowColor = (device) =>
+  device.isOverdue ? 'danger' : deviceEffectivelySimulated(device) ? 'info' : undefined
+
+const STATUS_FILTER_OPTIONS = [
+  { value: '', label: 'All statuses' },
+  { value: 'ok', label: 'OK' },
+  { value: 'danger', label: 'Error' },
+  { value: 'info', label: 'Simulation' },
+]
+
 /**
  * Devices list (AGENTS_TO_DO.md, 2026-08-01, redesigned 2026-08-14) - Device
  * Group and Node filters, a page-level Config button (left of Clear
@@ -379,10 +405,11 @@ const DevicesList = () => {
   const [nodes, setNodes] = useState([])
   const [error, setError] = useState(null)
   const [pageState, setPageState] = usePersistedState('nexusedge.devicesPage', PERSISTED_DEFAULTS)
-  const { search, groupFilter, nodeFilter, expandedIds } = pageState
+  const { search, groupFilter, nodeFilter, statusFilter, expandedIds } = pageState
   const setSearch = (value) => setPageState({ search: value })
   const setGroupFilter = (value) => setPageState({ groupFilter: value })
   const setNodeFilter = (value) => setPageState({ nodeFilter: value })
+  const setStatusFilter = (value) => setPageState({ statusFilter: value })
   const setExpandedIds = (ids) => setPageState({ expandedIds: ids })
   const { isExpanded, toggleOne } = useExpandableRows(expandedIds, setExpandedIds)
   // Not persisted - a TableSearchInput remount trigger only, see
@@ -422,14 +449,14 @@ const DevicesList = () => {
 
   // AGENTS_TO_DO.md, 2026-08-15 - toggling a node's own simulated flag
   // from a DIFFERENT tab (e.g. NodesList.jsx there) doesn't push any
-  // live event this page could subscribe to (no `node` domain exists in
-  // the live WebSocket protocol at all today - see AGENTS.md's own
-  // writeup on why polling was chosen over adding one). Periodic
-  // refetch is the same "UI convenience poll, not a control loop"
-  // precedent ProcessesList.jsx's own registered-kinds poll already
-  // established, applied here to converge `node_simulated`/`simulated`
-  // (and everything else GET /devices returns) within one interval of
-  // a change made anywhere else.
+  // live event this page subscribes to. A `node` domain does now exist
+  // (AGENTS.md section 61, added 2026-08-16, after this poll was
+  // written) - not migrated to it in this pass, still deliberately
+  // poll-based for the same "UI convenience poll, not a control loop"
+  // reasoning ProcessesList.jsx's own registered-kinds poll established,
+  // converging `node_simulated`/`simulated` (and everything else GET
+  // /devices returns, including the status filter's own `isOverdue`
+  // snapshot below) within one interval of a change made anywhere else.
   useEffect(() => {
     const interval = setInterval(reloadDevices, DEVICES_POLL_MS)
     return () => clearInterval(interval)
@@ -441,14 +468,16 @@ const DevicesList = () => {
       (device) => !groupFilter || (device.device_group_ids ?? []).includes(Number(groupFilter)),
     )
     .filter((device) => !nodeFilter || String(device.node_id) === nodeFilter)
+    .filter((device) => !statusFilter || (deviceRowColor(device) || 'ok') === statusFilter)
   const { page, pageSize, pageItems, totalItems, setPage, setPageSize } = usePagination(filtered, {
     pageSize: pageState.pageSize,
     onPageSizeChange: (size) => setPageState({ pageSize: size }),
   })
 
-  const hasActiveFilters = Boolean(search) || Boolean(groupFilter) || Boolean(nodeFilter)
+  const hasActiveFilters =
+    Boolean(search) || Boolean(groupFilter) || Boolean(nodeFilter) || Boolean(statusFilter)
   const handleResetFilters = () => {
-    setPageState({ search: '', groupFilter: '', nodeFilter: '' })
+    setPageState({ search: '', groupFilter: '', nodeFilter: '', statusFilter: '' })
     setSearchResetToken((token) => token + 1)
   }
 
@@ -463,6 +492,20 @@ const DevicesList = () => {
         {!error && devices && (
           <>
             <CRow className="mb-3 g-2 align-items-center">
+              <CCol xs="auto">
+                <CFormSelect
+                  size="sm"
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  aria-label="Filter by status"
+                >
+                  {STATUS_FILTER_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </CFormSelect>
+              </CCol>
               <CCol xs="auto">
                 <CFormSelect
                   size="sm"
@@ -542,15 +585,7 @@ const DevicesList = () => {
                   </CTableHead>
                   <CTableBody>
                     {pageItems.map((device) => {
-                      // `effectivelySimulated` - a node-attached device has
-                      // no switch of its own (see below) but is still
-                      // visually "simulated" right now whenever its parent
-                      // node is (`node_simulated`, from
-                      // SELECT_DEVICE_LIST_BASE's own join) - the row
-                      // highlight should reflect what's actually resolving,
-                      // not just this row's own `simulated` column.
-                      const effectivelySimulated =
-                        device.node_id === null ? device.simulated : device.node_simulated
+                      const effectivelySimulated = deviceEffectivelySimulated(device)
                       return (
                         <DeviceRow
                           key={device.id}

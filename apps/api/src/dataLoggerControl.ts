@@ -78,6 +78,41 @@ export function computeOverdue(
   return { isOverdue: nowMs > expiresAt, expiresAt };
 }
 
+function overdueSnapshotKey(deviceId: number): string {
+  return `data-logger:${deviceId}:overdueSnapshot`;
+}
+
+/** Write-only cache of computeOverdue's own last result per device
+ * (AGENTS_TO_DO.md, 2026-08-16) - routes/devices.ts's publishDeviceReading
+ * writes this on every read (mount fetch, Data Logger's own touch/write),
+ * alongside its live publish. Exists purely so `GET /devices` (the list
+ * route) can offer a cheap, "last known" isOverdue per device for the
+ * Devices list's own status filter, without doing a live EdgeX read for
+ * every device on every list load (deliberately never done anywhere else
+ * in this app - see SELECT_DEVICE_LIST_BASE's own reasoning). Necessarily
+ * a snapshot, not live - it only refreshes as often as something actually
+ * reads that specific device (a mount fetch, Data Logger's own
+ * `periodSeconds` cadence), same staleness profile as the value itself. */
+export async function setOverdueSnapshot(deviceId: number, isOverdue: boolean, expiresAt: number | null): Promise<void> {
+  await redis.set(overdueSnapshotKey(deviceId), JSON.stringify({ isOverdue, expiresAt }));
+}
+
+/** Batch read for the list route above - one Redis MGET for every device
+ * id on the page rather than N round-trips. Missing entries (a device
+ * nothing has read yet this deploy) are simply omitted, left for the
+ * caller to default to "not overdue" - same "unproven, not flagged"
+ * stance `computeOverdue` itself takes for a `null` reading. */
+export async function getOverdueSnapshots(
+  deviceIds: number[],
+): Promise<Map<number, { isOverdue: boolean; expiresAt: number | null }>> {
+  const result = new Map<number, { isOverdue: boolean; expiresAt: number | null }>();
+  if (deviceIds.length === 0) return result;
+  const raw = await redis.mget(deviceIds.map(overdueSnapshotKey));
+  raw.forEach((value, index) => {
+    if (value) result.set(deviceIds[index], JSON.parse(value));
+  });
+  return result;
+}
 
 /** Called by the orchestrator runner right after it successfully writes a
  * `log_device` row for this device (AGENTS.md) - deliberately a plain

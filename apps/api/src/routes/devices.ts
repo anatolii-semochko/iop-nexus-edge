@@ -163,15 +163,21 @@ async function publishDeviceReading(
   source: string,
 ): Promise<{ isOverdue: boolean; expiresAt: number | null }> {
   const result = dataLoggerControl.computeOverdue(device.data_logger_control, readingOriginMs, Date.now());
-  await publishDeviceEvent({
-    domain: "device",
-    entityId: device.id,
-    value,
-    isOverdue: result.isOverdue,
-    expiresAt: result.expiresAt,
-    timestamp: new Date().toISOString(),
-    source,
-  });
+  await Promise.all([
+    publishDeviceEvent({
+      domain: "device",
+      entityId: device.id,
+      value,
+      isOverdue: result.isOverdue,
+      expiresAt: result.expiresAt,
+      timestamp: new Date().toISOString(),
+      source,
+    }),
+    // AGENTS_TO_DO.md, 2026-08-16 - lets GET /devices (the list route)
+    // offer a cheap "last known" isOverdue per device, for the Devices
+    // list's own status filter, without a live EdgeX read of its own.
+    dataLoggerControl.setOverdueSnapshot(device.id, result.isOverdue, result.expiresAt),
+  ]);
   return result;
 }
 
@@ -188,11 +194,20 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
       app.log.warn({ err }, "failed to fetch EdgeX device list; returning registry data without live status");
     }
 
+    // Last-known isOverdue per device (AGENTS_TO_DO.md, 2026-08-16) - for
+    // the Devices list's own status filter, which needs a value for every
+    // device up front, not just the ones a mounted DeviceRow has already
+    // fetched. A snapshot, not live - "unknown yet" (no cache entry)
+    // defaults to not-overdue, same stance computeOverdue itself takes.
+    const overdueSnapshots = await dataLoggerControl.getOverdueSnapshots(result.rows.map((d) => d.id));
+
     return result.rows.map((device) => {
       const resolvedEdgexName = resolveEdgexName(device);
+      const overdue = overdueSnapshots.get(device.id);
       return {
         ...device,
         edgex: resolvedEdgexName ? (edgexByName.get(resolvedEdgexName) ?? null) : null,
+        isOverdue: overdue?.isOverdue ?? false,
       };
     });
   });

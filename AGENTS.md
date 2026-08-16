@@ -5874,3 +5874,97 @@ stays permanently `null` for it regardless of how often anything reads
 it, so `computeOverdue` correctly and permanently returns `false`. This
 was flagged to the user separately as its own open question (server-
 side display treatment for a write-only resource), not addressed here.
+
+## 63. Header Simulation badge, Nodes/Devices status filters, Heartbeating Control panel polish
+
+2026-08-16, same day, three independent, smaller requests batched into
+one pass.
+
+**Header blinking "Simulation" badge** (`AppHeader.jsx`, left of
+`SystemTickIndicator`) - visible whenever `useAnyNodeSimulated()`
+(`useLiveNode.js`, new) is true. That hook does its own one-time `GET
+/nodes` fetch layered with the existing `useNodesLiveState()` overlay -
+since the header mounts app-wide and the underlying WebSocket
+connection is shared regardless of which page is open, a `simulated`
+toggle on the Nodes page updates this badge immediately even though
+the header component has nothing to do with that page. Reuses the
+existing `.wem-blink-ring` CSS animation (`NotificationCenter.jsx`'s
+own warning/error icons) rather than inventing a second blink
+mechanism.
+
+**Nodes/Devices status filter** - a new leftmost filter dropdown (OK/
+Error/Simulation), filtering by the exact same `rowColor` value each
+table already computes for its own row - factored into a shared
+`nodeRowColor(node)`/`deviceRowColor(device)` function in each file so
+the filter and the row's own background can never drift apart (same
+"derive from one source" principle `RowStatusBadge` itself already
+established, section 56).
+
+Devices needed more than Nodes here too, in a smaller echo of section
+62's own finding: `NodesList.jsx` already computes every row's status
+in one flat array up front, so filtering by it was trivial. `isOverdue`
+in `DevicesList.jsx`, by contrast, is only known *inside* each
+`DeviceRow` after its own async mount fetch - the parent has no
+visibility into it, and pagination/filtering happen at the parent
+level, before any row for an unfiltered page has even mounted (a
+circular dependency: what's filtered determines what renders, but what
+renders is what determines the filter's own input). Fixed by having
+`GET /devices` (list route) include a per-device `isOverdue`, sourced
+from a new write-only Redis snapshot (`dataLoggerControl.ts`'s
+`setOverdueSnapshot`/`getOverdueSnapshots`) that `publishDeviceReading`
+(section 62) now also writes on every read, batch-read via one Redis
+`MGET` for the whole list rather than N round-trips. This is
+necessarily a *snapshot* (refreshes only as often as something reads
+that specific device - a mount fetch, Data Logger's own touch), not
+live - the filter itself only re-runs when the list-level poll
+(`DEVICES_POLL_MS`) refreshes `GET /devices`, same cadence the
+cross-tab `simulated`-convergence poll already used. Each `DeviceRow`'s
+own rendered color still uses its own live-updated `isOverdue`
+(unchanged from section 62) - marginally fresher than the filter's own
+input, the two agree within one read/poll interval of each other.
+
+**Heartbeating Control panel** (`HeartbeatControlPanel.jsx`) - three
+asks: a status filter (OK vs "Warning or Error", one combined option
+per the user's own framing - "quick search for problem entities", not
+separate Warning/Error options), a leading icon column, and row
+background coloring for a problem entity. All three needed a
+*computed* per-row staleness the panel's own `GET /heartbeat-controls`
+never returned before today - `heartbeatControl.ts`'s `listEntities`
+only ever returned the *config* (thresholds), never whether an entity
+is *currently* stale by them.
+
+Generalized `nodeHeartbeatStaleness` (section 58) into a shared
+`computeStaleness(config, stopped, lastSeenAt)` - node's own
+`simulated` skip is now a thin wrapper around it
+(`nodeHeartbeatStaleness` itself unchanged from nodes.ts's point of
+view). `listEntities` now also joins `library_items` (by `(kind,
+type_name)`, the same key `routes/devices.ts`/`routes/library.ts`'s
+own `usedTypeNames()` already join on per entity type -
+`processes.kind`, `devices.type`, `nodes.type`) for the icon, and
+computes `staleness` per row using whatever `lastSeenAt`/`stopped`/
+`simulated` (node only, `false` literal for process/device in the
+query) it already had to fetch anyway - no new Redis reads, this was
+already request-time/live, same as `GET /nodes`'s own `heartbeatStale`
+(section 58). Devices always resolve to `"ok"` here (no real heartbeat
+producer, `lastSeenAt` always `null` for that type - unchanged,
+long-standing limitation, not addressed today) - correct, not a gap
+introduced by this pass.
+
+Frontend: `entityRowColor(entry)` (error -> danger, warning -> warning,
+no simulation tier - this panel spans three entity types and only
+staleness is a concept shared by all of them) drives both the new
+leading icon-column `<CTableRow color=...>` and the status filter,
+same "one source" principle as the Nodes/Devices filters above.
+
+**Verified live** in nexus-edge-aquarium: toggled a node's `simulated`
+switch in one tab, watched the header badge appear/blink and
+disappear live in the same tab with no reload; the Nodes/Devices
+status filters correctly isolated the simulated node / correctly
+returned "no devices" for a Devices Error filter when nothing was
+actually overdue; the Heartbeating Control panel's own "Warning or
+Error" filter, after a page reload to force a fresh `GET /heartbeat-
+controls`, correctly surfaced "Main node control" - the physical node
+had genuinely gone silent for about a minute during this same testing
+session (not a synthetic condition) - with its row highlighted red and
+its own entity icon showing, consistent with what the Nodes page
+itself showed for the same node at the same moment.

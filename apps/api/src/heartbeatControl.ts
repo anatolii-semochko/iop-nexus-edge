@@ -48,6 +48,12 @@ export interface HeartbeatControlEntry {
   // Live (Redis) - only ever populated for processes today (the only
   // entity type with a real heartbeat producer so far - AGENTS.md).
   lastSeenAt: string | null;
+  // AGENTS_TO_DO.md, 2026-08-16 - the panel's own row icon (Library
+  // Catalog, joined by (kind, type_name) same as Devices/Nodes/Processes
+  // already do individually) and its computed staleness, for the panel's
+  // own status filter/row highlight - see computeStaleness below.
+  iconPath: string | null;
+  staleness: StalenessLevel;
 }
 
 function stoppedKey(type: EntityType, id: number): string {
@@ -190,24 +196,21 @@ function skippedTicks(lastSeenAt: string | null): number | null {
 }
 
 /** Request-time replica of apps/orchestrator/src/processes/heartbeatControl.ts's
- * own evaluate() for a single node - needed so `GET /nodes` can expose a real
- * staleness signal directly (AGENTS_TO_DO.md, 2026-08-15: the orchestrator's own
- * evaluate() only ever surfaces this as WEM/critical/warning on the Heartbeating
- * Control process's own row, never writes anything back onto the node itself,
- * which left `node.heartbeatStopped` - actually the unrelated "monitoring
- * paused" toggle - as the only thing NodesList.jsx had to color a row with,
- * so a real disconnect never showed as anything but "OK"). Pure/sync - takes
- * the same `heartbeatStopped`/`heartbeatLastSeenAt` values withLiveHeartbeat
- * already fetches from Redis, rather than re-querying. Devices still have no
- * real heartbeat producer (see listEntities above), so no analogous helper
- * for those yet. */
-export function nodeHeartbeatStaleness(
+ * own evaluate() (a single entity's own share of it) - needed so a live
+ * request can expose a real staleness signal directly (AGENTS_TO_DO.md,
+ * 2026-08-15: the orchestrator's own evaluate() only ever surfaces this as
+ * WEM/critical/warning on the Heartbeating Control process's own row, never
+ * writes anything back onto the monitored entity itself). Pure/sync - takes
+ * whatever `stopped`/`lastSeenAt` values the caller already has from Redis,
+ * rather than re-querying. Shared by `nodeHeartbeatStaleness` below (adds
+ * the node-only `simulated` skip) and `listEntities` (the Heartbeating
+ * Control panel's own per-row status, 2026-08-16) - process and device
+ * entities have no `simulated` concept, so they call this directly. */
+export function computeStaleness(
   config: HeartbeatControlConfig,
-  simulated: boolean,
   stopped: boolean,
   lastSeenAt: string | null,
 ): StalenessLevel {
-  if (simulated) return "ok";
   const { stoppable, warning, error } = config;
   if (stoppable && stopped) return "ok";
   if (!warning && !error) return "ok";
@@ -220,28 +223,73 @@ export function nodeHeartbeatStaleness(
   return "ok";
 }
 
+/** Node-specific wrapper around computeStaleness above - `GET /nodes`'s own
+ * signature unchanged (AGENTS.md section 58). A simulated node is skipped
+ * entirely, not just quietly stale - same reasoning as the orchestrator's
+ * own evaluate() (there is no real hardware link for it to be stale *from*
+ * while deliberately in bench-test/service mode). */
+export function nodeHeartbeatStaleness(
+  config: HeartbeatControlConfig,
+  simulated: boolean,
+  stopped: boolean,
+  lastSeenAt: string | null,
+): StalenessLevel {
+  if (simulated) return "ok";
+  return computeStaleness(config, stopped, lastSeenAt);
+}
+
+// Which column on each entity's own table holds the "type name" the
+// Library Catalog indexes icons by (same key routes/devices.ts and
+// routes/library.ts's usedTypeNames() already join on, per kind) -
+// `processes.kind`, `devices.type`, `nodes.type`.
+const TYPE_COLUMN_BY_TYPE: Record<EntityType, string> = {
+  process: "kind",
+  device: "type",
+  node: "type",
+};
+
 interface EntityRow {
   id: number;
   name: string;
   heartbeat_control: HeartbeatControlConfig;
+  simulated: boolean;
+  icon_path: string | null;
 }
 
 async function listEntities(type: EntityType): Promise<HeartbeatControlEntry[]> {
+  const typeColumn = TYPE_COLUMN_BY_TYPE[type];
+  // `simulated` only exists on `nodes` - selected as a literal `false` for
+  // process/device so this stays one query shape across all three types.
   const { rows } = await pool.query<EntityRow>(
-    `SELECT id, name, heartbeat_control FROM ${TABLE_BY_TYPE[type]} ORDER BY name`,
+    `SELECT e.id, e.name, e.heartbeat_control,
+       ${type === "node" ? "e.simulated" : "false"} AS simulated,
+       li.icon_path
+     FROM ${TABLE_BY_TYPE[type]} e
+     LEFT JOIN library_items li ON li.type_name = e.${typeColumn} AND li.kind = $1
+     ORDER BY e.name`,
+    [type],
   );
   return Promise.all(
-    rows.map(async (row) => ({
-      type,
-      id: row.id,
-      name: row.name,
-      heartbeatControl: row.heartbeat_control,
-      stopped: await isMonitoringStopped(type, row.id),
+    rows.map(async (row) => {
+      const stopped = await isMonitoringStopped(type, row.id);
       // "device" has no real producer yet (AGENTS.md's Heartbeating
       // Control section) - "process" and "node" (2026-08-09, the
       // control-node's own Heartbeat device) both do.
-      lastSeenAt: type === "process" || type === "node" ? await getLastSeenAt(type, row.id) : null,
-    })),
+      const lastSeenAt = type === "process" || type === "node" ? await getLastSeenAt(type, row.id) : null;
+      return {
+        type,
+        id: row.id,
+        name: row.name,
+        heartbeatControl: row.heartbeat_control,
+        stopped,
+        lastSeenAt,
+        iconPath: row.icon_path,
+        staleness:
+          type === "node"
+            ? nodeHeartbeatStaleness(row.heartbeat_control, row.simulated, stopped, lastSeenAt)
+            : computeStaleness(row.heartbeat_control, stopped, lastSeenAt),
+      };
+    }),
   );
 }
 

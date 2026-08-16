@@ -19,6 +19,7 @@
 import React, { useEffect, useRef } from 'react'
 import { useSelector, useDispatch } from 'react-redux'
 import {
+  CBadge,
   CContainer,
   CDropdown,
   CDropdownItem,
@@ -32,6 +33,7 @@ import {
 import CIcon from '@coreui/icons-react'
 import { cilContrast, cilMenu, cilMoon, cilSun } from '@coreui/icons'
 
+import { useAnyNodeSimulated } from '../api/useLiveNode'
 import { AppHeaderDropdown } from './header/index'
 import NotificationCenter from './header/NotificationCenter'
 import SystemTickIndicator from './header/SystemTickIndicator'
@@ -53,6 +55,7 @@ const AppHeader = () => {
 
   const dispatch = useDispatch()
   const sidebarShow = useSelector((state) => state.sidebarShow)
+  const anyNodeSimulated = useAnyNodeSimulated()
 
   useEffect(() => {
     const handleScroll = () => {
@@ -74,6 +77,18 @@ const AppHeader = () => {
           <CIcon icon={cilMenu} size="lg" />
         </CHeaderToggler>
         <CHeaderNav className="ms-auto">
+          {anyNodeSimulated && (
+            <li className="nav-item d-flex align-items-center py-1 me-3">
+              <CBadge
+                color="primary"
+                className="wem-blink-ring rounded-pill px-3 py-2 me-2"
+                role="status"
+                title="At least one node is in simulation mode"
+              >
+                Simulation
+              </CBadge>
+            </li>
+          )}
           <li className="nav-item d-flex align-items-center py-1 me-3">
             <SystemTickIndicator />
           </li>
