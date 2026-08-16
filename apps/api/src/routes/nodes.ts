@@ -5,6 +5,7 @@ import { logCommand } from "../commandLog.js";
 import { pool } from "../db.js";
 import * as heartbeatControl from "../heartbeatControl.js";
 import type { HeartbeatControlConfig } from "../heartbeatControl.js";
+import { publishNodeEvent } from "../messaging.js";
 
 interface NodeRow {
   id: number;
@@ -52,6 +53,22 @@ async function withLiveHeartbeat(node: NodeRow) {
     heartbeatLastSeenAt,
   );
   return { ...node, heartbeatStopped, heartbeatLastSeenAt, heartbeatStale };
+}
+
+// Live push (AGENTS.md section 61) - `value` is the whole withLiveHeartbeat
+// row, matching NodeEventEnvelope's own "no hand-picked field subset"
+// choice. Callers already have this row for their own HTTP response in
+// most cases; kept as a separate small helper anyway so a route that
+// *doesn't* need to return the row (the broadcast endpoint below) doesn't
+// have to fake one.
+async function publishNodeState(node: Awaited<ReturnType<typeof withLiveHeartbeat>>, source: string): Promise<void> {
+  await publishNodeEvent({
+    domain: "node",
+    entityId: node.id,
+    value: node,
+    timestamp: new Date().toISOString(),
+    source,
+  });
 }
 
 // Resolved group name joined in, not a separate per-row fetch - the list
@@ -119,7 +136,9 @@ export async function nodeRoutes(app: FastifyInstance): Promise<void> {
         [request.body.groupId, request.params.id],
       );
       if (!result.rows[0]) return reply.code(404).send({ error: "node not found" });
-      return findNode(request.params.id);
+      const node = await withLiveHeartbeat(await findNode(request.params.id));
+      await publishNodeState(node, "node-group-changed");
+      return node;
     },
   );
 
@@ -163,7 +182,9 @@ export async function nodeRoutes(app: FastifyInstance): Promise<void> {
         [request.body.simulated, request.params.id],
       );
       if (!result.rows[0]) return reply.code(404).send({ error: "node not found" });
-      return withLiveHeartbeat(await findNode(request.params.id));
+      const updated = await withLiveHeartbeat(await findNode(request.params.id));
+      await publishNodeState(updated, request.body.simulated ? "node-simulated-on" : "node-simulated-off");
+      return updated;
     },
   );
 
@@ -183,7 +204,9 @@ export async function nodeRoutes(app: FastifyInstance): Promise<void> {
           [name, request.params.id],
         );
         if (!result.rows[0]) return reply.code(404).send({ error: "node not found" });
-        return findNode(request.params.id);
+        const node = await withLiveHeartbeat(await findNode(request.params.id));
+        await publishNodeState(node, "node-renamed");
+        return node;
       } catch (err) {
         if (isUniqueViolation(err)) {
           return reply.code(409).send({ error: "a node with this name already exists" });
@@ -192,4 +215,26 @@ export async function nodeRoutes(app: FastifyInstance): Promise<void> {
       }
     },
   );
+
+  // Orchestrator-driven push for the OTHER kind of node change - not a
+  // discrete write (those already publish above), but a passive staleness-
+  // tier transition (AGENTS.md section 61). Nothing "happens" at the exact
+  // moment a node crosses its heartbeat threshold - the orchestrator's own
+  // heartbeat-control process kind is the only thing that evaluates this
+  // every tick (apps/orchestrator/src/processes/heartbeatControl.ts), so it
+  // diffs against the previous tick's result itself and calls this only for
+  // node ids whose tier actually changed - mirrors POST /processes/state/
+  // broadcast's own "forced" shape, just scoped to specific ids instead of
+  // the whole fleet (a node's own row is cheap to refetch individually,
+  // unlike the process snapshot's single assembled blob).
+  app.post<{ Body: { nodeIds: number[]; reason?: string } }>("/nodes/state/broadcast", async (request) => {
+    await Promise.all(
+      request.body.nodeIds.map(async (id) => {
+        const node = await findNode(String(id));
+        if (!node) return;
+        await publishNodeState(await withLiveHeartbeat(node), request.body.reason ?? "heartbeat-stale-changed");
+      }),
+    );
+    return { status: "ok" };
+  });
 }

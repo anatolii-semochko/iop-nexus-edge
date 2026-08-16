@@ -5672,3 +5672,87 @@ capability flag, mirroring the existing `readOnly` one, so `GET
 succeed, and the UI renders it distinctly rather than implying a
 confirmed reading) - not yet actioned, awaiting the user's choice of
 display treatment.
+
+## 61. New `node` live WS domain - Nodes list is push-driven, not polled
+
+2026-08-16. The user's own question, after living through §58/§60's
+poll-cadence-vs-threshold class of bugs: "we already have an open
+socket to the server - why not push a message when a node's state
+changes, instead of re-polling?" Agreed, with one scoping note given
+back before starting: a discrete write (simulated/group/name) maps
+cleanly onto a push event, but a *passive* staleness transition (a
+node going silent - nothing "happens" at the exact moment a threshold
+is crossed) doesn't, unless something proactively evaluates and diffs
+it. The orchestrator's own heartbeat-control process kind already does
+exactly that every tick (section 28), so it was the natural place to
+diff and notify from. Devices' own `isOverdue` stays poll-based for
+now - it's computed client-side from `data_logger_control`, not
+server-side like `heartbeatStale` (section 58), so doing this properly
+there first needs moving that computation server-side - a separate,
+larger piece of work, deliberately out of scope here.
+
+**Wire protocol** (`apps/api/src/messaging.ts`): a third domain
+alongside `device`/`process` (section 9), same RabbitMQ topic exchange
+(`nexus.events`), routing key `node.<id>.updated`. This retires the
+`node.<id>.heartbeat` shape section 9 reserved - a node was never
+atomic-one-value the way a Device is, so there's no single "heartbeat"
+event worth splitting out; one `updated` type carrying the whole
+live-ish row (not a hand-picked field subset, same philosophy as
+`device`'s own envelope) covers both a discrete write and a staleness-
+tier change. `apps/messaging-gateway` needed **zero** changes - it
+already relays every `nexus.events` message generically by routing-key
+pattern match, domain-agnostic by design (confirmed: no shared domain
+enum exists anywhere in this codebase, `domain` is just a string
+literal duplicated per file, same as `device`/`process` already are).
+No new snapshot cache either (unlike `device`'s `state:*`) - NodesList.
+jsx always does its own initial `GET /nodes` REST fetch on mount, so
+the socket is only ever needed for *subsequent* live updates.
+
+**Publish side** (`apps/api/src/routes/nodes.ts`): a `publishNodeState`
+helper (whole `withLiveHeartbeat` row as `value`) called from all three
+mutating routes (`PATCH /:id/group`, `/:id/simulated`, `/:id/name`) -
+each already had the fresh row in hand for its own HTTP response, so
+this is just one extra call, not a new query. New `POST /nodes/state/
+broadcast` (body: `{nodeIds, reason?}`) mirrors `POST /processes/
+state/broadcast`'s own "forced" shape, scoped to specific ids rather
+than the whole fleet - this is what the orchestrator calls for the
+passive case below.
+
+**The passive-transition half** (`apps/orchestrator/src/processes/
+heartbeatControl.ts`): a new module-level `Map<number, StalenessLevel>`
+(`lastNodeStaleness`, in-memory only, resets cleanly on restart - same
+defensive stance as `controlNode.ts`'s own `lastHeartbeat` map) tracks
+each node's `heartbeatStale` (now also added to `apiClient.ts`'s
+`NodeRecord` type, reusing the value `GET /nodes` already computes -
+not a third re-derivation of the same threshold math) from the
+previous tick. `notifyStalenessChanges()` runs every tick right after
+`evaluate()`, diffs, and calls `apiClient.broadcastNodeState()` only
+for ids that actually changed (an empty list skips the HTTP call
+entirely - most ticks, nothing changed).
+
+**Frontend** (`apps/ui/src/api/useLiveNode.js`, new): `useNodesLiveState()`
+- a fleet-wide `{[id]: value}` overlay map, mirroring `useDeviceLiveState`'s
+internals but shaped for `NodesList.jsx`'s flat-array rendering (no
+per-row component to subscribe individually the way `DevicesList.jsx`'s
+`DeviceRow` does). `NodesList.jsx` spreads `liveNodes[node.id]` over
+each row before filtering/pagination; the old `NODES_POLL_MS` interval
+is gone entirely. One addition beyond pure push: a reconnect-triggered
+one-shot `reloadNodes()` (via `useLiveConnectionStatus()`, skipping the
+initial `false -> true` on mount) - a dropped WebSocket connection by
+definition can't have delivered whatever happened while it was down,
+and nothing else would ever correct that without a manual page reload.
+
+**Verified live**, both directions, in nexus-edge-aquarium with two
+browser tabs open on Nodes:
+- Discrete write: toggled `simulated` in tab A, tab B's row (Status
+  badge + Switch) updated instantly with no reload - tab B never wrote
+  anything itself, so this could only have come from the live push.
+- Passive transition: rather than needing the physical node
+  disconnected again, forced it via `PATCH /heartbeat-controls/node/2`
+  (`error.numberSkippedTicks: 0`, tripping "error" on literally the
+  next tick regardless of real connectivity) - the open tab flipped to
+  red "Error" within ~1s with zero interaction on that tab at all.
+  Restored the threshold afterward and watched it flip back to green
+  "OK" live the same way - confirms the orchestrator's tick-diff
+  correctly detects a transition in *either* direction, not just
+  worsening.

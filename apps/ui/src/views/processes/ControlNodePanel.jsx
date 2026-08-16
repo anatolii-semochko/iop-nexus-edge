@@ -89,7 +89,7 @@ const ControlNodePanel = ({ process, onConfigChange }) => {
         const zone = zoneFor(value, min, max, warnMin, warnMax)
         return (
           <CRow key={key} className="align-items-center g-4 mb-2">
-            <CCol xs="auto" style={{ width: '8rem' }}>
+            <CCol xs="auto" style={{ width: '9rem' }}>
               <div className="text-body-secondary small">{label}</div>
               <div
                 className={`d-inline-block ${zone === 'normal' ? '' : `${wemBadgeClass(zone)} px-2`}`}

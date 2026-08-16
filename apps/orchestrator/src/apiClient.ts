@@ -34,6 +34,11 @@ export interface NodeRecord {
   // sent a heartbeat" alarm for a node that was deliberately put into
   // simulated/bench-test mode.
   simulated: boolean;
+  // AGENTS.md section 61 - the same request-time staleness result this
+  // file's own evaluate() below recomputes independently for WEM/critical/
+  // warning purposes; read here too so the live-push diff (heartbeatControl.ts)
+  // doesn't need a third computation of the same thing.
+  heartbeatStale: "ok" | "warning" | "error";
 }
 
 export interface AnnunciatorSlot {
@@ -298,6 +303,17 @@ export const apiClient = {
     request("/processes/state/broadcast", {
       method: "POST",
       body: JSON.stringify({ reason }),
+    }),
+  // Node counterpart of forceStateBroadcast above (AGENTS.md section 61) -
+  // called once per tick by heartbeat-control's own runner, only with the
+  // ids whose heartbeatStale tier actually changed since the previous
+  // tick (never the whole fleet - a node's own row is cheap to refetch
+  // individually server-side, unlike the process snapshot's one assembled
+  // blob).
+  broadcastNodeState: (nodeIds: number[], reason?: string) =>
+    request("/nodes/state/broadcast", {
+      method: "POST",
+      body: JSON.stringify({ nodeIds, reason }),
     }),
   // System tick pulse (AGENTS_TO_DO.md, 2026-08-01) - the header's green
   // "alive" indicator. No body at all (not even an empty one) - `request()`

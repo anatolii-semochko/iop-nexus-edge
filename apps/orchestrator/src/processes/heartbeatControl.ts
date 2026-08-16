@@ -100,6 +100,33 @@ function evaluate(
   }
 }
 
+// Live push for Nodes (AGENTS.md section 61, AGENTS_TO_DO.md 2026-08-16) -
+// replaces NodesList.jsx's old 10s poll. `heartbeatStale` is the request-
+// time result `GET /nodes` already computes (apps/api/src/heartbeatControl.
+// ts's nodeHeartbeatStaleness) - nothing "happens" the instant a node
+// crosses its threshold, so this is the one place that can notice a
+// passive transition: diff this tick's value against the last tick's, per
+// node id, in-memory only (resets cleanly on restart - a fresh `undefined`
+// here just means "skip the notify this one tick", same defensive stance
+// as controlNode.ts's own `lastHeartbeat` map). Discrete node writes
+// (simulated/group/name) publish their own live event directly from
+// routes/nodes.ts - this only covers the passive case those can't.
+const lastNodeStaleness = new Map<number, NodeRecord["heartbeatStale"]>();
+
+async function notifyStalenessChanges(nodes: NodeRecord[]): Promise<void> {
+  const changedIds: number[] = [];
+  for (const node of nodes) {
+    const previous = lastNodeStaleness.get(node.id);
+    lastNodeStaleness.set(node.id, node.heartbeatStale);
+    if (previous !== undefined && previous !== node.heartbeatStale) {
+      changedIds.push(node.id);
+    }
+  }
+  if (changedIds.length > 0) {
+    await apiClient.broadcastNodeState(changedIds, "heartbeat-stale-changed");
+  }
+}
+
 export async function runHeartbeatControl(process: ProcessRecord): Promise<void> {
   let processes: ProcessRecord[];
   let nodes: NodeRecord[];
@@ -116,6 +143,7 @@ export async function runHeartbeatControl(process: ProcessRecord): Promise<void>
 
   evaluate("process", processes, errorEntries, warningEntries);
   evaluate("node", nodes, errorEntries, warningEntries);
+  await notifyStalenessChanges(nodes);
 
   // Same row-highlight convention as resourceMonitor.ts - the boolean
   // flags drive the table row's red/yellow background, independent of

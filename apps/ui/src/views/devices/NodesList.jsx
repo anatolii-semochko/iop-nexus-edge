@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import {
   CAlert,
   CCard,
@@ -28,13 +28,8 @@ import TableSearchInput from '../../components/table/TableSearchInput'
 import { useExpandableRows } from '../../hooks/useExpandableRows'
 import { usePagination } from '../../hooks/usePagination'
 import { usePersistedState } from '../../hooks/usePersistedState'
-
-// AGENTS_TO_DO.md, 2026-08-15 - same "UI convenience poll, not a control
-// loop" precedent as DevicesList.jsx's own DEVICES_POLL_MS: no `node`
-// domain exists in the live WebSocket protocol, so a heartbeat that goes
-// stale (or a simulated toggle flipped from another tab) only converges
-// within one interval of this poll rather than never.
-const NODES_POLL_MS = 10000
+import { useLiveConnectionStatus } from '../../api/useLiveDevice'
+import { useNodesLiveState } from '../../api/useLiveNode'
 import RowStatusBadge from '../../components/table/RowStatusBadge'
 import { formatRelativeTime } from '../../utils/format'
 import NodeSettingsModal from './NodeSettingsModal'
@@ -95,6 +90,8 @@ const NodesList = () => {
   const [searchResetToken, setSearchResetToken] = useState(0)
   const [configVisible, setConfigVisible] = useState(false)
   const [settingsNode, setSettingsNode] = useState(null)
+  const liveNodes = useNodesLiveState()
+  const connected = useLiveConnectionStatus()
 
   const reloadNodes = () =>
     api
@@ -123,12 +120,29 @@ const NodesList = () => {
     reloadNodeGroups()
   }, [])
 
+  // AGENTS_TO_DO.md, 2026-08-16 - replaces the old NODES_POLL_MS interval
+  // (AGENTS.md section 61): the `node` WS domain now pushes both discrete
+  // writes (routes/nodes.ts's PATCH routes) and passive heartbeatStale
+  // transitions (the orchestrator's own heartbeat-control tick diff), so a
+  // recurring poll has nothing left to catch that the live overlay below
+  // doesn't already cover - except a connection that was actually dropped
+  // and just came back, which by definition can't have delivered whatever
+  // happened while it was down. `connected` starts `false` before the
+  // socket's own first `open` event, so this only fires on a *real*
+  // reconnect (false -&gt; true again), not on initial mount.
+  const isFirstConnect = useRef(true)
   useEffect(() => {
-    const interval = setInterval(reloadNodes, NODES_POLL_MS)
-    return () => clearInterval(interval)
-  }, [])
+    if (!connected) return
+    if (isFirstConnect.current) {
+      isFirstConnect.current = false
+      return
+    }
+    reloadNodes()
+  }, [connected])
 
-  const filtered = (nodes ?? [])
+  const nodesWithLive = (nodes ?? []).map((node) => ({ ...node, ...liveNodes[node.id] }))
+
+  const filtered = nodesWithLive
     .filter((node) => matchesSearch(node, search))
     .filter((node) => !groupFilter || String(node.group_id) === groupFilter)
   const { page, pageSize, pageItems, totalItems, setPage, setPageSize } = usePagination(filtered, {
