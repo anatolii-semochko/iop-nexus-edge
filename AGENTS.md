@@ -6318,3 +6318,70 @@ match (`disabled`, `ariaLabel`). Live-verified via an actual UI click
 this time (not the browser-console `fetch()` workaround the earlier
 follow-ups used) - `weather-node-01`'s switch turned simulated ON
 successfully, `Simulation` pill and header badge both lit up.
+
+## 67. Devices expand row - a readOnly device's own simulated value is now editable in place, not just via Dev Simulator
+
+2026-08-23. The user asked directly: with the simulated-value machinery
+now working end to end for `weather-node-01`, could the expand row's
+left "Value" table also let you edit a simulated device's value right
+there, instead of needing the separate Dev Simulator page for the same
+`PUT /devices/:id/simulate` write - "якщо це число - використовуємо
+компоненту з кнопочками -input+" (their own name for `NumericStepper`),
+with a per-device step, and - explicitly, since every other caller of
+that component has a disabled display-only input - "Інпут в даному
+випадку дозволений (not disabled)".
+
+**`NumericStepper.jsx`**: new `editable` prop (default `false`, every
+existing caller unaffected). When true, the input becomes a real typable
+`CFormInput` - local `text` state, committed on blur or Enter (parses,
+clamps to `[min, max]`, calls `onCommit` if the value actually changed).
+Kept the render-time "sync `text` from a changed `value` prop" logic
+*out* of a `useEffect` (`if (current !== syncedCurrent) { setSyncedCurrent(...); setText(...) }`
+during render instead) - this codebase's stricter React Compiler-era
+lint rules (`react-hooks/set-state-in-effect`) reject a plain setState
+call inside an effect body, same class of rule `ProcessSettingsModal.jsx`
+already has its own comments about. A second, unrelated lint error
+(`react-hooks/immutability`) surfaced on the *pre-existing* `doStep`
+function's own `runningValueRef.current = clamped` write purely from
+`commitText` being declared nearby and also touching that ref - fixed by
+not having `commitText` touch `runningValueRef` at all (it never needed
+to: that ref only matters for a held-repeat's own running baseline, and
+the existing `current`-tracking effect already re-syncs it once the
+parent re-renders with the value `commitText`'s own `onCommit` produced).
+
+**`DevicesList.jsx`**: new `SimulatedValueEditor` (own small component,
+under the left "Value" `KeyValueTable`, only rendered when
+`effectivelySimulated && device.capabilities?.readOnly && typeof value
+=== 'number'` - the exact same class of device Dev Simulator's own
+readOnly branch already targets, just reachable from this page too now).
+Step is `device.capabilities?.step ?? 1` - `capabilities.step` was
+already an existing per-device field (`DeviceCapabilities` interface,
+`routes/devices.ts`; already read by DevSimulator's own `CustomSimulator`
+branch for e.g. `light-regulator`'s slider) that the plain generic
+`NumericStepper` path in DevSimulator never actually consulted (hardcoded
+`step={0.5}` there regardless of device type) - this is the "personal
+step" the user asked for, reusing that field rather than inventing a new
+one. Write goes through the existing `api.simulateDevice()` (same route
+DevSimulator uses) - no `reloadDevices()` afterward needed, since the
+write already lands via the live `device` event `useDeviceLiveState`
+subscribes to (every open tab, including this row's own, converges on
+its own). Also fixed the left table's own "Value" row to read the same
+live-overlaid `value` `DeviceRow` already computes for its collapsed-row
+cell, instead of the one-time-fetch-only `fetched?.value` it used before
+- those two could previously disagree indefinitely once any live event
+arrived, which would have looked especially broken sitting directly
+above a live-editable input showing the correct number.
+
+**Weather-node's own devices** (`nexus-edge-aquarium`) got real
+`step`/`min`/`max` values for the first time as part of this
+(`temperature`: 0.5/-40/60, `humidity`: 1/0/100, `pressure`: 1, `light`:
+50/0/4095) - both the migration file and a live `UPDATE` against the
+already-seeded rows (migrate-extra's own idempotency means editing the
+file alone doesn't retroactively touch a row that already exists).
+
+Live-verified: typed `1200` directly into `weather-node-light`'s new
+input and pressed Enter (no `+`/`-` click) - committed immediately,
+visible in the collapsed row, the Value table, and the header's own
+Simulation badge context all at once; clicked `+` once afterward and
+confirmed it stepped by exactly 50 (`1200` -> `1250`), the configured
+per-device step, not a hardcoded default.

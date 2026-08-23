@@ -29,13 +29,18 @@ import { useExpandableRows } from '../../hooks/useExpandableRows'
 import { useNow } from '../../hooks/useNow'
 import { usePagination } from '../../hooks/usePagination'
 import { usePersistedState } from '../../hooks/usePersistedState'
-import { useDeviceLiveState, useDevicesMetadataLiveState, useLiveConnectionStatus } from '../../api/useLiveDevice'
+import {
+  useDeviceLiveState,
+  useDevicesMetadataLiveState,
+  useLiveConnectionStatus,
+} from '../../api/useLiveDevice'
 import { useNodesLiveState } from '../../api/useLiveNode'
 import RowStatusBadge from '../../components/table/RowStatusBadge'
 import TablePagination from '../../components/table/TablePagination'
 import TableSearchInput from '../../components/table/TableSearchInput'
 import { formatRelativeTime } from '../../utils/format'
 import DeviceSettingsModal from './DeviceSettingsModal'
+import NumericStepper from './NumericStepper'
 
 // Registration for usePersistedState (AGENTS_TO_DO.md, 2026-08-01, joined
 // 2026-08-02 by `expandedIds`) - flat variant, same as NodesList.jsx.
@@ -150,7 +155,10 @@ const formatDate = (value) => (value ? new Date(value).toLocaleString() : undefi
 // per-table flex-basis guess.
 const KeyValueTable = ({ title, rows }) => (
   <div>
-    <div className="text-body-secondary text-uppercase fw-semibold text-decoration-underline mb-1" style={{ fontSize: '0.6875rem', letterSpacing: '0.04em' }}>
+    <div
+      className="text-body-secondary text-uppercase fw-semibold text-decoration-underline mb-1"
+      style={{ fontSize: '0.6875rem', letterSpacing: '0.04em' }}
+    >
       {title}
     </div>
     <CTable small borderless className="mb-0 small">
@@ -187,38 +195,90 @@ const KeyValueTable = ({ title, rows }) => (
 // when there's room for two >=320px columns, wraps to one column
 // per row otherwise, and each column claims its own fair share of
 // whatever width is actually available instead of a fixed guess.
-const DeviceDetailRow = ({ device, fetched, expiresAt }) => {
+// Under the left "Value" table (AGENTS_TO_DO.md, 2026-08-23) - lets a
+// readOnly device's current value be edited directly from this row when
+// it's effectively simulated (own `simulated` flag, or its node's),
+// instead of needing the separate Dev Simulator page for the same
+// `PUT /devices/:id/simulate` write DevSimulator.jsx already uses.
+// Numeric only, per the user's own spec ("Якщо це число") - Bool/String/
+// JSON values have no editor here yet, not asked for. `editable` (new
+// NumericStepper prop) is what makes the input itself typable here,
+// unlike every other NumericStepper caller's disabled display-only
+// input. `step` is this device's own "personal" step
+// (`capabilities.step`, already an existing per-device field - see
+// devices/standalone/*/edgex-device-profile.yaml's own `properties`) so
+// e.g. a 0-4095 raw light reading steps by a meaningful chunk instead of
+// DevSimulator's own generic step={0.5} fallback; falls back to 1 when a
+// device type hasn't set one.
+const SimulatedValueEditor = ({ device, value, onSimulate }) => (
+  <div className="mt-2">
+    <div
+      className="text-body-secondary text-uppercase fw-semibold mb-1"
+      style={{ fontSize: '0.6875rem', letterSpacing: '0.04em' }}
+    >
+      Simulated value
+    </div>
+    <NumericStepper
+      value={value}
+      step={device.capabilities?.step ?? 1}
+      min={device.capabilities?.min}
+      max={device.capabilities?.max}
+      editable
+      onCommit={onSimulate}
+    />
+  </div>
+)
+
+const DeviceDetailRow = ({
+  device,
+  fetched,
+  value,
+  expiresAt,
+  effectivelySimulated,
+  onSimulate,
+}) => {
   const dualState = fetched?.dualState
+  const canEditSimulatedValue =
+    effectivelySimulated && device.capabilities?.readOnly && typeof value === 'number'
   return (
     <div
       className="p-3 pt-0"
-      style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '0.5rem 2rem' }}
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+        gap: '0.5rem 2rem',
+      }}
     >
-      <KeyValueTable
-        title="Value"
-        rows={[
-          { label: 'Value', value: fetched?.value },
-          { label: 'Value type', value: fetched?.valueType },
-          { label: 'Units', value: fetched?.units },
-          { label: 'Mode', value: dualState?.mode },
-          { label: 'Auto value', value: dualState?.valueAuto },
-          { label: 'Manual value', value: dualState?.valueManual },
-          // formatRelativeTime (utils/format.js, already used by
-          // NodesList.jsx's own last-heartbeat column) is typed for an
-          // ISO string but really just does `new Date(x)` - an epoch-ms
-          // number (readingOrigin/expiresAt) works identically.
-          {
-            label: 'Last reading',
-            value: fetched?.readingOrigin ? formatRelativeTime(fetched.readingOrigin) : undefined,
-          },
-          // Same overdue threshold DeviceRow's own row-color check uses
-          // (data_logger_control's periodSeconds * error.
-          // numberSkippedPeriods) - previously only visible indirectly as
-          // the row turning danger-red, not as an actual value (AGENTS_TO_DO.md,
-          // 2026-08-15: "не бачу значення expiration").
-          { label: 'Expires', value: expiresAt ? formatRelativeTime(expiresAt) : undefined },
-        ]}
-      />
+      <div>
+        <KeyValueTable
+          title="Value"
+          rows={[
+            { label: 'Value', value },
+            { label: 'Value type', value: fetched?.valueType },
+            { label: 'Units', value: fetched?.units },
+            { label: 'Mode', value: dualState?.mode },
+            { label: 'Auto value', value: dualState?.valueAuto },
+            { label: 'Manual value', value: dualState?.valueManual },
+            // formatRelativeTime (utils/format.js, already used by
+            // NodesList.jsx's own last-heartbeat column) is typed for an
+            // ISO string but really just does `new Date(x)` - an epoch-ms
+            // number (readingOrigin/expiresAt) works identically.
+            {
+              label: 'Last reading',
+              value: fetched?.readingOrigin ? formatRelativeTime(fetched.readingOrigin) : undefined,
+            },
+            // Same overdue threshold DeviceRow's own row-color check uses
+            // (data_logger_control's periodSeconds * error.
+            // numberSkippedPeriods) - previously only visible indirectly as
+            // the row turning danger-red, not as an actual value (AGENTS_TO_DO.md,
+            // 2026-08-15: "не бачу значення expiration").
+            { label: 'Expires', value: expiresAt ? formatRelativeTime(expiresAt) : undefined },
+          ]}
+        />
+        {canEditSimulatedValue && (
+          <SimulatedValueEditor device={device} value={value} onSimulate={onSimulate} />
+        )}
+      </div>
       <KeyValueTable
         title="Device"
         rows={[
@@ -251,6 +311,7 @@ const DeviceRow = ({
   onToggleExpand,
   onToggleSimulated,
   onOpenSettings,
+  onSimulateValue,
   effectivelySimulated,
 }) => {
   const [fetched, setFetched] = useState(null)
@@ -276,7 +337,10 @@ const DeviceRow = ({
   // it current; that's no longer true now that isOverdue is itself a
   // server-computed, live-pushed field.
   useEffect(() => {
-    api.getDevice(device.id).then(setFetched).catch(() => {})
+    api
+      .getDevice(device.id)
+      .then(setFetched)
+      .catch(() => {})
   }, [device.id])
 
   const value = live.value !== undefined ? live.value : fetched?.value
@@ -365,7 +429,14 @@ const DeviceRow = ({
       {expanded && (
         <CTableRow color={rowColor}>
           <CTableDataCell colSpan={8} className="p-0">
-            <DeviceDetailRow device={device} fetched={fetched} expiresAt={expiresAt} />
+            <DeviceDetailRow
+              device={device}
+              fetched={fetched}
+              value={value}
+              expiresAt={expiresAt}
+              effectivelySimulated={effectivelySimulated}
+              onSimulate={onSimulateValue}
+            />
           </CTableDataCell>
         </CTableRow>
       )}
@@ -456,6 +527,17 @@ const DevicesList = () => {
       .setDeviceSimulated(device.id, !device.simulated)
       .then(reloadDevices)
       .catch((err) => setError(err.message))
+
+  // Simulated-value editor (AGENTS_TO_DO.md, 2026-08-23, DeviceDetailRow's
+  // own SimulatedValueEditor) - same PUT /devices/:id/simulate write
+  // DevSimulator.jsx's own handleSimulate uses. No reloadDevices() after -
+  // unlike handleToggleSimulated above (a registry/metadata change with no
+  // live push of its own until section 65 built one), a value write
+  // already lands via the live `device` event useDeviceLiveState
+  // subscribes to, so every open tab (including this row's own) converges
+  // without a refetch.
+  const handleSimulateValue = (device, value) =>
+    api.simulateDevice(device.id, value).catch((err) => setError(err.message))
 
   useEffect(() => {
     reloadDevices()
@@ -633,6 +715,7 @@ const DevicesList = () => {
                           onToggleExpand={() => toggleOne(device.id)}
                           onToggleSimulated={() => handleToggleSimulated(device)}
                           onOpenSettings={() => setSettingsDevice(device)}
+                          onSimulateValue={(value) => handleSimulateValue(device, value)}
                           effectivelySimulated={effectivelySimulated}
                         />
                       )
