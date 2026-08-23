@@ -60,10 +60,11 @@ end-to-end today, verified live in a running container stack (see
 - **A universal pagination/filtering toolkit** for admin tables (debounced
   search, page-size control, client-side pagination) — built once, reused
   across every list view in the app.
-- **One real device type end-to-end** (`devices/standalone/actuator/light-regulator`)
-  — contract schema, EdgeX device profile, safety rules, and both a
-  production and a dev-simulator UI component, following the same
-  convention every future device type will use.
+- **Multiple real device types end-to-end** (starting with
+  `devices/standalone/actuator/light-regulator`) — contract schema,
+  EdgeX device profile, safety rules, and both a production and a
+  dev-simulator UI component, the convention every device type since
+  has followed.
 
 Deliberately **not** done yet, and documented as such rather than left
 quiet: per-endpoint API authorization (today only the UI login and the
@@ -104,7 +105,7 @@ apps/           orchestrator, api, messaging-gateway, ui, device-service — the
 packages/       shared libraries (empty for now)
 plugins/        protocol/device-driver/UI/storage/AI plugins (empty for now)
 devices/        device/node type definitions for physical & virtual devices,
-                see AGENTS.md section 7 (light-regulator is the first real one)
+                see AGENTS.md section 7
 examples/       example configurations (empty for now)
 docs/           architecture vision (PROJECT_MASTER-1.1.md) and screenshots
 ```
