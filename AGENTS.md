@@ -6385,3 +6385,119 @@ visible in the collapsed row, the Value table, and the header's own
 Simulation badge context all at once; clicked `+` once afterward and
 confirmed it stepped by exactly 50 (`1200` -> `1250`), the configured
 per-device step, not a hardcoded default.
+## 68. `devices.name` uniqueness narrowed from global to per-node
+
+2026-08-23. Reported inconvenient directly: `name` had a plain global
+UNIQUE constraint (`devices_name_key`, the original column-level
+`unique: true` from `1690000000001_create-devices-table.ts`, never
+touched since) - meaning a second instance of any node type could never
+reuse that type's own device names (e.g. a second `control-node`
+re-seeding its own `...-led-green`-style names), confirmed as a real,
+already-present limitation via every existing seed file (all name every
+device `<node-type>-<slot>`, never `<node-instance>-<slot>`).
+
+`name` is a separate column from `edgex_device_name` (each with its own
+independent UNIQUE constraint) - `name` is the user-editable display
+label (`PATCH /devices/:id/name`), `edgex_device_name` is what actually
+goes to EdgeX and has to stay globally unique since that's EdgeX's own
+requirement, untouched here. The Model State Validator
+(`apps/api/src/validator.ts`) already resolved forbidden-state device
+names via a node-scoped lookup (`findDeviceByNodeAndName`) - the app's
+own business logic already only ever needed per-node uniqueness; the DB
+constraint had simply been stricter than necessary.
+
+New migration (`1690000000052_devices-name-unique-per-node.ts`) drops
+`devices_name_key` and replaces it with TWO partial unique indexes, not
+one plain composite `UNIQUE(node_id, name)`: Postgres treats every NULL
+`node_id` as distinct from every other in a composite UNIQUE, so a plain
+composite constraint would leave standalone devices (`node_id IS NULL`)
+completely unconstrained by name instead of merely node-scoped - there's
+no node for them to be scoped to. Confirmed with the user: standalone
+devices keep their previous global-uniqueness behavior
+(`devices_name_unique_standalone`, `UNIQUE (name) WHERE node_id IS
+NULL`); node-attached devices get the new per-node scoping
+(`devices_name_unique_per_node`, `UNIQUE (node_id, name) WHERE node_id
+IS NOT NULL`).
+
+`routes/devices.ts`'s rename route (`PATCH /devices/:id/name`) already
+handled the unique-violation case generically (catch `23505`, return
+409) - left its error message scope-neutral ("a device with this name
+already exists") rather than claiming either "on this node" or
+"globally", since which one actually fired now depends on whether the
+device is node-attached, and the route has no cheap way to tell without
+an extra query.
+
+Live-verified directly against Postgres (not through the API - no
+runtime "create device" route exists, devices are only ever created via
+migrations): two devices on two different nodes now successfully share a
+name; two devices on the SAME node with the same name still correctly
+reject (`devices_name_unique_per_node` violation); two standalone
+devices (`node_id IS NULL`) with the same name still correctly reject
+(`devices_name_unique_standalone` violation) - all three cases confirmed
+in a rolled-back transaction, no lasting test data left behind.
+
+## 69. `nodes.seed_key` - target-project seed migrations no longer duplicate a Node on every `migrate-extra` re-run
+
+2026-08-23, same day as §69, surfaced investigating a user report of
+stale duplicate nodes in `nexus-edge-aquarium`'s own DB
+(`control-node-01`/`weather-node-01`, both empty or nearly-empty
+shells alongside the real, in-use `Main node control`/`Weather
+Station`). Root cause: `nodes.name` has its own real UNIQUE constraint
+(`nodes_name_key`), and every target-project seed `*.sql` file
+(`001_seed_control_node.sql`, `002_seed_weather_node.sql`,
+`003_seed_aquarium_light.sql`, all in `nexus-edge-aquarium`) matched its
+Node INSERT via `ON CONFLICT (name)` - exactly the same idempotency
+strategy already used for `devices.edgex_device_name`. The difference:
+`devices.edgex_device_name` is deliberately never touched by the UI
+(only `devices.name` is user-renameable), but Nodes have no such second,
+UI-invisible identity column - `nodes.name` IS the only identity a Node
+has, and it's just as user-renameable (`PATCH /nodes/:id/name`) as a
+Device's own `name`. Once a seeded node got renamed via the UI (as both
+of these had been, independently, at some earlier point), the literal
+string in the seed file's `ON CONFLICT (name)` no longer matched any
+existing row, and `migrate-extra`'s own re-run-every-container-start
+design (`docker-compose.yml`'s own comment: "re-runs every *.sql file on
+every container start") silently inserted a fresh, empty duplicate node
+instead of recognizing the real one. `weather-node-01` additionally
+picked up one duplicate DEVICE too (`weather-node-light-level`) - the
+computed `light-level` device (§66, no `edgex_device_name` at all) has
+no idempotency key of its own either, keyed only by `node_id` matching a
+node it could no longer find (the very same rename problem, one level
+down).
+
+Fixed with a new nullable, unique `nodes.seed_key` column
+(`1690000000053_add-nodes-seed-key.ts`) - the Node-level equivalent of
+`devices.edgex_device_name`: a UI-invisible anchor only a seed
+migration's own `ON CONFLICT` ever reads or writes, `name` stays exactly
+as freely renameable as it always was. Each of the three target-project
+seed files now leads with a one-time `UPDATE nodes SET seed_key = '<the
+same literal string the file has always used for name>' WHERE type =
+'<node type>' AND seed_key IS NULL` - this is what makes the fix
+self-healing for every already-renamed deployment, not just future
+ones: it backfills `seed_key` onto whatever the real, live node of that
+type happens to be right now, however it's currently named, the very
+first time the updated file runs. Every subsequent `(SELECT id FROM
+nodes WHERE name = '...')` subquery in these files (device `node_id`
+resolution, the computed device's own `NOT EXISTS` guard, the process
+config's `nodeId`/`lightNodeId`/`panelNodeId`) switched to `WHERE
+seed_key = '...'` too, since `name` can no longer be trusted to match
+after a rename.
+
+Cleaned up live in `nexus-edge-aquarium`'s own DB before writing the
+fix: deleted the two empty node duplicates (`control-node-01`,
+`weather-node-01`) plus a third, unrelated pre-existing empty
+`control-node` duplicate found in the same pass (`System control`, same
+root cause, from even earlier) and the one orphaned `weather-node-
+light-level` device (`nodes.id → devices.node_id` is `ON DELETE SET
+NULL`, not CASCADE - deleting the node alone left the device behind as
+a newly-standalone row, needing its own explicit cleanup). Verified the
+backfill+fix together afterward by running `migrate-extra` twice in a
+row against the now-clean DB: first run reported `UPDATE 1` for each of
+the four backfills (linking the real, already-renamed nodes to their
+seed_key) and `INSERT 0 0` for every node/device insert that would
+previously have duplicated; second run reported `UPDATE 0` for every
+backfill (already linked) and `INSERT 0 0` throughout - full end-to-end
+idempotency confirmed, not just reasoned about. `processes` GET
+afterward confirmed every affected process still resolves its
+`nodeId`/device references correctly and remains non-critical.
+

@@ -659,6 +659,11 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
         return findDeviceListRow(request.params.id);
       } catch (err) {
         if (isUniqueViolation(err)) {
+          // Scope-neutral on purpose - the unique constraint is now
+          // node-scoped for a node-attached device but still global for a
+          // standalone one (migration 1690000000052), and this route has
+          // no cheap way to tell which case just fired without an extra
+          // query.
           return reply.code(409).send({ error: "a device with this name already exists" });
         }
         throw err;
