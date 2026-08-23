@@ -6265,3 +6265,31 @@ classified it to `very-sunny` within one tick with zero manual
 intervention, and both the WeatherControlPanel and WeatherZonesSection
 (marker position, current-zone label, "Accept current value") rendered
 correctly against that live value in the browser.
+
+**Second follow-up, same day** - with no real firmware for 3-5 weeks
+(components still in transit), `weather-node-01` had no way to ever send
+a real heartbeat, so Heartbeating Control would eventually flag it stale
+regardless of everything above working correctly. The platform's
+existing fix for exactly this ("simulated" toggle on a Node,
+`nodeHeartbeatStaleness`: `if (simulated) return "ok"`) turned out to be
+unreachable for it: `PATCH /nodes/:id/simulated`'s own guard (`routes/
+nodes.ts`, originally added for `control-node`'s partial-physical-network
+feature) unconditionally required at least one device on the node to
+have a simulated twin (`edgex_device_name_simulated`) before allowing
+`simulated: true` - correct for a node with real hardware to redirect
+away from, but weather-node has zero `backend: physical` devices at all
+right now, so no twin could ever exist and the toggle was permanently
+blocked with a 409.
+
+Fixed by scoping the check to nodes that actually have a physical
+device: `SELECT count(*) FILTER (WHERE backend = 'physical'), count(*)
+FILTER (WHERE edgex_device_name_simulated IS NOT NULL) FROM devices
+WHERE node_id = $1` - reject only when `physical_count > 0 AND
+twin_count = 0`. `control-node`'s own toggle re-verified unchanged
+afterward (it has 2 physical devices with no twin of their own, `pulse`/
+`heartbeat`, but passes via its other 2 twinned devices, `led-green`/
+`temperature` - same "some redirect happens somewhere on this node"
+condition as before, not "every physical device needs its own twin").
+`weather-node-01` toggled to `simulated: true` live afterward, confirmed
+via the Nodes page (`Simulation` status pill, red toggle) and the
+header's own blinking Simulation badge lighting up.

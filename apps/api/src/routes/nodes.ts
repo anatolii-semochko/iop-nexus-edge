@@ -146,10 +146,29 @@ export async function nodeRoutes(app: FastifyInstance): Promise<void> {
   // this node's simulated redirect for every device attached to it at
   // once (the switching granularity confirmed with the user - a device
   // never drifts out of sync with its own physical neighbors). Rejected
-  // when not one single child device actually has a simulated twin
-  // provisioned - otherwise this would silently be a no-op (resolveEdgexName,
+  // when the node has at least one `physical` device but not one single
+  // device anywhere on it has a simulated twin provisioned - otherwise
+  // turning simulated on would silently be a no-op (resolveEdgexName,
   // routes/devices.ts, falls back to the physical name for any device
   // with no twin), which would look like a bug, not a deliberate choice.
+  // Original 2026-08-09/10 check, unchanged for any node with physical
+  // devices - e.g. control-node, which has 2 (`pulse`/`heartbeat`, no
+  // twins of their own) but passes via its other 2 twinned devices
+  // (`led-green`/`temperature`) - the check is "some redirect happens
+  // somewhere on this node", not "every physical device has its own
+  // twin".
+  //
+  // A node with NO physical devices at all (every device already
+  // `backend: virtual`, e.g. weather-node before any hardware exists -
+  // AGENTS_TO_DO.md, 2026-08-23) skips this check entirely: there is
+  // nothing for a twin to redirect away from, so requiring one here would
+  // just be friction, not a no-op guard against real confusion. `simulated`
+  // still does real work for such a node even with zero twins - it's what
+  // suppresses Heartbeating Control's staleness alarm for a node that has
+  // no firmware yet to ever send a real heartbeat (heartbeatControl.ts's
+  // `nodeHeartbeatStaleness`: `if (simulated) return "ok"`) - a second,
+  // independent use of this same flag, not contingent on any device
+  // redirect happening at all.
   // No `log_command` row (that table has no `node_id` column - a bigger
   // schema change not attempted in this pass) - `value` carries the
   // node's own name instead, for at least some audit context.
@@ -161,11 +180,15 @@ export async function nodeRoutes(app: FastifyInstance): Promise<void> {
       if (!node) return reply.code(404).send({ error: "node not found" });
 
       if (request.body.simulated) {
-        const twinCount = await pool.query<{ count: string }>(
-          "SELECT count(*) FROM devices WHERE node_id = $1 AND edgex_device_name_simulated IS NOT NULL",
+        const counts = await pool.query<{ physical_count: string; twin_count: string }>(
+          `SELECT
+             count(*) FILTER (WHERE backend = 'physical') AS physical_count,
+             count(*) FILTER (WHERE edgex_device_name_simulated IS NOT NULL) AS twin_count
+           FROM devices WHERE node_id = $1`,
           [request.params.id],
         );
-        if (Number(twinCount.rows[0].count) === 0) {
+        const { physical_count, twin_count } = counts.rows[0];
+        if (Number(physical_count) > 0 && Number(twin_count) === 0) {
           return reply.code(409).send({ error: "no device on this node has a simulated twin provisioned" });
         }
       }
