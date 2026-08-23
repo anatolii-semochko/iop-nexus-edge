@@ -15,7 +15,8 @@ import {
   CTableHeaderCell,
   CTableRow,
 } from '@coreui/react'
-import { cilSettings } from '@coreui/icons'
+import CIcon from '@coreui/icons-react'
+import { cilLibrary, cilSettings } from '@coreui/icons'
 import { api } from '../../api/client'
 import GroupsConfigModal from '../../components/GroupsConfigModal'
 import IconButton from '../../components/IconButton'
@@ -56,6 +57,34 @@ const NodeDetailRow = ({ node }) => (
     <pre className="mb-0 small">{JSON.stringify(node, null, 2)}</pre>
   </div>
 )
+
+// Library Catalog icon column (AGENTS_TO_DO.md, 2026-08-23) - same
+// `/api${icon_path}` static-mount idiom DevicesList.jsx's own DeviceIcon
+// already uses, minus that one's active-color background circle (not a
+// Node concept). Kept as a plain local component here too, matching
+// DeviceIcon's own precedent, rather than extracting a shared one for a
+// second caller.
+const NodeIcon = ({ iconPath }) => {
+  const url = iconPath ? `/api${iconPath}` : null
+  return (
+    <div
+      style={{
+        width: 32,
+        height: 32,
+        borderRadius: '50%',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      {url ? (
+        <img src={url} alt="" style={{ width: 20, height: 20, objectFit: 'contain' }} />
+      ) : (
+        <CIcon icon={cilLibrary} className="text-body-secondary" />
+      )}
+    </div>
+  )
+}
 
 const matchesSearch = (node, search) => {
   if (!search) return true
@@ -250,10 +279,11 @@ const NodesList = () => {
                   <CTableHead>
                     <CTableRow>
                       <CTableHeaderCell scope="col">Status</CTableHeaderCell>
+                      <CTableHeaderCell scope="col"></CTableHeaderCell>
                       <CTableHeaderCell scope="col">Name</CTableHeaderCell>
-                      <CTableHeaderCell scope="col">Type</CTableHeaderCell>
-                      <CTableHeaderCell scope="col">Location</CTableHeaderCell>
                       <CTableHeaderCell scope="col">Group</CTableHeaderCell>
+                      <CTableHeaderCell scope="col">Location</CTableHeaderCell>
+                      <CTableHeaderCell scope="col">Type</CTableHeaderCell>
                       <CTableHeaderCell scope="col">Last heartbeat</CTableHeaderCell>
                       <CTableHeaderCell scope="col" className="text-end">
                         <div className="d-flex justify-content-end align-items-center gap-2">
@@ -284,16 +314,19 @@ const NodesList = () => {
                               <RowStatusBadge rowColor={rowColor} />
                             </CTableDataCell>
                             <CTableDataCell className={noBorderWhenExpanded}>
+                              <NodeIcon iconPath={node.icon_path} />
+                            </CTableDataCell>
+                            <CTableDataCell className={noBorderWhenExpanded}>
                               {node.name}
                             </CTableDataCell>
                             <CTableDataCell className={noBorderWhenExpanded}>
-                              {node.type}
+                              {node.group_name ?? '-'}
                             </CTableDataCell>
                             <CTableDataCell className={noBorderWhenExpanded}>
                               {node.location ?? '-'}
                             </CTableDataCell>
                             <CTableDataCell className={noBorderWhenExpanded}>
-                              {node.group_name ?? '-'}
+                              {node.type}
                             </CTableDataCell>
                             <CTableDataCell className={noBorderWhenExpanded}>
                               {formatRelativeTime(node.last_heartbeat_at)}
@@ -330,7 +363,7 @@ const NodesList = () => {
                           </CTableRow>
                           {expandedRow && (
                             <CTableRow color={rowColor}>
-                              <CTableDataCell colSpan={7} className="p-0">
+                              <CTableDataCell colSpan={8} className="p-0">
                                 <NodeDetailRow node={node} />
                               </CTableDataCell>
                             </CTableRow>

@@ -18,6 +18,12 @@ interface NodeRow {
   last_heartbeat_at: string | null;
   group_id: number | null;
   heartbeat_control: HeartbeatControlConfig;
+  // Library Catalog icon (AGENTS_TO_DO.md, 2026-08-23) - same `library_items`
+  // join DevicesList.jsx's own icon column already reads for Devices
+  // (routes/devices.ts's SELECT_DEVICE_LIST_BASE), keyed by `kind = 'node'`
+  // instead of `'device'`. Null when this node's type has no icon.svg yet
+  // (e.g. example-thermal-node).
+  icon_path: string | null;
   // Partial physical network (AGENTS_TO_DO.md, 2026-08-09/10) - the
   // switching granularity for every node-attached device at once (see
   // routes/devices.ts's resolveEdgexName) - a device ignores its own
@@ -92,13 +98,14 @@ async function publishNodeState(node: Awaited<ReturnType<typeof withLiveHeartbea
 // route itself was fixed to allow it - this field has to encode the
 // exact same condition as the write path, not a looser proxy for it.
 const SELECT_NODE = `
-  SELECT n.*, g.name AS group_name,
+  SELECT n.*, g.name AS group_name, li.icon_path,
     NOT EXISTS(
       SELECT 1 FROM devices d
       WHERE d.node_id = n.id AND d.backend = 'physical' AND d.edgex_device_name_simulated IS NULL
     ) AS can_enable_simulated
   FROM nodes n
   LEFT JOIN node_groups g ON g.id = n.group_id
+  LEFT JOIN library_items li ON li.type_name = n.type AND li.kind = 'node'
 `;
 
 async function findNode(id: string) {
@@ -243,6 +250,29 @@ export async function nodeRoutes(app: FastifyInstance): Promise<void> {
         }
         throw err;
       }
+    },
+  );
+
+  // `location` was display-only (NodesList.jsx's own column, and the
+  // row-detail JSON dump) with no write path anywhere until now
+  // (AGENTS_TO_DO.md, 2026-08-23) - same per-node Settings popup as the
+  // rename route above, no uniqueness to worry about (unlike `name`).
+  // Empty string normalizes to NULL, matching how the list column already
+  // falls back to '-' for a null location rather than showing an empty
+  // cell.
+  app.patch<{ Params: { id: string }; Body: { location: string | null } }>(
+    "/nodes/:id/location",
+    async (request, reply) => {
+      const location = request.body.location?.trim() || null;
+
+      const result = await pool.query<{ id: number }>(
+        "UPDATE nodes SET location = $1, updated_at = now() WHERE id = $2 RETURNING id",
+        [location, request.params.id],
+      );
+      if (!result.rows[0]) return reply.code(404).send({ error: "node not found" });
+      const node = await withLiveHeartbeat(await findNode(request.params.id));
+      await publishNodeState(node, "node-location-changed");
+      return node;
     },
   );
 
