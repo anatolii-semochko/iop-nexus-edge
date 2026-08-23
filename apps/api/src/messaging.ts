@@ -22,7 +22,15 @@ export const EVENTS_EXCHANGE = "nexus.events";
 export interface DeviceEventEnvelope {
   domain: "device";
   entityId: number;
-  value: unknown;
+  // AGENTS_TO_DO.md, 2026-08-23 - optional, not required: a metadata-only
+  // event (rename/group/node reassignment/simulated/capabilities, see
+  // `metadata` below) has no reading of its own to report. Was required
+  // until today, forcing every publish site to supply *something* here -
+  // switched to optional specifically so useLiveDevice.js's own reducer
+  // can tell "no reading in this event" apart from "the reading is
+  // genuinely absent/null" and merge accordingly, instead of a metadata
+  // event clobbering the last known live value with `undefined`.
+  value?: unknown;
   // Absent for a readOnly (sensor) device - it has no Dual Devices Model
   // concept at all (AGENTS.md section 6/7), unlike a controllable device,
   // which always has all three.
@@ -36,6 +44,15 @@ export interface DeviceEventEnvelope {
   // that isn't itself an overdue-status change.
   isOverdue?: boolean;
   expiresAt?: number | null;
+  // AGENTS_TO_DO.md, 2026-08-23 - present only for a metadata change
+  // (rename, Device Group membership, Node assignment, simulated toggle,
+  // capabilities) - the same list-row shape `GET /devices` returns per
+  // device (routes/devices.ts's `findDeviceListRow`), not a hand-picked
+  // field subset, so a future new mutable metadata field starts flowing
+  // through here for free (same reasoning as `NodeEventEnvelope.value`
+  // below). Lets DevicesList.jsx patch its own row in place instead of
+  // needing a full `GET /devices` poll for cross-tab convergence.
+  metadata?: unknown;
   timestamp: string;
   source: string;
 }

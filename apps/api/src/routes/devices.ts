@@ -181,6 +181,30 @@ async function publishDeviceReading(
   return result;
 }
 
+/**
+ * Publishes a metadata-only `device` event (AGENTS_TO_DO.md, 2026-08-23) -
+ * called after any write that changes a device's *registry* fields
+ * (rename, Device Group membership, Node assignment, simulated toggle,
+ * capabilities), not its reading. Carries the whole list-row shape as
+ * `metadata` (not `value` - see messaging.ts's own envelope comment for
+ * why conflating the two would corrupt useDeviceLiveState's rendered
+ * value), so `DevicesList.jsx` can patch its own row in place instead of
+ * needing a full `GET /devices` poll for cross-tab convergence - the
+ * same problem section 61 already solved for Nodes' own `simulated`/
+ * rename, applied here to Devices.
+ */
+async function publishDeviceMetadata(deviceId: number, source: string): Promise<void> {
+  const row = await findDeviceListRow(String(deviceId));
+  if (!row) return;
+  await publishDeviceEvent({
+    domain: "device",
+    entityId: deviceId,
+    metadata: row,
+    timestamp: new Date().toISOString(),
+    source,
+  });
+}
+
 export async function deviceRoutes(app: FastifyInstance): Promise<void> {
   // List view: registry metadata plus EdgeX admin/operating state, fetched
   // once for every device.
@@ -495,6 +519,7 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
         client.release();
       }
 
+      await publishDeviceMetadata(device.id, "device-groups-changed");
       return { status: "ok" };
     },
   );
@@ -512,6 +537,7 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
         [request.body.nodeId, request.params.id],
       );
       if (!result.rows[0]) return reply.code(404).send({ error: "device not found" });
+      await publishDeviceMetadata(result.rows[0].id, "device-node-changed");
       return findDeviceListRow(request.params.id);
     },
   );
@@ -552,6 +578,7 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
         [request.body.simulated, request.params.id],
       );
       if (!result.rows[0]) return reply.code(404).send({ error: "device not found" });
+      await publishDeviceMetadata(result.rows[0].id, "device-simulated-changed");
       return findDeviceListRow(request.params.id);
     },
   );
@@ -572,6 +599,7 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
           [name, request.params.id],
         );
         if (!result.rows[0]) return reply.code(404).send({ error: "device not found" });
+        await publishDeviceMetadata(result.rows[0].id, "device-renamed");
         return findDeviceListRow(request.params.id);
       } catch (err) {
         if (isUniqueViolation(err)) {
@@ -607,6 +635,7 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
         capabilities,
         device.id,
       ]);
+      await publishDeviceMetadata(device.id, "device-capabilities-changed");
       return findDeviceListRow(request.params.id);
     },
   );

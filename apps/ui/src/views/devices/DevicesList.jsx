@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import {
   CAlert,
   CBadge,
@@ -29,7 +29,8 @@ import { useExpandableRows } from '../../hooks/useExpandableRows'
 import { useNow } from '../../hooks/useNow'
 import { usePagination } from '../../hooks/usePagination'
 import { usePersistedState } from '../../hooks/usePersistedState'
-import { useDeviceLiveState } from '../../api/useLiveDevice'
+import { useDeviceLiveState, useDevicesMetadataLiveState, useLiveConnectionStatus } from '../../api/useLiveDevice'
+import { useNodesLiveState } from '../../api/useLiveNode'
 import RowStatusBadge from '../../components/table/RowStatusBadge'
 import TablePagination from '../../components/table/TablePagination'
 import TableSearchInput from '../../components/table/TableSearchInput'
@@ -46,10 +47,6 @@ const PERSISTED_DEFAULTS = {
   pageSize: 10,
   expandedIds: [],
 }
-
-// AGENTS_TO_DO.md, 2026-08-15 - see the poll's own useEffect comment
-// below for why this is a plain interval rather than a live event.
-const DEVICES_POLL_MS = 10000
 
 const backendColor = (backend) => (backend === 'physical' ? 'primary' : 'info')
 
@@ -436,6 +433,9 @@ const DevicesList = () => {
   const [searchResetToken, setSearchResetToken] = useState(0)
   const [configVisible, setConfigVisible] = useState(false)
   const [settingsDevice, setSettingsDevice] = useState(null)
+  const deviceMetadata = useDevicesMetadataLiveState()
+  const liveNodes = useNodesLiveState()
+  const connected = useLiveConnectionStatus()
 
   const reloadDevices = () =>
     api
@@ -466,22 +466,42 @@ const DevicesList = () => {
       .catch((err) => setError(err.message))
   }, [])
 
-  // AGENTS_TO_DO.md, 2026-08-15 - toggling a node's own simulated flag
-  // from a DIFFERENT tab (e.g. NodesList.jsx there) doesn't push any
-  // live event this page subscribes to. A `node` domain does now exist
-  // (AGENTS.md section 61, added 2026-08-16, after this poll was
-  // written) - not migrated to it in this pass, still deliberately
-  // poll-based for the same "UI convenience poll, not a control loop"
-  // reasoning ProcessesList.jsx's own registered-kinds poll established,
-  // converging `node_simulated`/`simulated` (and everything else GET
-  // /devices returns, including the status filter's own `isOverdue`
-  // snapshot below) within one interval of a change made anywhere else.
+  // AGENTS_TO_DO.md, 2026-08-23 - replaces the old DEVICES_POLL_MS list
+  // poll (section 15/63's own deferred item - "toggling a node's own
+  // simulated flag from a different tab doesn't push any live event this
+  // page subscribes to... not migrated to [`node`] in this pass"). Two
+  // live sources now cover what that poll used to converge every 10s:
+  // `deviceMetadata` (routes/devices.ts's publishDeviceMetadata, on
+  // rename/group/node reassignment/simulated/capabilities) patches a
+  // device's own row directly; `liveNodes` (the same `node` domain
+  // NodesList.jsx already uses) patches `node_name`/`node_simulated` for
+  // every device attached to a node that changed - no full refetch
+  // either way. Only a dropped-then-restored WebSocket connection still
+  // needs a one-shot catch-up fetch (can't have delivered anything while
+  // down) - `connected`'s own `false -> true` transition, skipping the
+  // initial mount (see NodesList.jsx's identical pattern).
+  const isFirstConnect = useRef(true)
   useEffect(() => {
-    const interval = setInterval(reloadDevices, DEVICES_POLL_MS)
-    return () => clearInterval(interval)
-  }, [])
+    if (!connected) return
+    if (isFirstConnect.current) {
+      isFirstConnect.current = false
+      return
+    }
+    reloadDevices()
+  }, [connected])
 
-  const filtered = (devices ?? [])
+  const devicesWithLive = (devices ?? []).map((device) => {
+    const metadata = deviceMetadata[device.id]
+    const liveNode = device.node_id !== null ? liveNodes[device.node_id] : undefined
+    if (!metadata && !liveNode) return device
+    return {
+      ...device,
+      ...metadata,
+      ...(liveNode && { node_name: liveNode.name, node_simulated: liveNode.simulated }),
+    }
+  })
+
+  const filtered = devicesWithLive
     .filter((device) => matchesSearch(device, search))
     .filter(
       (device) => !groupFilter || (device.device_group_ids ?? []).includes(Number(groupFilter)),

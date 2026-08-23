@@ -6055,3 +6055,78 @@ JSON fields (Buzzer 1/active-buzzer) - `Capabilities`/`Data Logger`/
 of a narrow fixed one, the "VALUE"/"DEVICE" titles render, rows are
 visibly tighter, and no blank margin remains past the right table's
 own content.
+
+## 65. DevicesList's last poll retired - metadata changes now push over the `device` domain too
+
+2026-08-23. Closes the one deferred item sections 62/63 both explicitly
+flagged and left alone: `DevicesList.jsx`'s own `DEVICES_POLL_MS` list-
+level `GET /devices` poll (10s), kept specifically because no live event
+existed yet for a node's `simulated`/rename reaching Devices, or for a
+device's own rename/Device Group/Node reassignment/capabilities edit
+made in a different tab. The user noticed the poll was still firing (a
+DevTools Network tab observation, not a guess) and asked directly
+whether it was still needed, in the same conversation where a physical
+CAN reconnect turned out to have exposed just how sluggish Devices'
+reaction actually was compared to Nodes.
+
+**Two distinct things were making Devices "slower than Nodes" that day,
+worth keeping separate**: (1) `control-node-heartbeat`'s own
+`data_logger_control` error window (20s, section 62's own deliberate
+choice to stay clear of the touch-cadence race) is genuinely wider than
+Nodes' 10-tick/10s threshold - a config difference, not fixed here; (2)
+the list-level poll itself, which this section retires.
+
+**`messaging.ts`**: `DeviceEventEnvelope.value` became optional, and a
+new optional `metadata` field added - carries the whole `GET /devices`
+list-row shape (not a hand-picked subset, same philosophy as
+`NodeEventEnvelope.value`), present only for a registry/metadata change,
+never together with a real reading. Keeping the two on separate fields
+(rather than overloading `value` for both purposes) was deliberate:
+`useDeviceLiveState`'s reducer previously overwrote `value`/`mode`/etc.
+unconditionally on *every* event for a device, so a metadata-only event
+publishing under `value` would have silently clobbered the last known
+live reading with `undefined`. Fixed the reducer itself to only touch
+the reading fields when `'value' in event`, metadata fields only when
+`event.metadata !== undefined` - a metadata event and a reading event
+now can't step on each other regardless of which arrives first.
+
+**`routes/devices.ts`**: new `publishDeviceMetadata(deviceId, source)`,
+called after each of the five metadata-mutating routes (Device Group
+membership, Node assignment, simulated toggle, rename, capabilities) -
+mirrors `publishDeviceReading`'s own shape, reusing `findDeviceListRow`
+each route already computes for its own HTTP response rather than a
+second query.
+
+**Frontend**: new `useDevicesMetadataLiveState()` (`useLiveDevice.js`,
+fleet-wide `{[id]: row}`, mirrors `useNodesLiveState`'s own shape - a
+per-id selector like `useDeviceLiveState` isn't the right shape for
+`DevicesList.jsx`, which renders from one flat array, not a per-row
+subscribing component). `DevicesList.jsx` now merges two live sources
+into its own `devices` array before filtering/rendering: this metadata
+overlay (patches a device's own row on any registry change, anywhere),
+and the *existing* `node` domain (`useNodesLiveState`, section 61) for
+`node_name`/`node_simulated` - a node's own rename/simulated toggle
+reaching every device attached to it, without Devices needing its own
+copy of that logic. `DEVICES_POLL_MS`/its `setInterval` are gone
+entirely, replaced by the same reconnect-triggered one-shot refetch
+pattern `NodesList.jsx` already established (a dropped-then-restored
+WebSocket connection can't have delivered anything while down; nothing
+else still needs a recurring timer).
+
+**A red herring during verification, not a code bug**: after deploying,
+`GET /devices` was still observed firing every ~10s in the API's own
+request log. Confirmed via elimination (closed every automation-
+controlled tab entirely - the poll kept firing) that this was the
+user's *own*, separate browser tab still running the pre-rebuild
+cached bundle (confirmed by grepping the freshly-built container's
+served JS for `DEVICES_POLL_MS` - genuinely absent). A hard reload
+(Ctrl+Shift+R) on that tab was the actual fix, not a code change.
+
+**Verified live** in nexus-edge-aquarium with two fresh tabs (guaranteed
+non-cached bundle): renamed a device via a direct authenticated
+`fetch()` call (bypassing a UI click that silently failed to submit)
+and watched the second tab's row update instantly, no reload; toggled
+`Main node control`'s own `simulated` flag the same way and watched
+every device attached to it - and the header's own Simulation badge -
+flip live across the whole list simultaneously, also with zero polling
+in either direction.
