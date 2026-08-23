@@ -22,7 +22,7 @@ const LedSimulator = ({ value, color = DEFAULT_COLOR, onChange }) => {
         width: 32,
         height: 32,
         borderRadius: '50%',
-        border: '5px solid #000',
+        border: '3px solid #000',
         backgroundColor: active ? color : INACTIVE_FILL,
         boxSizing: 'border-box',
         padding: 0,

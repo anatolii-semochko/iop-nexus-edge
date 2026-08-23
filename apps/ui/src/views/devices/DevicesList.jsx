@@ -395,8 +395,8 @@ const DeviceRow = ({
           <ValueCell value={value} />
         </CTableDataCell>
         <CTableDataCell className={noBorderWhenExpanded}>{device.name}</CTableDataCell>
-        <CTableDataCell className={noBorderWhenExpanded}>{device.type}</CTableDataCell>
         <CTableDataCell className={noBorderWhenExpanded}>{device.node_name ?? '-'}</CTableDataCell>
+        <CTableDataCell className={noBorderWhenExpanded}>{device.type}</CTableDataCell>
         <CTableDataCell className={`text-end ${noBorderWhenExpanded ?? ''}`}>
           <div className="d-flex justify-content-end align-items-center gap-1 flex-nowrap">
             <IconButton
@@ -690,8 +690,8 @@ const DevicesList = () => {
                       <CTableHeaderCell scope="col"></CTableHeaderCell>
                       <CTableHeaderCell scope="col">Value</CTableHeaderCell>
                       <CTableHeaderCell scope="col">Name</CTableHeaderCell>
-                      <CTableHeaderCell scope="col">Type</CTableHeaderCell>
                       <CTableHeaderCell scope="col">Node</CTableHeaderCell>
+                      <CTableHeaderCell scope="col">Type</CTableHeaderCell>
                       <CTableHeaderCell scope="col" className="text-end">
                         <div className="d-flex justify-content-end align-items-center gap-2">
                           <span>Actions</span>

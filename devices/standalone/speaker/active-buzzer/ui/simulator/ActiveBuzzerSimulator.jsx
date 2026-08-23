@@ -32,7 +32,7 @@ const ActiveBuzzerSimulator = ({ value, onChange }) => {
       aria-pressed={active}
       aria-label="Toggle buzzer"
     >
-      <div style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: GRILLE_COLOR }} />
+      <div style={{ width: 7, height: 7, borderRadius: '50%', backgroundColor: GRILLE_COLOR }} />
     </button>
   )
 }

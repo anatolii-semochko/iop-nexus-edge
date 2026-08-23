@@ -5,7 +5,7 @@ import { LEVEL_BY_KEY } from './lightLevels'
 import { useDeviceValue } from './useDeviceValue'
 
 const Reading = ({ label, value, unit, decimals = 1 }) => (
-  <CCol xs="auto" className="text-center">
+  <CCol xs="auto">
     <div className="text-body-secondary small">{label}</div>
     <div style={{ fontSize: '1.9rem', fontWeight: 600, lineHeight: 1 }}>
       {value !== undefined && value !== null
@@ -55,7 +55,7 @@ const WeatherControlPanel = ({ process }) => {
         <Reading label="Humidity" value={humidity} unit="%RH" />
         <Reading label="Pressure" value={pressure} unit=" hPa" />
         <Reading label="Light (raw)" value={light} unit="" decimals={0} />
-        <CCol xs="auto" className="text-center">
+        <CCol xs="auto">
           <div className="text-body-secondary small">Light level</div>
           <div
             className="d-flex align-items-center gap-2"
