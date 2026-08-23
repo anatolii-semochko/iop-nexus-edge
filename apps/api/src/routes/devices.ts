@@ -288,6 +288,20 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
         }
       }
       ({ isOverdue, expiresAt } = await publishDeviceReading(device, readingOrigin, value, "device-read"));
+    } else if (device.capabilities.readOnly) {
+      // No EdgeX/hardware backend at all (e.g. `light-level`, AGENTS.md
+      // section 66) - the only way such a Device's value ever changes is
+      // a process calling PUT /devices/:id/reading, which writes
+      // straight into the `state:*` cache via
+      // dualDevicesModel.publishReading(). Read it back from there
+      // instead of a live EdgeX call, which this Device has nothing to
+      // resolve to.
+      const reading = await dualDevicesModel.getReading(device.id);
+      if (reading) {
+        value = reading.value;
+        readingOrigin = Date.parse(reading.updatedAt);
+        ({ isOverdue, expiresAt } = await publishDeviceReading(device, readingOrigin, value, "device-read"));
+      }
     }
 
     return { ...device, value, valueType, units, dualState, readingOrigin, isOverdue, expiresAt };

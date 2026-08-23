@@ -6224,3 +6224,44 @@ live.
 migration both belong in a target project, not core, and need a real
 deployment decision (which project, own CAN segment or shared with
 `control-node`) this session didn't settle.
+
+**Follow-up, same day** - wired the real instance into
+nexus-edge-aquarium (`migrations/002_seed_weather_node.sql`, `plugins/
+weather-control/process.ts` mirroring `plugins/control-node/process.ts`'s
+shape minus the Pulse/watchdog half this node type has none of,
+`extra-res/devices/weather-node-devices.yaml`, `backend: virtual`
+throughout - see that project's own AGENTS.md for the instance-level
+writeup). 6 devices on the real instance, not 5 - heartbeat is a Device
+too, same as `control-node`. Rebuilt and live-verified end to end
+(`docker compose build` + `up -d` on api/orchestrator/device-service/ui,
+then Dev Simulator -> Processes -> Weather Node's own panel and Settings
+popup) - and two real bugs surfaced only by that live pass, both fixed
+here in core, not worked around in the target project:
+
+- `apps/device-service/internal/driver/codec.go`'s `coerceToValueType`
+  had no `Uint16` case (only Bool/Int32/Uint32/Float32/Float64/String) -
+  `light`'s Uint16 valueType fell through to the passthrough default,
+  and EdgeX's own `NewCommandValue` rejected the raw YAML-decoded `int`
+  it got instead. Added the missing case (`toInt64` too, for the
+  write-then-read-back round trip - same reasoning already documented on
+  its `int32` case for Int32/Uint32).
+- `routes/devices.ts`'s `GET /devices/:id` turned out to have NO code
+  path at all for a Device with no resolvable EdgeX name - `value` stayed
+  hardcoded `null` forever, regardless of what `PUT /devices/:id/reading`
+  had written into the `state:*` cache. This one was invisible from the
+  write side alone (the route returned `200 {"status":"ok"}` correctly)
+  and only surfaced reading the value back - a reminder that
+  `publishReading()`'s own doc comment ("reach the state:* cache and
+  nexus.events") was written with the *live push* consumer in mind, not
+  the plain REST GET, which turned out to have its own entirely separate
+  value-sourcing logic. Added `dualDevicesModel.getReading()` (reads back
+  what `publishReading()` last wrote) and a new `else if
+  (device.capabilities.readOnly)` branch in the route, parallel to the
+  EdgeX branch above it.
+
+Both fixed and live-verified before this follow-up was written: raw
+light simulated to 3800 via the Dev Simulator, `weather-control`
+classified it to `very-sunny` within one tick with zero manual
+intervention, and both the WeatherControlPanel and WeatherZonesSection
+(marker position, current-zone label, "Accept current value") rendered
+correctly against that live value in the browser.

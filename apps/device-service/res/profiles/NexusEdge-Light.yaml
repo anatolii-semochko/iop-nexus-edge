@@ -1,0 +1,19 @@
+# Loaded copy of devices/standalone/sensor/light/edgex-device-profile.yaml
+# (source of truth) - kept in sync by hand (AGENTS.md section 7).
+name: "NexusEdge-Light"
+manufacturer: "NexusEdge"
+model: "light"
+labels:
+  - "sensor"
+description: "Raw photoresistor light-level reading - atomic device, one Uint16 value"
+
+deviceResources:
+  - name: "Light"
+    isHidden: false
+    description: "Raw photoresistor (LDR) ADC reading, uncalibrated"
+    properties:
+      valueType: "Uint16"
+      readWrite: "RW"
+      units: "raw"
+
+deviceCommands: []

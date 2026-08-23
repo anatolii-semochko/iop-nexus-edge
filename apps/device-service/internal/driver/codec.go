@@ -29,6 +29,13 @@ func coerceToValueType(valueType string, value any) (any, error) {
 		}
 		return int32(n), nil
 
+	case common.ValueTypeUint16:
+		n, err := toInt64(value)
+		if err != nil {
+			return nil, err
+		}
+		return uint16(n), nil
+
 	case common.ValueTypeUint32:
 		n, err := toInt64(value)
 		if err != nil {
@@ -67,12 +74,14 @@ func toInt64(value any) (int64, error) {
 	case int:
 		return int64(v), nil
 	case int32:
-		// A resource previously written as Int32/Uint32 round-trips back
-		// through here on the next read already carrying its coerced
-		// native Go type (see writeVirtual, which stores
+		// A resource previously written as Int16/Int32/Uint16/Uint32
+		// round-trips back through here on the next read already carrying
+		// its coerced native Go type (see writeVirtual, which stores
 		// params[i].Value as-is) - not the generic int/float64 a fresh
 		// YAML-seeded value would arrive as. Both shapes must be
 		// accepted, not just the seed-time one.
+		return int64(v), nil
+	case uint16:
 		return int64(v), nil
 	case uint32:
 		return int64(v), nil

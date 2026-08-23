@@ -1,0 +1,19 @@
+# Loaded copy of devices/standalone/sensor/pressure/edgex-device-profile.yaml
+# (source of truth) - kept in sync by hand (AGENTS.md section 7).
+name: "NexusEdge-Pressure"
+manufacturer: "NexusEdge"
+model: "pressure"
+labels:
+  - "sensor"
+description: "Atmospheric pressure sensor - atomic device, one Float32 value"
+
+deviceResources:
+  - name: "Pressure"
+    isHidden: false
+    description: "Atmospheric pressure reading"
+    properties:
+      valueType: "Float32"
+      readWrite: "RW"
+      units: "hPa"
+
+deviceCommands: []
