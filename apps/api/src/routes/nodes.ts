@@ -23,7 +23,7 @@ interface NodeRow {
   // routes/devices.ts's resolveEdgexName) - a device ignores its own
   // `simulated` column entirely once it has a `node_id`.
   simulated: boolean;
-  has_simulated_twin: boolean;
+  can_enable_simulated: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -75,15 +75,28 @@ async function publishNodeState(node: Awaited<ReturnType<typeof withLiveHeartbea
 // view (NodesList.jsx) needs it for every row up front, unlike the
 // per-process Tab/Message Group membership (routes/processes.ts), which
 // is only fetched on-demand when a Settings popup opens.
-// `has_simulated_twin` (2026-08-09/10) - computed here rather than
-// forcing NodesList.jsx to fetch every node's devices just to know
-// whether its own simulated switch should be enabled (that list is
-// only fetched today for the per-row detail expansion, not up front for
-// every row - see DevicesList.jsx's own SELECT_DEVICE_LIST_BASE for the
-// same "resolve everything the list view needs in one query" idiom).
+// `can_enable_simulated` (2026-08-09/10, renamed from `has_simulated_twin`
+// 2026-08-23 - AGENTS_TO_DO.md) - computed here rather than forcing
+// NodesList.jsx to fetch every node's devices just to know whether its
+// own simulated switch should be enabled (that list is only fetched
+// today for the per-row detail expansion, not up front for every row -
+// see DevicesList.jsx's own SELECT_DEVICE_LIST_BASE for the same
+// "resolve everything the list view needs in one query" idiom). Mirrors
+// PATCH /nodes/:id/simulated's own guard below EXACTLY (same NOT EXISTS
+// shape, not just "some twin exists somewhere") - the original
+// `has_simulated_twin` version of this only checked for the presence of
+// ANY twin, which blocked a node with zero physical devices (e.g.
+// weather-node before any hardware exists) from ever enabling simulated
+// mode at all, since it could never have a twin to begin with. A stale
+// client-side switch state disabled on such a node even after the PATCH
+// route itself was fixed to allow it - this field has to encode the
+// exact same condition as the write path, not a looser proxy for it.
 const SELECT_NODE = `
   SELECT n.*, g.name AS group_name,
-    EXISTS(SELECT 1 FROM devices d WHERE d.node_id = n.id AND d.edgex_device_name_simulated IS NOT NULL) AS has_simulated_twin
+    NOT EXISTS(
+      SELECT 1 FROM devices d
+      WHERE d.node_id = n.id AND d.backend = 'physical' AND d.edgex_device_name_simulated IS NULL
+    ) AS can_enable_simulated
   FROM nodes n
   LEFT JOIN node_groups g ON g.id = n.group_id
 `;
@@ -179,18 +192,12 @@ export async function nodeRoutes(app: FastifyInstance): Promise<void> {
       const node = await findNode(request.params.id);
       if (!node) return reply.code(404).send({ error: "node not found" });
 
-      if (request.body.simulated) {
-        const counts = await pool.query<{ physical_count: string; twin_count: string }>(
-          `SELECT
-             count(*) FILTER (WHERE backend = 'physical') AS physical_count,
-             count(*) FILTER (WHERE edgex_device_name_simulated IS NOT NULL) AS twin_count
-           FROM devices WHERE node_id = $1`,
-          [request.params.id],
-        );
-        const { physical_count, twin_count } = counts.rows[0];
-        if (Number(physical_count) > 0 && Number(twin_count) === 0) {
-          return reply.code(409).send({ error: "no device on this node has a simulated twin provisioned" });
-        }
+      // `node` already carries `can_enable_simulated` (SELECT_NODE) -
+      // the exact same condition NodesList.jsx's own switch disables on,
+      // computed once, in one place, rather than re-derived here with its
+      // own separate query that could silently drift out of sync with it.
+      if (request.body.simulated && !node.can_enable_simulated) {
+        return reply.code(409).send({ error: "no device on this node has a simulated twin provisioned" });
       }
 
       await logCommand({

@@ -310,13 +310,13 @@ const NodesList = () => {
                                 <Switch
                                   checked={node.simulated}
                                   onChange={() => handleToggleSimulated(node)}
-                                  disabled={!node.simulated && !node.has_simulated_twin}
+                                  disabled={!node.simulated && !node.can_enable_simulated}
                                   activeColor="#e55353"
                                   inactiveColor="#d3d3d3"
                                   ariaLabel={
                                     node.simulated
                                       ? `${node.name} is simulated - switch to physical`
-                                      : node.has_simulated_twin
+                                      : node.can_enable_simulated
                                         ? `${node.name} is physical - switch to simulated`
                                         : `${node.name} has no simulated twin provisioned`
                                   }

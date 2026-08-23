@@ -6293,3 +6293,28 @@ condition as before, not "every physical device needs its own twin").
 `weather-node-01` toggled to `simulated: true` live afterward, confirmed
 via the Nodes page (`Simulation` status pill, red toggle) and the
 header's own blinking Simulation badge lighting up.
+
+**Third follow-up, same day** - the user reported the Nodes page's own
+switch could turn `weather-node-01`'s simulated mode OFF but not back
+ON. Root cause: `NodesList.jsx`'s `Switch` disabled itself on
+`!node.simulated && !node.has_simulated_twin` - `has_simulated_twin` was
+the OLD, unfixed field (`EXISTS(... edgex_device_name_simulated IS NOT
+NULL)`, still just "does any twin exist anywhere"), never updated when
+the second follow-up above fixed the actual write-path guard. For a node
+with zero physical devices this can never be true, so the switch stayed
+permanently disabled for turning simulated ON, regardless of the PATCH
+route itself now allowing it - the backend fix alone wasn't enough; the
+frontend had its own, now-stale copy of the pre-fix rule guarding the
+same decision.
+
+Renamed the field to `can_enable_simulated` and gave it the exact same
+`NOT EXISTS (physical device with no twin)` condition the PATCH guard
+now uses - then simplified the PATCH handler itself to read
+`node.can_enable_simulated` off the row `findNode` already returns
+(`SELECT_NODE` computes it once) instead of running its own separate
+count query, so there is now exactly one place this condition is
+computed, not two that can drift apart again. `NodesList.jsx` updated to
+match (`disabled`, `ariaLabel`). Live-verified via an actual UI click
+this time (not the browser-console `fetch()` workaround the earlier
+follow-ups used) - `weather-node-01`'s switch turned simulated ON
+successfully, `Simulation` pill and header badge both lit up.
