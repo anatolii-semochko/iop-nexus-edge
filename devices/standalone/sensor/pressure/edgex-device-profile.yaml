@@ -1,0 +1,28 @@
+# Source of truth for this device type's EdgeX-facing shape. The copy
+# actually loaded by apps/device-service lives at
+# apps/device-service/res/profiles/NexusEdge-Pressure.yaml - there is no
+# provisioning flow yet that reads this file directly (AGENTS.md section
+# 7), so the two must be kept in sync by hand. Identical content.
+name: "NexusEdge-Pressure"
+manufacturer: "NexusEdge"
+model: "pressure"
+labels:
+  - "sensor"
+description: "Atmospheric pressure sensor - atomic device, one Float32 value"
+
+deviceResources:
+  - name: "Pressure"
+    isHidden: false
+    description: "Atmospheric pressure reading"
+    properties:
+      valueType: "Float32"
+      # RW at the EdgeX/core-command level even though this is conceptually
+      # read-only - same reasoning as ../temperature's own profile: Devices
+      # API enforces "no ordinary command surface" via
+      # capabilities.readOnly, and marking this "R" here would make it
+      # impossible for the Dev Simulator's .../simulate endpoint (or a
+      # physical CAN write) to ever push a reading through core-command.
+      readWrite: "RW"
+      units: "hPa"
+
+deviceCommands: []

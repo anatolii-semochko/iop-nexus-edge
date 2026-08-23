@@ -1,0 +1,24 @@
+nodeType: weather-node
+description: >
+  Outdoor weather station (AGENTS_TO_DO.md, 2026-08-23 "Node Weather
+  Control", `Node Weather Control.txt`) - STM32F103C8T6 ("Blue Pill") +
+  CAN transceiver, mounted outside the enclosure. Three physical sensors,
+  four raw logical readings: AHT20 (I2C, temperature + humidity), BMP280
+  (I2C, pressure only - its own temperature output is unused, AHT20
+  already covers that), photoresistor (ADC, raw light level). A fifth,
+  computed reading (categorical light level) is derived from the raw
+  light value by the `weather-control` process, not by this node's own
+  firmware - see `devices/standalone/sensor/light-level/`'s own docs.
+  Posts a heartbeat once/sec, same convention as `control-node`. Unlike
+  `control-node`, this node type has no watchdog/LED/buzzer/reset
+  function - it is a pure sensor station, transmit-only (no CAN frame
+  it needs to receive).
+bus:
+  type: can
+supports:
+  - temperature
+  - humidity
+  - pressure
+  - light
+  - light-level
+  - heartbeat

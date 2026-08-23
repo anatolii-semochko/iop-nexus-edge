@@ -6130,3 +6130,97 @@ and watched the second tab's row update instantly, no reload; toggled
 every device attached to it - and the header's own Simulation badge -
 flip live across the whole list simultaneously, also with zero polling
 in either direction.
+
+## 66. New "weather-node" node type - CORE Library + firmware scaffold, first Device with no EdgeX backend at all
+
+2026-08-23. `Node Weather Control.txt` (AGENTS_TO_DO.md) - components
+ordered, not yet in hand; this section is the CORE-side software prep
+done ahead of hardware arrival, same "build simulated first, wire to
+real CAN later" order `control-node` itself followed.
+
+**Hardware -> Devices mapping, settled up front**: three physical
+sensors, four raw logical readings, plus one computed one - AHT20
+(temperature + humidity, two atomic Devices, same "one I2C chip, two
+Device rows" precedent `control-node`'s own `../humidity` contract
+already established), BMP280 (pressure only - its own temperature output
+read and discarded, AHT20 already covers that), a photoresistor (raw,
+uncalibrated ADC count). A `weather-control` process derives a 6-level
+categorical light-level (`very-sunny`/`sunny`/`medium`/`overcast`/
+`dusk`/`dark`) from the raw value every tick - **5 Devices total** on a
+real instance, not 4: temperature, humidity, pressure, light (raw),
+light-level (computed).
+
+**New Library device types** (`devices/standalone/sensor/`):
+`pressure` and `light` are ordinary readOnly sensor types, same shape as
+`temperature`/`humidity` - nothing new architecturally. `light-level` is
+the first Device type in this library with **no
+`edgex-device-profile.yaml` at all** - no physical or virtual EdgeX
+backend, deliberately. Two existing write paths were checked and both
+rejected it: `PUT /devices/:id/auto` requires a resolvable EdgeX device
+via `requireEdgeXDevice` and rejects `readOnly` devices outright; `PUT
+/devices/:id/simulate` *also* requires a resolvable EdgeX device (it
+writes the value out through EdgeX too, not just the `state:*` cache -
+see its own `writeOrReject` call). Neither fits a value that was never
+meant to have hardware behind it.
+
+**New route, `PUT /devices/:id/reading`** (`routes/devices.ts`) -
+skips EdgeX entirely, calls `dualDevicesModel.publishReading()` directly
+(the same cache-refresh-and-publish primitive `.../simulate` already
+used for its own side effects) after confirming the device exists and is
+`readOnly`. Not logged via `logCommand` - a process re-asserting its own
+computed reading every tick isn't a "command" worth auditing, any more
+than an ordinary EdgeX-sourced sensor reading is. New orchestrator
+`apiClient.setDeviceReading(deviceId, value)` calls it - the
+`weather-control` process's own future runner (a target project's
+`plugins/weather-control/process.ts`, not built yet - see below) will
+use this the same way `control-node/process.ts` uses `setDeviceAuto` for
+Pulse.
+
+**New node type**, `devices/nodes/weather-node/` - `node.yaml`
+(`supports:` temperature/humidity/pressure/light/light-level/heartbeat),
+full firmware scaffold (`firmware/src/{config,env_sensor,
+pressure_sensor,light_sensor,can_bus,main}.{h,cpp}`, PlatformIO project),
+`docs/wiring.md`. Simpler than `control-node`'s own firmware - this
+board has no watchdog/LED/buzzer/reset function at all, transmit-only
+(no `canBusReceive()`), just three sensors read on their own intervals
+plus a heartbeat, once/sec. New CAN ID block `0x310`-`0x31F` (deliberately
+leaving `0x306`-`0x30F` free for `control-node`'s own future growth, in
+case the two ever do share one physical bus - an open wiring question,
+not a firmware one, see `wiring.md`'s own note on dedicated-segment vs.
+shared-bus). AHT20 and BMP280 share one I2C1 bus at different fixed
+addresses (`0x38`/`0x76`) - no second bus needed. Firmware is untested
+(components not yet in hand), written by direct analogy with
+`control-node`'s own AHT20 protocol code and STM32_CAN wrapper, same
+`HAL_CAN_MODULE_ENABLED` build flag applied proactively (a known,
+documented STM32_CAN + STM32duino requirement, not something to
+rediscover).
+
+**New UI** (`apps/ui/src/views/processes/`): `WeatherControlPanel.jsx`
+(expandable-row detail, `KIND_PANELS['weather-control']`) - read-only
+display of all five readings, no thresholds here (this process has none
+of its own to edit). `WeatherZonesSection.jsx` - the zone-boundary
+editor, registered in `ProcessSettingsModal.jsx`'s
+`EXTRA_SETTINGS_SECTIONS['weather-control']` (the user's own "Config
+процесу" placement, not the expandable panel) - horizontal diagram of
+the 6 zones proportional to a 0-4095 raw range, a dashed marker at the
+raw light Device's current live value, one boundary `NumericStepper` per
+border between adjacent zones (min/max clamped against neighbor zones),
+an "accept current value" button per boundary, and a color picker per
+zone. Staged locally via a ref (`extraConfigRef`, generalized from what
+used to be `AnnunciatorSlotsSection`'s own hardcoded `slotsRef` - a new
+`EXTRA_CONFIG_FIELD` kind->field map lets `ProcessSettingsModal.jsx`'s
+`handleSave` stay generic across both of these now, not just one),
+committed to `process.config.zones` only when the modal's own Save runs
+- Cancel/close discards it, matching the spec's explicit Save/Cancel
+ask. Icons: `@coreui/icons` has no dedicated weather set -
+`cilSun`/`cilBrightness`/`cilCloudy`/`cilCloud`/`cilContrast`/`cilMoon`
+stand in (`lightLevels.js`); `cilBrightness`/`cilContrast` are generic
+UI icons, not literal sun/dusk glyphs, worth a visual check once seen
+live.
+
+**Not done yet, deliberately** - same split `control-node`/
+`ControlNodePanel.jsx` already established: the process *runner*
+(`plugins/weather-control/process.ts`) and the real node instance seed
+migration both belong in a target project, not core, and need a real
+deployment decision (which project, own CAN segment or shared with
+`control-node`) this session didn't settle.

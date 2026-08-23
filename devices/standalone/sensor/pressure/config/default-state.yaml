@@ -1,0 +1,6 @@
+# Initial value for a `backend: virtual` instance of this device type
+# (seeded into apps/device-service's Virtual Node Runtime via the
+# "initial.Pressure" protocol property) - not meaningful for a real
+# physical (CAN) instance, which just reports whatever the sensor reads.
+# A plausible sea-level-ish default, not a real reading.
+Pressure: 1013.25

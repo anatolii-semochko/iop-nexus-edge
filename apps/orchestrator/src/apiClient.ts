@@ -260,6 +260,17 @@ export const apiClient = {
       method: "PUT",
       body: JSON.stringify({ value }),
     }),
+  // For a readOnly device with no EdgeX backend at all - e.g. the
+  // `weather-control` process's own computed `light-level` device
+  // (devices/standalone/sensor/light-level). setDeviceAuto above would
+  // reject a readOnly device outright; this hits PUT /devices/:id/reading
+  // instead (routes/devices.ts's own comment explains why neither
+  // .../auto nor .../simulate fits).
+  setDeviceReading: (deviceId: number, value: unknown) =>
+    request(`/devices/${deviceId}/reading`, {
+      method: "PUT",
+      body: JSON.stringify({ value }),
+    }),
   setCritical: (processId: number, critical: boolean) =>
     request(`/processes/${processId}/critical`, {
       method: "POST",

@@ -14,6 +14,7 @@ import {
   CSpinner,
 } from '@coreui/react'
 import { api } from '../../api/client'
+import WeatherZonesSection from './WeatherZonesSection'
 
 // One checkbox section - fetches this process's current membership in
 // `items` (Tab Groups or Message Casting Groups, whichever `entity`
@@ -94,29 +95,30 @@ const GroupCheckboxSection = ({ title, items, fetchSelected, selectedIds, onChan
 // Casting Groups pair (AGENTS_TO_DO.md, 2026-08-02 - "один основний
 // попап з конфігом... загальні стандартні опції, а після того блок
 // унікальних для процесу опцій"). A plain kind->component map, same
-// dispatch idiom ProcessesTable.jsx's own KIND_PANELS already uses -
-// only one entry exists today, but the shape scales the same way that
-// one does.
+// dispatch idiom ProcessesTable.jsx's own KIND_PANELS already uses. Two
+// entries as of 2026-08-23 (weather-control's own WeatherZonesSection
+// joined this one) - EXTRA_CONFIG_FIELD below is what lets handleSave
+// stay generic across however many of these end up existing.
 // Owns its own slots state, initialized straight from `process.config.
 // slots` - safe as a plain useState initializer (no effect needed)
 // because this component only ever renders inside the `visible &&
 // process &&` block below, so it mounts fresh every time the modal
 // opens, same as GroupCheckboxSection above. Writes its latest value
-// into `slotsRef` from the CFormSelect's own onChange handler (a ref
-// write during a real event is always safe - unlike during render or
+// into `extraConfigRef` from the CFormSelect's own onChange handler (a
+// ref write during a real event is always safe - unlike during render or
 // inside an effect body, both of which this codebase's stricter React
 // Compiler-era lint rules reject) so the parent's Save handler can read
 // the latest edited value on demand, without lifting this into parent
 // state (which would need an effect to reset on reopen, since the
 // parent itself never unmounts - see ProcessSettingsModal's own
-// `slotsRef` comment for why that's the one thing to avoid here).
-const AnnunciatorSlotsSection = ({ process, groups, slotsRef }) => {
+// `extraConfigRef` comment for why that's the one thing to avoid here).
+const AnnunciatorSlotsSection = ({ process, groups, extraConfigRef }) => {
   const [slots, setSlots] = useState(process.config.slots ?? [])
 
   const updateSlot = (index, messageGroupId) => {
     const next = slots.map((s, i) => (i === index ? { ...s, messageGroupId } : s))
     setSlots(next)
-    slotsRef.current = next
+    extraConfigRef.current = next
   }
 
   return (
@@ -151,6 +153,19 @@ const AnnunciatorSlotsSection = ({ process, groups, slotsRef }) => {
 
 const EXTRA_SETTINGS_SECTIONS = {
   'alarm-annunciator': AnnunciatorSlotsSection,
+  // Node Weather Control.txt / AGENTS_TO_DO.md 2026-08-23 - zone
+  // boundaries/colors for the derived light-level classification, same
+  // "Config процесу" placement the spec asked for.
+  'weather-control': WeatherZonesSection,
+}
+
+// Which process.config field each EXTRA_SETTINGS_SECTIONS entry stages
+// its edits into, read back by handleSave below - a plain kind->field
+// map since AnnunciatorSlotsSection/WeatherZonesSection each own exactly
+// one config field.
+const EXTRA_CONFIG_FIELD = {
+  'alarm-annunciator': 'slots',
+  'weather-control': 'zones',
 }
 
 /**
@@ -179,20 +194,22 @@ const EXTRA_SETTINGS_SECTIONS = {
 const ProcessSettingsModal = ({ visible, onClose, process, tabGroups, messageGroups, onSaved }) => {
   const [selectedTabGroupIds, setSelectedTabGroupIds] = useState(new Set())
   const [selectedMessageGroupIds, setSelectedMessageGroupIds] = useState(new Set())
-  // Not React state - AnnunciatorSlotsSection (mounts fresh each open,
-  // see its own comment) writes an edited value here from its own
-  // onChange handler; `null` means "untouched this session", so
-  // handleSave falls back to the process's own current config (a no-op
-  // write, not data loss). Reset on close so a cancelled edit for one
-  // process can never leak into a later save for another.
-  const slotsRef = useRef(null)
+  // Not React state - the active ExtraSection (mounts fresh each open,
+  // see AnnunciatorSlotsSection's own comment) writes an edited value
+  // here from its own onChange handler; `null` means "untouched this
+  // session", so handleSave falls back to the process's own current
+  // config (a no-op write, not data loss). Reset on close so a
+  // cancelled edit for one process can never leak into a later save for
+  // another.
+  const extraConfigRef = useRef(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
 
   const ExtraSection = process && EXTRA_SETTINGS_SECTIONS[process.kind]
+  const extraConfigField = process && EXTRA_CONFIG_FIELD[process.kind]
 
   const handleClose = () => {
-    slotsRef.current = null
+    extraConfigRef.current = null
     onClose()
   }
 
@@ -204,9 +221,11 @@ const ProcessSettingsModal = ({ visible, onClose, process, tabGroups, messageGro
         api.setProcessTabGroups(process.id, [...selectedTabGroupIds]),
         api.setProcessMessageGroups(process.id, [...selectedMessageGroupIds]),
       ]
-      if (ExtraSection) {
+      if (ExtraSection && extraConfigField) {
         writes.push(
-          api.setProcessConfig(process.id, { slots: slotsRef.current ?? process.config.slots }),
+          api.setProcessConfig(process.id, {
+            [extraConfigField]: extraConfigRef.current ?? process.config[extraConfigField],
+          }),
         )
       }
       await Promise.all(writes)
@@ -251,7 +270,11 @@ const ProcessSettingsModal = ({ visible, onClose, process, tabGroups, messageGro
               busy={busy}
             />
             {ExtraSection && (
-              <ExtraSection process={process} groups={messageGroups} slotsRef={slotsRef} />
+              <ExtraSection
+                process={process}
+                groups={messageGroups}
+                extraConfigRef={extraConfigRef}
+              />
             )}
           </>
         )}

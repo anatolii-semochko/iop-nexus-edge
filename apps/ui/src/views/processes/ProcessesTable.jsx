@@ -36,6 +36,7 @@ import HeartbeatControlTestPanel from './HeartbeatControlTestPanel'
 import ProcessSettingsModal from './ProcessSettingsModal'
 import ResourceMonitorPanel from './ResourceMonitorPanel'
 import TemperatureProcessPanel from './TemperatureProcessPanel'
+import WeatherControlPanel from './WeatherControlPanel'
 import WemRow from './WemRow'
 
 // process.kind -> its expandable detail component (AGENTS.md section 10).
@@ -57,6 +58,10 @@ export const KIND_PANELS = {
   // temperature-control split (AGENTS_TO_DO.md, 2026-08-09 "НОДА
   // КОНТРОЛЮ").
   'control-node': ControlNodePanel,
+  // Runner lives in a target project's own plugins/weather-control/
+  // process.ts, panel stays here - same split as control-node above
+  // (Node Weather Control.txt, AGENTS_TO_DO.md 2026-08-23).
+  'weather-control': WeatherControlPanel,
 }
 
 const statusColor = (status) => (status === 'on' ? 'success' : 'secondary')

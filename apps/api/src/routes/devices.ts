@@ -414,6 +414,48 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
     return { status: "ok", state };
   });
 
+  // Orchestrator-driven write for a readOnly device with no EdgeX backend
+  // at all - e.g. `light-level` (devices/standalone/sensor/light-level),
+  // a categorical value computed by the `weather-control` process from
+  // another device's raw reading, added 2026-08-23 (Node Weather
+  // Control.txt, AGENTS_TO_DO.md). Neither existing write path fits: PUT
+  // .../auto requires a resolvable EdgeX device via requireEdgeXDevice and
+  // rejects readOnly devices outright (this route's own check above), and
+  // PUT .../simulate ALSO requires a resolvable EdgeX device (it writes
+  // the value out to EdgeX, not just the state:* cache - see that route's
+  // own writeOrReject call) - neither works for a Device that was never
+  // meant to have hardware behind it. This route skips EdgeX entirely and
+  // goes straight to dualDevicesModel.publishReading(), the same
+  // cache-refresh-and-publish primitive .../simulate already uses for its
+  // own state:*/nexus.events side effects.
+  //
+  // Not logged via logCommand - unlike a human's .../simulate action, a
+  // process re-asserting its own computed reading every tick isn't a
+  // "command" worth auditing, any more than an ordinary EdgeX-sourced
+  // sensor reading is (those are never logged either).
+  app.put<{ Params: { id: string }; Body: { value: unknown } }>(
+    "/devices/:id/reading",
+    async (request, reply) => {
+      const { value } = request.body;
+      if (value === undefined) {
+        return reply.code(400).send({ error: "request body must include a 'value'" });
+      }
+
+      const device = await findDevice(request.params.id);
+      if (!device) {
+        return reply.code(404).send({ error: "device not found" });
+      }
+      if (!device.capabilities.readOnly) {
+        return reply
+          .code(400)
+          .send({ error: `device '${device.name}' is not read-only`, hint: "use PUT /devices/:id/auto instead" });
+      }
+
+      await dualDevicesModel.publishReading(device.id, value, "process");
+      return { status: "ok" };
+    },
+  );
+
   // Releases a device from MANUAL back to AUTO - the orchestrator's last
   // computed value takes over immediately.
   app.post<{ Params: { id: string } }>(

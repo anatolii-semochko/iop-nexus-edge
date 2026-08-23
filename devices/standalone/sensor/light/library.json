@@ -1,0 +1,5 @@
+{
+  "id": "device-light",
+  "name": "Light",
+  "description": "Raw photoresistor light-level reading - single Uint16 reading, uncalibrated, read-only."
+}
