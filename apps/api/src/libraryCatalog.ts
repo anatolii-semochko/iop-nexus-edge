@@ -14,8 +14,13 @@
 // same date - process *kinds* are a design-time catalog exactly like
 // device/node types, just sourced from a third folder; a process kind's
 // library.json is the same {id, name, description} shape). Private
-// plugins/ (a target project's own DNPs) has no nodes/-or-processes-
-// equivalent concept today - scanned flat as kind "device" only.
+// plugins/ (a target project's own DNPs, AGENTS.md section 31) mirrors
+// this with its own `plugins/devices/` (kind "device") and
+// `plugins/nodes/` (kind "node") subtrees, added 2026-08-24 once a real
+// consumer needed a fully private node type (not just a private device
+// type) - no private "processes" tree yet, since a process *kind*'s own
+// registration already happens at runtime via `plugins/<name>/process.ts`,
+// not through this design-time catalog.
 //
 // A folder is either:
 // - a leaf item (`library.json` present) - not recursed into further,
@@ -206,7 +211,8 @@ export async function syncLibrary(): Promise<{ categories: number; items: number
   await walk(path.join(config.apiPlugins.builtinDevicesDir, "nodes"), "nodes", "node", null, state);
   await walk(path.join(config.apiPlugins.builtinDevicesDir, "processes"), "processes", "process", null, state);
   if (config.apiPlugins.extraDir) {
-    await walk(config.apiPlugins.extraDir, "private", "device", null, state);
+    await walk(path.join(config.apiPlugins.extraDir, "devices"), "private/devices", "device", null, state);
+    await walk(path.join(config.apiPlugins.extraDir, "nodes"), "private/nodes", "node", null, state);
   }
 
   // Delete rows for folders that no longer exist (moved/renamed/removed

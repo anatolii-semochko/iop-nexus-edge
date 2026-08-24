@@ -43,7 +43,8 @@ const METRIC_ROWS = [
 const zoneFor = (value, min, max, warnMin, warnMax) => {
   if (value === undefined) return 'normal'
   if ((min !== undefined && value < min) || (max !== undefined && value > max)) return 'error'
-  if ((warnMin !== undefined && value < warnMin) || (warnMax !== undefined && value > warnMax)) return 'warning'
+  if ((warnMin !== undefined && value < warnMin) || (warnMax !== undefined && value > warnMax))
+    return 'warning'
   return 'normal'
 }
 
@@ -63,13 +64,15 @@ const zoneFor = (value, min, max, warnMin, warnMax) => {
  * temperature-control already established (AGENTS_TO_DO.md, 2026-07-29
  * "chistiy proekt"): the device/node *types* stay in core's public
  * Library, a target project owns the real instance's behavior, but this
- * *panel* stays here in core's KIND_PANELS, matching temperature-control's
- * own TemperatureProcessPanel.jsx precedent exactly.
+ * *panel* stays here, registered into core's own processTypeRegistry
+ * (builtinProcessTypes.js), matching temperature-control's own
+ * TemperatureProcessPanel.jsx precedent exactly.
  */
 const ControlNodePanel = ({ process, onConfigChange }) => {
   const live = useProcessLiveState(process.id)
   const metrics = live.metrics ?? process.metrics
-  const hasHumidity = process.config.humidityDeviceId !== undefined && process.config.humidityDeviceId !== null
+  const hasHumidity =
+    process.config.humidityDeviceId !== undefined && process.config.humidityDeviceId !== null
 
   const handleCommit = async (field, value) => {
     const result = await api.setProcessConfig(process.id, { [field]: value })
@@ -80,67 +83,74 @@ const ControlNodePanel = ({ process, onConfigChange }) => {
 
   return (
     <div className="p-3 pt-0">
-      {rows.map(({ key, label, unit, minKey, maxKey, warnMinKey, warnMaxKey, stepperMin, stepperMax }) => {
-        const value = metrics?.[key]
-        const min = process.config[minKey]
-        const max = process.config[maxKey]
-        const warnMin = process.config[warnMinKey]
-        const warnMax = process.config[warnMaxKey]
-        const zone = zoneFor(value, min, max, warnMin, warnMax)
-        return (
-          <CRow key={key} className="align-items-center g-4 mb-2">
-            <CCol xs="auto" style={{ width: '9rem' }}>
-              <div className="text-body-secondary small">{label}</div>
-              <div
-                className={`d-inline-block ${zone === 'normal' ? '' : `${wemBadgeClass(zone)} px-2`}`}
-                style={{ fontSize: '1.9rem', fontWeight: 600, lineHeight: 1, whiteSpace: 'nowrap' }}
-              >
-                {value !== undefined ? `${value.toFixed(1)}${unit}` : '-'}
-              </div>
-            </CCol>
-            <CCol xs="auto">
-              <div className="text-body-secondary small">Warning Min{unit}</div>
-              <NumericStepper
-                value={warnMin ?? stepperMin}
-                step={1}
-                min={stepperMin}
-                max={stepperMax}
-                onCommit={(v) => handleCommit(warnMinKey, v)}
-              />
-            </CCol>
-            <CCol xs="auto">
-              <div className="text-body-secondary small">Warning Max{unit}</div>
-              <NumericStepper
-                value={warnMax ?? stepperMax}
-                step={1}
-                min={stepperMin}
-                max={stepperMax}
-                onCommit={(v) => handleCommit(warnMaxKey, v)}
-              />
-            </CCol>
-            <CCol xs="auto">
-              <div className="text-body-secondary small">Error Min{unit}</div>
-              <NumericStepper
-                value={min ?? stepperMin}
-                step={1}
-                min={stepperMin}
-                max={stepperMax}
-                onCommit={(v) => handleCommit(minKey, v)}
-              />
-            </CCol>
-            <CCol xs="auto">
-              <div className="text-body-secondary small">Error Max{unit}</div>
-              <NumericStepper
-                value={max ?? stepperMax}
-                step={1}
-                min={stepperMin}
-                max={stepperMax}
-                onCommit={(v) => handleCommit(maxKey, v)}
-              />
-            </CCol>
-          </CRow>
-        )
-      })}
+      {rows.map(
+        ({ key, label, unit, minKey, maxKey, warnMinKey, warnMaxKey, stepperMin, stepperMax }) => {
+          const value = metrics?.[key]
+          const min = process.config[minKey]
+          const max = process.config[maxKey]
+          const warnMin = process.config[warnMinKey]
+          const warnMax = process.config[warnMaxKey]
+          const zone = zoneFor(value, min, max, warnMin, warnMax)
+          return (
+            <CRow key={key} className="align-items-center g-4 mb-2">
+              <CCol xs="auto" style={{ width: '9rem' }}>
+                <div className="text-body-secondary small">{label}</div>
+                <div
+                  className={`d-inline-block ${zone === 'normal' ? '' : `${wemBadgeClass(zone)} px-2`}`}
+                  style={{
+                    fontSize: '1.9rem',
+                    fontWeight: 600,
+                    lineHeight: 1,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {value !== undefined ? `${value.toFixed(1)}${unit}` : '-'}
+                </div>
+              </CCol>
+              <CCol xs="auto">
+                <div className="text-body-secondary small">Warning Min{unit}</div>
+                <NumericStepper
+                  value={warnMin ?? stepperMin}
+                  step={1}
+                  min={stepperMin}
+                  max={stepperMax}
+                  onCommit={(v) => handleCommit(warnMinKey, v)}
+                />
+              </CCol>
+              <CCol xs="auto">
+                <div className="text-body-secondary small">Warning Max{unit}</div>
+                <NumericStepper
+                  value={warnMax ?? stepperMax}
+                  step={1}
+                  min={stepperMin}
+                  max={stepperMax}
+                  onCommit={(v) => handleCommit(warnMaxKey, v)}
+                />
+              </CCol>
+              <CCol xs="auto">
+                <div className="text-body-secondary small">Error Min{unit}</div>
+                <NumericStepper
+                  value={min ?? stepperMin}
+                  step={1}
+                  min={stepperMin}
+                  max={stepperMax}
+                  onCommit={(v) => handleCommit(minKey, v)}
+                />
+              </CCol>
+              <CCol xs="auto">
+                <div className="text-body-secondary small">Error Max{unit}</div>
+                <NumericStepper
+                  value={max ?? stepperMax}
+                  step={1}
+                  min={stepperMin}
+                  max={stepperMax}
+                  onCommit={(v) => handleCommit(maxKey, v)}
+                />
+              </CCol>
+            </CRow>
+          )
+        },
+      )}
     </div>
   )
 }

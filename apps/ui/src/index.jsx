@@ -5,6 +5,8 @@ import 'core-js'
 
 import './builtinDeviceTypes'
 import './pluginDeviceTypes'
+import './builtinProcessTypes'
+import './pluginProcessTypes'
 import App from './App'
 import store from './store'
 

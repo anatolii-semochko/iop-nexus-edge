@@ -14,7 +14,7 @@ import {
   CSpinner,
 } from '@coreui/react'
 import { api } from '../../api/client'
-import WeatherZonesSection from './WeatherZonesSection'
+import { processSettingsSections, processSettingsConfigFields } from '../../processTypeRegistry'
 
 // One checkbox section - fetches this process's current membership in
 // `items` (Tab Groups or Message Casting Groups, whichever `entity`
@@ -91,83 +91,6 @@ const GroupCheckboxSection = ({ title, items, fetchSelected, selectedIds, onChan
   )
 }
 
-// Per-kind extra section, rendered below the standard Tab Groups/Message
-// Casting Groups pair (AGENTS_TO_DO.md, 2026-08-02 - "один основний
-// попап з конфігом... загальні стандартні опції, а після того блок
-// унікальних для процесу опцій"). A plain kind->component map, same
-// dispatch idiom ProcessesTable.jsx's own KIND_PANELS already uses. Two
-// entries as of 2026-08-23 (weather-control's own WeatherZonesSection
-// joined this one) - EXTRA_CONFIG_FIELD below is what lets handleSave
-// stay generic across however many of these end up existing.
-// Owns its own slots state, initialized straight from `process.config.
-// slots` - safe as a plain useState initializer (no effect needed)
-// because this component only ever renders inside the `visible &&
-// process &&` block below, so it mounts fresh every time the modal
-// opens, same as GroupCheckboxSection above. Writes its latest value
-// into `extraConfigRef` from the CFormSelect's own onChange handler (a
-// ref write during a real event is always safe - unlike during render or
-// inside an effect body, both of which this codebase's stricter React
-// Compiler-era lint rules reject) so the parent's Save handler can read
-// the latest edited value on demand, without lifting this into parent
-// state (which would need an effect to reset on reopen, since the
-// parent itself never unmounts - see ProcessSettingsModal's own
-// `extraConfigRef` comment for why that's the one thing to avoid here).
-const AnnunciatorSlotsSection = ({ process, groups, extraConfigRef }) => {
-  const [slots, setSlots] = useState(process.config.slots ?? [])
-
-  const updateSlot = (index, messageGroupId) => {
-    const next = slots.map((s, i) => (i === index ? { ...s, messageGroupId } : s))
-    setSlots(next)
-    extraConfigRef.current = next
-  }
-
-  return (
-    <div className="mb-3">
-      <div className="text-body-secondary small mb-2">Alarm Annunciator - slot bindings</div>
-      {slots.map((slot, index) => (
-        <CRow key={index} className="align-items-center g-2 mb-2">
-          <CCol xs="3">
-            <div className="text-body-secondary small">Slot {index + 1}</div>
-          </CCol>
-          <CCol>
-            <CFormSelect
-              size="sm"
-              value={slot.messageGroupId ?? ''}
-              onChange={(e) =>
-                updateSlot(index, e.target.value === '' ? null : Number(e.target.value))
-              }
-            >
-              <option value="">Not bound</option>
-              {groups.map((group) => (
-                <option key={group.id} value={group.id}>
-                  {group.name}
-                </option>
-              ))}
-            </CFormSelect>
-          </CCol>
-        </CRow>
-      ))}
-    </div>
-  )
-}
-
-const EXTRA_SETTINGS_SECTIONS = {
-  'alarm-annunciator': AnnunciatorSlotsSection,
-  // Node Weather Control.txt / AGENTS_TO_DO.md 2026-08-23 - zone
-  // boundaries/colors for the derived light-level classification, same
-  // "Config процесу" placement the spec asked for.
-  'weather-control': WeatherZonesSection,
-}
-
-// Which process.config field each EXTRA_SETTINGS_SECTIONS entry stages
-// its edits into, read back by handleSave below - a plain kind->field
-// map since AnnunciatorSlotsSection/WeatherZonesSection each own exactly
-// one config field.
-const EXTRA_CONFIG_FIELD = {
-  'alarm-annunciator': 'slots',
-  'weather-control': 'zones',
-}
-
 /**
  * Per-process Settings popup (AGENTS.md section 22) - opened from the
  * first action button on a process's row. Standard sections first (Tab
@@ -175,7 +98,7 @@ const EXTRA_CONFIG_FIELD = {
  * this process CASTS its WEM into, AGENTS_TO_DO.md 2026-08-02 rename
  * disambiguating from the not-yet-built inverse "Message Receiving
  * Groups" some future process kinds will have), then one optional
- * kind-specific block below (`EXTRA_SETTINGS_SECTIONS`) - single popup
+ * kind-specific block below (`processSettingsSections`, processTypeRegistry.js) - single popup
  * per process, not a separate kind-specific modal (AGENTS_TO_DO.md,
  * 2026-08-02 - Alarm Annunciator's own slot-binding UI used to be a
  * second modal opened from the expanded panel; consolidated here).
@@ -205,8 +128,8 @@ const ProcessSettingsModal = ({ visible, onClose, process, tabGroups, messageGro
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
 
-  const ExtraSection = process && EXTRA_SETTINGS_SECTIONS[process.kind]
-  const extraConfigField = process && EXTRA_CONFIG_FIELD[process.kind]
+  const ExtraSection = process && processSettingsSections[process.kind]
+  const extraConfigField = process && processSettingsConfigFields[process.kind]
 
   const handleClose = () => {
     extraConfigRef.current = null
@@ -221,7 +144,9 @@ const ProcessSettingsModal = ({ visible, onClose, process, tabGroups, messageGro
         api.setProcessTabGroups(process.id, [...selectedTabGroupIds]),
         api.setProcessMessageGroups(process.id, [...selectedMessageGroupIds]),
       ]
-      if (ExtraSection && extraConfigField) {
+      if (ExtraSection && extraConfigField === '*') {
+        writes.push(api.setProcessConfig(process.id, extraConfigRef.current ?? {}))
+      } else if (ExtraSection && extraConfigField) {
         writes.push(
           api.setProcessConfig(process.id, {
             [extraConfigField]: extraConfigRef.current ?? process.config[extraConfigField],

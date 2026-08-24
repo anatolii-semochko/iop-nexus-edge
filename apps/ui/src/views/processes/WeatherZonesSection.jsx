@@ -36,9 +36,9 @@ const boundaryRange = (zones, index) => {
  * "accept current value" button per boundary, and a color picker per
  * zone.
  *
- * Staged locally exactly like ProcessSettingsModal.jsx's own
- * AnnunciatorSlotsSection (that file's EXTRA_SETTINGS_SECTIONS
- * precedent) - edits only reach
+ * Staged locally exactly like AnnunciatorSlotsSection.jsx (both
+ * registered into processTypeRegistry.js's own processSettingsSections)
+ * - edits only reach
  * `process.config.zones` when the modal's own Save button runs, via
  * `extraConfigRef`; Cancel/close just discards this component's local
  * state.

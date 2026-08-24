@@ -3006,7 +3006,12 @@ special-casing "official" vs "private" anywhere below.
   would work too, for a target project wanting tighter integration) but
   the plugin loader above is the recommended path - it needs no
   npm package/Dockerfile of the target project's own, matching every
-  other extension point's low ceremony.
+  other extension point's low ceremony. `apiClient`'s own generic
+  `request<T>(path, options)` (added section 71) is a plugin's own way to
+  reach its private API routes (the point above) - the same `request()`
+  every already-typed `apiClient` method already uses internally, rather
+  than adding a one-off typed method here for each private route as it
+  comes up.
 - **`apps/ui`'s `deviceTypeRegistry`** (`src/deviceTypeRegistry.js`) -
   plain objects `deviceControls`/`deviceSimulators`, written to via
   `registerControl`/`registerSimulator`, read via bracket access
@@ -3017,6 +3022,13 @@ special-casing "official" vs "private" anywhere below.
   side-effect, from `index.jsx`); a target project's own types register
   the same way from its own `plugins/*/ui/register.js` - see the UI
   point below for how that file gets bundled in at all.
+- **`apps/ui`'s `processTypeRegistry`** (`src/processTypeRegistry.js`,
+  added section 71) - the process-kind sibling of `deviceTypeRegistry`
+  above, same shape: `processPanels`/`processSettingsSections`/
+  `processSettingsConfigFields`, `registerPanel`/`registerSettingsSection`,
+  built-ins from `builtinProcessTypes.js`, a target project's own kinds
+  from the SAME `plugins/*/ui/register.js` file device types use (one
+  file can call both registries).
 - **`apps/api`'s command-API plugin loader** (`src/apiPlugins.ts`,
   `loadApiPlugins()`) - recursively scans `config.apiPlugins.
   builtinDevicesDir` (`/workspace/devices`, Library - `devices/` is
@@ -3032,6 +3044,27 @@ special-casing "official" vs "private" anywhere below.
   `app.register()` - same shape every `routes/*.ts` in this app already
   exports. Only needed when the generic Device API (write/auto/simulate)
   and Process API aren't enough; nothing in the Library needs one today.
+  A target project's own private route can't reach this repo's own
+  `apps/api/src/db.ts` `pool` via a relative import (loaded via a plain
+  runtime `import()` from an arbitrary on-disk path, same as
+  `process.ts` below) - `loadApiPlugins()` passes its own already-open
+  shared `pool` as the plugin's own Fastify `opts` instead
+  (`app.register(mod.default, { pool })`), the same "receive
+  dependencies as arguments, don't import them" reasoning
+  `process.ts`'s own `apiClient`/`logger` injection already uses
+  (section 71) - a bare `import { Pool } from "pg"` from that file's own
+  on-disk location fails at runtime regardless (`ERR_MODULE_NOT_FOUND` -
+  `pg` is only hoisted under this package's own `node_modules`).
+- **`apps/api`'s Library Catalog private node-type packages**
+  (`src/libraryCatalog.ts`'s `syncLibrary()`, added section 71) - a
+  target project's own `plugins/devices/<type>/` and `plugins/nodes/
+  <type>/` (full packages - `node.yaml`/`library.json`/`icon.svg`/
+  `firmware/` for the node case) sync into `library_items` the same way
+  this repo's own `devices/standalone/`/`devices/nodes/` do, kind
+  `"device"`/`"node"` respectively - `library_items.id` (not
+  `folder_path`) is the `ON CONFLICT` key, so a package that moves
+  between a public and private location updates its existing row rather
+  than duplicating one.
 - **`apps/device-service`'s `EXTRA_RES_DIR`**
   (`internal/extrares/extrares.go`, `Merge()`) - the EdgeX SDK's
   `Device.ProfilesDir`/`DevicesDir` config keys are each exactly one
@@ -6385,7 +6418,52 @@ visible in the collapsed row, the Value table, and the header's own
 Simulation badge context all at once; clicked `+` once afterward and
 confirmed it stepped by exactly 50 (`1200` -> `1250`), the configured
 per-device step, not a hardcoded default.
-## 68. `devices.name` uniqueness narrowed from global to per-node
+
+## 68. DevSimulator.jsx - two generic crashes in the per-type generic fallback, found live wiring a private String-valued Device type
+
+2026-08-23, live-verifying a private target project's own new Device
+types (a writable String-valued actuator type and a readOnly Uint32
+counter type, both target-project-private per section 31's own
+extension points - no such type exists in this library itself).
+`apps/ui/src/views/devices/DevSimulator.jsx` lists every virtual Device
+across the whole fleet and, absent a per-type `CustomSimulator`
+registration, falls back to a generic renderer keyed on `valueType` -
+that fallback had never been exercised against a String-valued or
+integer-valued Device before, and broke in two independent ways:
+
+- The generic fallback only branched on `Bool` vs. "else `NumericStepper`"
+  - `NumericStepper`'s own `Number(value)` on a real string is `NaN`,
+    and `NaN !== NaN` is always `true` in JS, so its own render-time
+    state-sync (`if (current !== syncedCurrent) { setSyncedCurrent(...);
+    setText(...) }` - the documented React pattern for "adjust state
+    when a prop changes") never stabilizes and calls `setState` on every
+    single render forever - "Too many re-renders" (React error #301),
+    crashing the entire page, not just one row. Fixed with a dedicated
+    branch keyed on the Device's *runtime* value type (`typeof
+    currentValue === 'string'`), not its `valueType` field alone -
+    `light-level` (section 66, a computed Device with no EdgeX backend
+    at all) turned out to have `valueType: null` despite its value
+    genuinely being a string (`"medium"`), which `detail.valueType ===
+    'String'` alone missed. A readOnly string (computed Devices like
+    `light-level`) renders as plain text, since there is nothing to
+    write back to for a derived value; a writable one renders an
+    editable text input.
+  - The generic `NumericStepper` fallback also hardcoded `step={0.5}`
+    for every remaining (non-Bool, non-string) Device - fine while
+    `Float32` was the only numeric `valueType` in the library, but any
+    `Uint32` Device (e.g. `heartbeat`) rejects a fractional write
+    (`strconv.ParseUint: parsing "0.5": invalid syntax`, EdgeX's own
+    error). Fixed by deriving the step from the Device's own
+    `capabilities.step` first, falling back to `1` for any integer
+    `valueType` (`/^u?int/i` - `Uint16`/`Uint32`/`Int32`/etc.) and `0.5`
+    only for genuinely fractional types.
+
+Both confirmed fixed live: Dev Simulator renders a String-valued Device
+(editable text input) and an integer-valued Device (now-integer stepper,
+no more EdgeX rejection) without crashing, alongside `light-level`'s own
+plain-text cell (readOnly, string, no EdgeX backend).
+
+## 69. `devices.name` uniqueness narrowed from global to per-node
 
 2026-08-23. Reported inconvenient directly: `name` had a plain global
 UNIQUE constraint (`devices_name_key`, the original column-level
@@ -6436,7 +6514,7 @@ devices (`node_id IS NULL`) with the same name still correctly reject
 (`devices_name_unique_standalone` violation) - all three cases confirmed
 in a rolled-back transaction, no lasting test data left behind.
 
-## 69. `nodes.seed_key` - target-project seed migrations no longer duplicate a Node on every `migrate-extra` re-run
+## 70. `nodes.seed_key` - target-project seed migrations no longer duplicate a Node on every `migrate-extra` re-run
 
 2026-08-23, same day as §69, surfaced investigating a user report of
 stale duplicate nodes in `nexus-edge-aquarium`'s own DB
@@ -6501,3 +6579,116 @@ idempotency confirmed, not just reasoned about. `processes` GET
 afterward confirmed every affected process still resolves its
 `nodeId`/device references correctly and remains non-critical.
 
+## 71. Extension points (section 31) extended: private node-type Library packages, private process-kind UI panels
+
+2026-08-24. A target project's own node-type/business-domain content had
+been leaking into this repo's own `devices/nodes/` and `apps/ui/src/
+views/processes/` because two of section 31's five extension points
+didn't actually exist yet when that content was first built - discovered
+relocating a private target project's own node types + process-kind UI
+out of core, confirming they belonged there in the first place. Both
+gaps are now closed, generically, not specific to whichever project
+first needed them:
+
+**Private node-type Library packages** - `libraryCatalog.ts`'s own
+`syncLibrary()` previously walked `config.apiPlugins.extraDir` flat, kind
+`"device"` only (a target project's own `plugins/<name>/library.json`
+files, sourced from the SAME `plugins/` directory `EXTRA_API_PLUGINS_DIR`
+already mounts for `process.ts`/`api.ts`/`ui/register.js`). A private
+NODE type (`node.yaml` + `library.json` + `icon.svg` + `firmware/`) had
+no equivalent - core's own `devices/nodes/` was the only tree
+`syncLibrary()` ever scanned for kind `"node"`. Fixed by restructuring
+the private walk to mirror core's own `standalone/`/`nodes/` split:
+`extraDir/devices/` (kind `"device"`) and `extraDir/nodes/` (kind
+`"node"`), both using the exact same `walk()`/`findIcon()`/`upsertItem()`
+machinery core's own trees already use - `library_items.id` (the
+library.json's own `id` field, not `folder_path`) is the `ON CONFLICT`
+key, so an already-seeded Node's live DB row (its `nodes.type` join
+target) updates in place when its Library package moves from core's
+`devices/nodes/<type>/` to a private `plugins/nodes/<type>/`, rather than
+duplicating. Zero prior consumers of the old flat device-only private
+walk existed anywhere (checked both target projects), so this
+restructuring needed no migration/back-compat shim.
+
+**Private process-kind UI panels** - `ProcessesTable.jsx`'s expandable-
+detail dispatch (`KIND_PANELS`) and `ProcessSettingsModal.jsx`'s
+kind-specific Settings-popup section (`EXTRA_SETTINGS_SECTIONS`/
+`EXTRA_CONFIG_FIELD`) were both hardcoded object literals living in this
+repo's own UI source, directly importing every kind's panel/section
+component by name - including a target project's own process kinds,
+which had no path to register a panel without editing these two core
+files. New `processTypeRegistry.js` (`processPanels`/
+`processSettingsSections`/`processSettingsConfigFields`, plain objects
+read via bracket access - same "avoid react-hooks/static-components"
+reasoning `deviceTypeRegistry.js` already documents) plus
+`builtinProcessTypes.js` (core's own kinds, mirroring
+`builtinDeviceTypes.js`) and `pluginProcessTypes.js` (`import.meta.glob(
+'plugins/*/ui/register.js', { eager: true })` - deliberately the SAME
+glob pattern `pluginDeviceTypes.js` already uses, not a second file
+convention; a target project's one `register.js` can call
+`deviceTypeRegistry.*` and/or `processTypeRegistry.*` as needed, ES
+module caching means importing the same file from two glob call sites
+still only runs its side effects once). `ProcessesTable.jsx`/
+`ProcessSettingsModal.jsx` now read `processPanels`/
+`processSettingsSections`/`processSettingsConfigFields` instead of
+owning the maps themselves - `control-node`/`weather-control` (this
+repo's own node types, runner lives in a target project) still register
+their panel here via `builtinProcessTypes.js`, same as before, just
+through the registry instead of a literal map entry.
+
+**A private plugin reaching core's own shared modules, and even core's
+own third-party packages, turned out to need real fixes on every side -
+none of this had ever been exercised by a real file before**:
+
+- UI-side (`apps/ui`), reaching core's own JS module tree: a target
+  project's own `plugins/*/ui/*.jsx` is compiled into the SAME Vite
+  bundle as core's own source (via `additional_contexts` in that
+  project's own Dockerfile) - the pre-existing `find: 'src/',
+  replacement: apps/ui/src/` alias (`vite.config.mjs`, previously unused
+  by anything) lets a plugin file `import { processTypeRegistry } from
+  'src/processTypeRegistry'` and reach core's own module tree despite
+  living outside it.
+- UI-side, reaching a third-party package (`@coreui/*`): a **second,
+  independent** resolution gap, found live the moment a real
+  `plugins/*/ui/register.js` file finally existed to exercise it -
+  `pluginDeviceTypes.js`'s own `import.meta.glob('plugins/*/ui/
+  register.js', ...)` had zero real consumers in any target project
+  before this, so this exact failure mode (a glob-discovered file
+  outside `apps/ui`'s own package importing a bare `@coreui/react`)
+  had simply never been built before. Confirmed live:
+  `@coreui/react`/`@coreui/icons`/`@coreui/icons-react` only exist as
+  symlinks under `apps/ui`'s own `node_modules` (`ls
+  /workspace/node_modules/@coreui` - not found; `/workspace/apps/ui/
+  node_modules/@coreui` - three symlinks into `.pnpm`), never hoisted to
+  the workspace root a glob-discovered file's own upward Node resolution
+  would reach - same root cause `react` itself was already pinned for,
+  just never extended to `@coreui/*` since nothing had needed it. Fixed
+  with three more `vite.config.mjs` aliases, same shape as the existing
+  `react`/`react/` pair.
+- API-side (`apps/api`), reaching core's own `pool` (`db.ts`) AND a
+  third-party package (`pg`) at once: a private `plugins/*/api.ts` is
+  loaded via a plain runtime `import()` from an arbitrary on-disk path
+  (`apiPlugins.ts`) - Node's own relative-import resolution would never
+  reach back into `db.ts` from a file living outside that package, and
+  (confirmed live, same class of bug as `@coreui/*` above)
+  `import { Pool } from "pg"` throws `ERR_MODULE_NOT_FOUND` at runtime
+  for the same reason - `pg` is only hoisted under `apps/api`'s own
+  `node_modules`. Vite's alias mechanism has no runtime-`import()`
+  equivalent, so the fix here is different in kind, not just in name:
+  `loadApiPlugins()` now passes its own already-open shared `pool` as
+  the plugin's own Fastify `opts`
+  (`app.register(mod.default, { pool })`) - a plugin's default export
+  signature is now `(app, { pool }) => Promise<void>`, receiving the
+  dependency as an argument rather than importing it at all, the exact
+  same "receive dependencies as arguments" reasoning `process.ts`'s own
+  `apiClient`/`logger` injection (`processPlugins.ts`) already
+  established - one shared pool, not a second connection pool per
+  plugin.
+- Orchestrator-side (`apps/orchestrator`), reaching a private route: a
+  private process kind reaches its own private API routes via
+  `apiClient`'s own new generic `request<T>(path, options)` escape
+  hatch, added alongside every already-typed method rather than adding
+  a one-off typed method for each private route as it comes up - no
+  resolution problem here, since `process.ts` already received
+  `apiClient` as a function argument rather than importing it (the
+  precedent the two fixes above both cite).

@@ -9,7 +9,11 @@
  */
 const BASE = '/api'
 
-async function request(path, options = {}) {
+// Exported (AGENTS.md section 31) - lets a target project's own private
+// UI (plugins/*/ui/*, reached via the `src/` alias) call its own private
+// API routes (plugins/*/api.ts) the same way every method on `api` below
+// already does, without needing those routes added to this shared object.
+export async function request(path, options = {}) {
   // FormData (avatar upload) needs the browser to set its own multipart
   // boundary in Content-Type - never set it ourselves for that case.
   const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData

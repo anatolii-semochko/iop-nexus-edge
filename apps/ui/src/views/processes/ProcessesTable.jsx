@@ -27,42 +27,9 @@ import TablePagination from '../../components/table/TablePagination'
 import TableSearchInput from '../../components/table/TableSearchInput'
 import { useExpandableRows } from '../../hooks/useExpandableRows'
 import { usePagination } from '../../hooks/usePagination'
-import ActiveBuzzerPanel from './ActiveBuzzerPanel'
-import AnnunciatorPanel from './AnnunciatorPanel'
-import ControlNodePanel from './ControlNodePanel'
-import DataLoggerPanel from './DataLoggerPanel'
-import HeartbeatControlPanel from './HeartbeatControlPanel'
-import HeartbeatControlTestPanel from './HeartbeatControlTestPanel'
+import { processPanels } from '../../processTypeRegistry'
 import ProcessSettingsModal from './ProcessSettingsModal'
-import ResourceMonitorPanel from './ResourceMonitorPanel'
-import TemperatureProcessPanel from './TemperatureProcessPanel'
-import WeatherControlPanel from './WeatherControlPanel'
 import WemRow from './WemRow'
-
-// process.kind -> its expandable detail component (AGENTS.md section 10).
-// Same plain-map approach as DEVICE_TYPE_SIMULATORS/DEVICE_TYPE_CONTROLS in
-// the Devices pages - temperature-control/-monitor share one panel,
-// resource-monitor (section 21) has its own, active-buzzer (Active Zummer
-// section) has its own.
-export const KIND_PANELS = {
-  'temperature-control': TemperatureProcessPanel,
-  'temperature-monitor': TemperatureProcessPanel,
-  'heartbeat-control': HeartbeatControlPanel,
-  'heartbeat-control-test': HeartbeatControlTestPanel,
-  'resource-monitor': ResourceMonitorPanel,
-  'active-buzzer': ActiveBuzzerPanel,
-  'data-logger': DataLoggerPanel,
-  'alarm-annunciator': AnnunciatorPanel,
-  // Runner lives in the target project (nexus-edge-aquarium's own
-  // plugins/control-node/process.ts), panel stays here - same
-  // temperature-control split (AGENTS_TO_DO.md, 2026-08-09 "НОДА
-  // КОНТРОЛЮ").
-  'control-node': ControlNodePanel,
-  // Runner lives in a target project's own plugins/weather-control/
-  // process.ts, panel stays here - same split as control-node above
-  // (Node Weather Control.txt, AGENTS_TO_DO.md 2026-08-23).
-  'weather-control': WeatherControlPanel,
-}
 
 const statusColor = (status) => (status === 'on' ? 'success' : 'secondary')
 
@@ -167,7 +134,7 @@ const ProcessRow = ({
     }
   }
 
-  const Panel = KIND_PANELS[process.kind]
+  const Panel = processPanels[process.kind]
   // Messages now render *inside* the expanded detail panel itself (its
   // last piece, after Panel's own content - see WemRow.jsx), not as their
   // own always-visible row - so they can no longer make the collapsed
@@ -361,9 +328,9 @@ const ProcessesTable = ({
 
   // "Expand/collapse all" (ExpandAllToggleButton, in the header) only ever
   // considers the current page's rows that actually have a panel
-  // (KIND_PANELS) - toggling doesn't touch rows on other pages, matching
+  // (processPanels) - toggling doesn't touch rows on other pages, matching
   // what's actually visible.
-  const expandableIds = pageItems.filter((p) => KIND_PANELS[p.kind]).map((p) => p.id)
+  const expandableIds = pageItems.filter((p) => processPanels[p.kind]).map((p) => p.id)
 
   const hasActiveFilters =
     (filters.search && Boolean(search)) ||

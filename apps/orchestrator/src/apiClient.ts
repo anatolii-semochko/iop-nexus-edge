@@ -351,4 +351,10 @@ export const apiClient = {
   // /devices/:id/log.
   logDeviceReading: (deviceId: number) =>
     request<{ status: string; value: unknown }>(`/devices/${deviceId}/log`, { method: "POST" }),
+  // Generic escape hatch (AGENTS.md section 31) - a target project's own
+  // process plugin (nexus-edge-aquarium's plugins/*/process.ts) can reach
+  // its own private API routes (plugins/*/api.ts) this way, the same
+  // `request()` every typed method above already uses, without needing
+  // those routes added to this shared object.
+  request: <T = unknown>(path: string, options?: RequestInit) => request<T>(path, options),
 };

@@ -7,6 +7,7 @@ import {
   CCardBody,
   CCardHeader,
   CFormCheck,
+  CFormInput,
   CSpinner,
   CTable,
   CTableBody,
@@ -168,10 +169,39 @@ const DeviceSimulatorRow = ({ device, onError }) => {
             disabled={busy}
             onChange={(e) => handleWrite(e.target.checked)}
           />
+        ) : typeof currentValue === 'string' ? (
+          // NumericStepper's `Number(value)` on real text is NaN, and NaN
+          // never equals itself - the `current !== syncedCurrent` render-time
+          // sync below would then setState on every single render, an
+          // infinite loop (crashes this whole page). Checked on the actual
+          // runtime value, not `detail.valueType`: a computed/derived
+          // sensor (e.g. `light-level`'s own "low"/"medium"/"high", AGENTS.md
+          // section 44) has no EdgeX device behind it at all, so its
+          // `valueType` comes back `null` even though its value is a string -
+          // `detail.valueType === 'String'` alone missed that case.
+          detail.capabilities?.readOnly ? (
+            <span className="text-body-secondary">{currentValue}</span>
+          ) : (
+            <CFormInput
+              size="sm"
+              defaultValue={currentValue ?? ''}
+              disabled={busy}
+              onBlur={(e) => handleWrite(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.currentTarget.blur()
+              }}
+            />
+          )
         ) : (
           <NumericStepper
             value={currentValue}
-            step={0.5}
+            // An integer valueType (Uint32 heartbeat, Int32, Uint16...)
+            // rejects a fractional write - EdgeX's own
+            // strconv.ParseUint/ParseInt errors on "0.5". The hardcoded 0.5
+            // here predates every integer-valued device type this codebase
+            // has (Float32 was the only numeric type for a while); a
+            // device's own `capabilities.step` still wins when set.
+            step={detail.capabilities?.step ?? (/^u?int/i.test(detail.valueType ?? '') ? 1 : 0.5)}
             busy={busy}
             onCommit={(value) =>
               detail.capabilities?.readOnly ? handleSimulate(value) : handleWrite(value)

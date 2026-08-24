@@ -54,6 +54,29 @@ export default defineConfig(() => {
           find: /^react\//,
           replacement: `${path.resolve(__dirname, 'node_modules/react')}/`,
         },
+        // Same reasoning as react above, surfaced by the FIRST real
+        // plugins/*/ui/register.js consumer (AGENTS.md section 71) - a
+        // static `import X from 'devices/...'` in a file that already
+        // lives inside apps/ui's own package (e.g. builtinDeviceTypes.js)
+        // resolves @coreui/* fine, but a glob-discovered plugin file
+        // living entirely outside apps/ui's own package (plugins/ or
+        // devices/'s own ui/control/ui/simulator components, imported
+        // only via that glob) has no node_modules of its own to walk up
+        // to - confirmed empirically (@coreui/react/@coreui/icons/
+        // @coreui/icons-react only exist as symlinks under apps/ui's own
+        // node_modules, never hoisted to the workspace root).
+        {
+          find: /^@coreui\/react$/,
+          replacement: path.resolve(__dirname, 'node_modules/@coreui/react'),
+        },
+        {
+          find: /^@coreui\/icons-react$/,
+          replacement: path.resolve(__dirname, 'node_modules/@coreui/icons-react'),
+        },
+        {
+          find: /^@coreui\/icons$/,
+          replacement: path.resolve(__dirname, 'node_modules/@coreui/icons'),
+        },
       ],
       extensions: ['.mjs', '.js', '.ts', '.jsx', '.tsx', '.json', '.scss'],
     },
