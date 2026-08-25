@@ -233,7 +233,21 @@ const ProcessRow = ({
         process={process}
         tabGroups={tabGroups}
         messageGroups={messageGroups}
-        onSaved={onGroupsChange}
+        onSaved={() => {
+          // The popup can write both group membership (Tab/Message
+          // Groups) AND this process's own `config` (any kind's
+          // ExtraSection) in one Save - onGroupsChange alone only
+          // refreshed the former, leaving `processes` (this table's own
+          // data, sourced from a one-shot GET, not the live WS domain -
+          // config was deliberately left out of that push, AGENTS.md
+          // section 24) stale until an unrelated full reload happened to
+          // fire. Confirmed live: a Settings-popup config save survived
+          // even a hard page reload without this, since GET /processes
+          // itself was always fresh - only this component's own cached
+          // copy of it wasn't being asked to refetch.
+          onReload()
+          onGroupsChange()
+        }}
       />
     </>
   )
