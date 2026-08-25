@@ -42,6 +42,14 @@ const boundaryRange = (zones, index) => {
  * `process.config.zones` when the modal's own Save button runs, via
  * `extraConfigRef`; Cancel/close just discards this component's local
  * state.
+ *
+ * `settingsTabs` (AGENTS_TO_DO.md 2026-08-25 "cosmetic improvements") -
+ * a single declared tab ("Configuration") is enough to split this kind's
+ * Settings popup into "System" (ProcessSettingsModal.jsx's own Tabs/
+ * Message Casting Groups, unchanged) + "Configuration" (this component's
+ * entire output) - see AquariumLightControlSettingsSection.jsx's own
+ * doc comment for the two/three-tab case this same mechanism also
+ * supports.
  */
 const WeatherZonesSection = ({ process, extraConfigRef }) => {
   const [zones, setZones] = useState(process.config.zones ?? defaultZones())
@@ -69,13 +77,37 @@ const WeatherZonesSection = ({ process, extraConfigRef }) => {
 
   return (
     <div className="mb-3">
-      <div className="text-body-secondary small mb-2">Light level zones</div>
+      {/* Per-zone color. */}
+      {zones.map((zone, index) => (
+        <CRow key={zone.key} className="align-items-center g-2 mb-1">
+          <CCol xs="4">
+            <div className="d-flex align-items-center gap-2">
+              <CIcon icon={LIGHT_LEVELS[index].icon} />
+              <span>{LIGHT_LEVELS[index].label}</span>
+            </div>
+          </CCol>
+          <CCol xs="auto">
+            <CFormInput
+              type="color"
+              size="sm"
+              style={{ width: '3rem', padding: '0.15rem' }}
+              value={zone.color}
+              onChange={(e) => updateColor(index, e.target.value)}
+            />
+          </CCol>
+        </CRow>
+      ))}
+
+      <div className="text-body-secondary small mt-3 mb-2">
+        Current raw light value: {rawLight !== undefined && rawLight !== null ? rawLight : '-'}
+        {currentZoneKey && ` (${LIGHT_LEVELS.find((l) => l.key === currentZoneKey)?.label})`}
+      </div>
 
       {/* Diagram - proportional colored segments across the raw light
           Device's own 0-4095 range, plus a dashed marker at its current
           value. */}
       <div
-        className="d-flex position-relative mb-2"
+        className="d-flex position-relative mb-3"
         style={{
           height: '2.5rem',
           borderRadius: '0.25rem',
@@ -117,34 +149,8 @@ const WeatherZonesSection = ({ process, extraConfigRef }) => {
           />
         )}
       </div>
-      <div className="text-body-secondary small mb-3">
-        Current raw light value: {rawLight !== undefined && rawLight !== null ? rawLight : '-'}
-        {currentZoneKey && ` (${LIGHT_LEVELS.find((l) => l.key === currentZoneKey)?.label})`}
-      </div>
-
-      {/* Per-zone color. */}
-      {zones.map((zone, index) => (
-        <CRow key={zone.key} className="align-items-center g-2 mb-1">
-          <CCol xs="4">
-            <div className="d-flex align-items-center gap-2">
-              <CIcon icon={LIGHT_LEVELS[index].icon} />
-              <span>{LIGHT_LEVELS[index].label}</span>
-            </div>
-          </CCol>
-          <CCol xs="auto">
-            <CFormInput
-              type="color"
-              size="sm"
-              style={{ width: '3rem', padding: '0.15rem' }}
-              value={zone.color}
-              onChange={(e) => updateColor(index, e.target.value)}
-            />
-          </CCol>
-        </CRow>
-      ))}
 
       {/* One boundary editor per border between adjacent zones. */}
-      <div className="text-body-secondary small mt-3 mb-2">Zone boundaries (raw light value)</div>
       {zones.slice(1).map((zone, i) => {
         const index = i + 1
         const [lower, upper] = boundaryRange(zones, index)
@@ -181,5 +187,9 @@ const WeatherZonesSection = ({ process, extraConfigRef }) => {
     </div>
   )
 }
+
+// Read by ProcessSettingsModal.jsx to split its popup into System/
+// Configuration instead of one flat scroll.
+WeatherZonesSection.settingsTabs = ['Configuration']
 
 export default WeatherZonesSection

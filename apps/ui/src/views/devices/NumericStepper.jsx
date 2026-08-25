@@ -184,7 +184,7 @@ const NumericStepper = ({
         size="sm"
         style={{ width: '4rem' }}
         value={editable ? text : format(current)}
-        disabled={!editable}
+        disabled={disabled || !editable}
         readOnly={!editable}
         onChange={editable ? (e) => setText(e.target.value) : undefined}
         onBlur={editable ? commitText : undefined}

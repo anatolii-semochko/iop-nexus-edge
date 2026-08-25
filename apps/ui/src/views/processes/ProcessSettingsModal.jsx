@@ -12,6 +12,9 @@ import {
   CModalTitle,
   CRow,
   CSpinner,
+  CTab,
+  CTabList,
+  CTabs,
 } from '@coreui/react'
 import { api } from '../../api/client'
 import { processSettingsSections, processSettingsConfigFields } from '../../processTypeRegistry'
@@ -113,6 +116,21 @@ const GroupCheckboxSection = ({ title, items, fetchSelected, selectedIds, onChan
  * current membership in each is fetched on open; the extra section's own
  * data (`process.config.slots`) is already on `process`, no separate
  * fetch needed.
+ *
+ * Settings tabs (opt-in, AGENTS_TO_DO.md 2026-08-25 "cosmetic
+ * improvements") - a kind whose own ExtraSection has grown too large for
+ * one flat scroll (Aquarium Light Control's first real case) can declare
+ * `ExtraSection.settingsTabs = ['Configuration', 'Channels']` (a plain
+ * static array on the component, no new registry needed) to split the
+ * popup into a "System" tab (this component's own Tabs/Message Casting
+ * Groups sections, unchanged) plus one tab per declared label, each
+ * rendered by the SAME ExtraSection instance (passed the active tab's
+ * lowercased label as `activeSettingsTab`, so it can pick which of its
+ * own pieces to show) - same "conditionally rendered, not CTabContent/
+ * CTabPanel" idiom `AquariumLightControlPanel.jsx`'s own tabs already
+ * use, so an inactive tab's own fetch/render doesn't run. A kind with no
+ * `settingsTabs` (every other kind today) renders exactly as before -
+ * no CTabs wrapper at all.
  */
 const ProcessSettingsModal = ({ visible, onClose, process, tabGroups, messageGroups, onSaved }) => {
   const [selectedTabGroupIds, setSelectedTabGroupIds] = useState(new Set())
@@ -127,12 +145,15 @@ const ProcessSettingsModal = ({ visible, onClose, process, tabGroups, messageGro
   const extraConfigRef = useRef(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
+  const [activeSettingsTab, setActiveSettingsTab] = useState('system')
 
   const ExtraSection = process && processSettingsSections[process.kind]
   const extraConfigField = process && processSettingsConfigFields[process.kind]
+  const settingsTabs = ExtraSection?.settingsTabs
 
   const handleClose = () => {
     extraConfigRef.current = null
+    setActiveSettingsTab('system')
     onClose()
   }
 
@@ -163,8 +184,29 @@ const ProcessSettingsModal = ({ visible, onClose, process, tabGroups, messageGro
     }
   }
 
+  const groupSections = (
+    <>
+      <GroupCheckboxSection
+        title="Tabs"
+        items={tabGroups}
+        fetchSelected={() => api.getProcessTabGroups(process.id)}
+        selectedIds={selectedTabGroupIds}
+        onChange={setSelectedTabGroupIds}
+        busy={busy}
+      />
+      <GroupCheckboxSection
+        title="Message Casting Groups"
+        items={messageGroups}
+        fetchSelected={() => api.getProcessMessageGroups(process.id)}
+        selectedIds={selectedMessageGroupIds}
+        onChange={setSelectedMessageGroupIds}
+        busy={busy}
+      />
+    </>
+  )
+
   return (
-    <CModal visible={visible} onClose={handleClose}>
+    <CModal visible={visible} onClose={handleClose} size="lg">
       <CModalHeader>
         <CModalTitle>{process?.name} settings</CModalTitle>
       </CModalHeader>
@@ -176,24 +218,38 @@ const ProcessSettingsModal = ({ visible, onClose, process, tabGroups, messageGro
             membership for a process nobody has opened Settings for yet.
             Unmounting on close is also what gives a reopen a fresh fetch,
             no separate loading-reset plumbing needed. */}
-        {visible && process && (
+        {visible && process && settingsTabs && (
           <>
-            <GroupCheckboxSection
-              title="Tabs"
-              items={tabGroups}
-              fetchSelected={() => api.getProcessTabGroups(process.id)}
-              selectedIds={selectedTabGroupIds}
-              onChange={setSelectedTabGroupIds}
-              busy={busy}
-            />
-            <GroupCheckboxSection
-              title="Message Casting Groups"
-              items={messageGroups}
-              fetchSelected={() => api.getProcessMessageGroups(process.id)}
-              selectedIds={selectedMessageGroupIds}
-              onChange={setSelectedMessageGroupIds}
-              busy={busy}
-            />
+            <CTabs activeItemKey={activeSettingsTab} onChange={setActiveSettingsTab}>
+              <CTabList variant="tabs" className="mb-3">
+                <CTab itemKey="system">System</CTab>
+                {settingsTabs.map((label) => (
+                  <CTab key={label} itemKey={label.toLowerCase()}>
+                    {label}
+                  </CTab>
+                ))}
+              </CTabList>
+            </CTabs>
+            {activeSettingsTab === 'system' && groupSections}
+            {/* ExtraSection stays mounted across a System <-> Configuration/
+                Channels round-trip (CSS-hidden, not unmounted) so its own
+                internal `useState` (staged edits) survives switching tabs -
+                unmounting and remounting would re-run that initializer
+                against the process's still-unsaved-on-the-server config,
+                silently discarding whatever the user had just typed. */}
+            <div style={{ display: activeSettingsTab === 'system' ? 'none' : undefined }}>
+              <ExtraSection
+                process={process}
+                groups={messageGroups}
+                extraConfigRef={extraConfigRef}
+                activeSettingsTab={activeSettingsTab}
+              />
+            </div>
+          </>
+        )}
+        {visible && process && !settingsTabs && (
+          <>
+            {groupSections}
             {ExtraSection && (
               <ExtraSection
                 process={process}
