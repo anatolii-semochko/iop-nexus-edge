@@ -7,6 +7,7 @@ import {
   CCard,
   CCardBody,
   CCardHeader,
+  CCol,
   CFormInput,
   CFormLabel,
   CFormSelect,
@@ -16,6 +17,7 @@ import {
   CModalFooter,
   CModalHeader,
   CModalTitle,
+  CRow,
   CSpinner,
   CTable,
   CTableBody,
@@ -168,7 +170,7 @@ const AddProcessModal = ({ item, visible, onClose, onCreated }) => {
 // the Library Catalog's categories are managed by moving folders in git,
 // not through this UI.
 const Breadcrumb = ({ trail, onNavigate }) => (
-  <div className="mb-3 d-flex align-items-center">
+  <div className="mb-2 d-flex align-items-center">
     <img
       src={upIcon}
       alt="Up"
@@ -308,30 +310,10 @@ const LibraryBrowser = () => {
     <CCard className="mb-4">
       <CCardHeader className="d-flex justify-content-between align-items-center">
         <strong>Library</strong>
-        <div className="d-flex align-items-center gap-2">
-          <CButtonGroup size="sm">
-            {KINDS.map((k) => (
-              <CButton
-                key={k.value}
-                color="primary"
-                variant={kind === k.value ? undefined : 'outline'}
-                onClick={() => handleKindChange(k.value)}
-              >
-                {k.label}
-              </CButton>
-            ))}
-          </CButtonGroup>
-          <CButton
-            color="secondary"
-            variant="outline"
-            size="sm"
-            onClick={handleSync}
-            disabled={syncing}
-          >
-            <CIcon icon={cilReload} className="me-1" />
-            {syncing ? 'Syncing...' : 'Sync'}
-          </CButton>
-        </div>
+        <CButton color="secondary" variant="outline" size="sm" onClick={handleSync} disabled={syncing}>
+          <CIcon icon={cilReload} className="me-1" />
+          {syncing ? 'Syncing...' : 'Sync'}
+        </CButton>
       </CCardHeader>
       <CCardBody>
         {error && <CAlert color="danger">{error}</CAlert>}
@@ -341,13 +323,29 @@ const LibraryBrowser = () => {
           </CAlert>
         )}
 
-        <div className="mb-3">
-          <TableSearchInput
-            value={search}
-            onSearch={setSearch}
-            placeholder={`Search ${kind === 'device' ? 'devices' : kind === 'node' ? 'nodes' : 'processes'} by name or description...`}
-          />
-        </div>
+        <CRow className="mb-3 g-2 align-items-center">
+          <CCol xs="auto">
+            <CButtonGroup size="sm">
+              {KINDS.map((k) => (
+                <CButton
+                  key={k.value}
+                  color="primary"
+                  variant={kind === k.value ? undefined : 'outline'}
+                  onClick={() => handleKindChange(k.value)}
+                >
+                  {k.label}
+                </CButton>
+              ))}
+            </CButtonGroup>
+          </CCol>
+          <CCol xs="auto">
+            <TableSearchInput
+              value={search}
+              onSearch={setSearch}
+              placeholder={`Search ${kind === 'device' ? 'devices' : kind === 'node' ? 'nodes' : 'processes'} by name or description...`}
+            />
+          </CCol>
+        </CRow>
 
         {!showingSearch && <Breadcrumb trail={breadcrumb} onNavigate={handleNavigate} />}
 
@@ -356,7 +354,7 @@ const LibraryBrowser = () => {
         ) : rows.length === 0 ? (
           <CAlert color="info">{showingSearch ? 'No matches.' : 'Nothing here yet.'}</CAlert>
         ) : (
-          <CTable hover responsive small>
+          <CTable hover responsive>
             <CTableHead>
               <CTableRow>
                 <CTableHeaderCell style={{ width: 40 }}></CTableHeaderCell>
