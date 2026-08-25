@@ -130,7 +130,7 @@ const HeartbeatControlPanel = () => {
   if (!entries) return <CSpinner size="sm" />
 
   return (
-    <div className="p-3 pt-0">
+    <div className="pt-0 pb-3 px-2">
       <CRow className="mb-3 g-2 align-items-center">
         <CCol xs="auto">
           <CFormSelect

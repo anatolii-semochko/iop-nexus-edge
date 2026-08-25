@@ -242,7 +242,7 @@ const DeviceDetailRow = ({
     effectivelySimulated && device.capabilities?.readOnly && typeof value === 'number'
   return (
     <div
-      className="p-3 pt-0"
+      className="pt-0 pb-3 px-2"
       style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',

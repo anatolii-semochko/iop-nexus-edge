@@ -82,7 +82,7 @@ const ControlNodePanel = ({ process, onConfigChange }) => {
   const rows = METRIC_ROWS.filter((row) => row.key !== 'humidity' || hasHumidity)
 
   return (
-    <div className="p-3 pt-0">
+    <div className="pt-0 pb-3 px-2">
       {rows.map(
         ({ key, label, unit, minKey, maxKey, warnMinKey, warnMaxKey, stepperMin, stepperMax }) => {
           const value = metrics?.[key]

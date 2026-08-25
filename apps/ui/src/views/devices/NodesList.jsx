@@ -53,7 +53,7 @@ const PERSISTED_DEFAULTS = {
 // допрацьовувати") - already have the full row object from the list, no
 // extra fetch needed.
 const NodeDetailRow = ({ node }) => (
-  <div className="p-3 pt-0">
+  <div className="pt-0 pb-3 px-2">
     <pre className="mb-0 small">{JSON.stringify(node, null, 2)}</pre>
   </div>
 )

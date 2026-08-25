@@ -179,7 +179,7 @@ const ProcessSettingsModal = ({ visible, onClose, process, tabGroups, messageGro
         {visible && process && (
           <>
             <GroupCheckboxSection
-              title="Tab Groups"
+              title="Tabs"
               items={tabGroups}
               fetchSelected={() => api.getProcessTabGroups(process.id)}
               selectedIds={selectedTabGroupIds}

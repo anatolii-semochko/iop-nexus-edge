@@ -33,7 +33,7 @@ const HeartbeatControlTestPanel = ({ process }) => {
   }
 
   return (
-    <div className="p-3 pt-0">
+    <div className="pt-0 pb-3 px-2">
       {error && <CAlert color="danger">{error}</CAlert>}
       <div className="d-flex align-items-center gap-3">
         <Switch

@@ -86,7 +86,7 @@ const ResourceMonitorPanel = ({ process, onConfigChange }) => {
   }
 
   return (
-    <div className="p-3 pt-0 d-flex align-items-stretch gap-4">
+    <div className="d-flex align-items-stretch gap-4 pt-0 pb-3 px-2">
       <div>
         {METRIC_ROWS.map(({ key, warnKey, maxKey, label, unit, stepperMax }) => {
           const value = metrics?.[key]

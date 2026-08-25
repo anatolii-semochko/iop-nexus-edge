@@ -85,7 +85,7 @@ const AnnunciatorPanel = ({ process }) => {
   }
 
   return (
-    <div className="p-3 pt-0">
+    <div className="pt-0 pb-3 px-2">
       <div className="d-flex align-items-center gap-2 mb-3">
         <CFormSelect
           size="sm"

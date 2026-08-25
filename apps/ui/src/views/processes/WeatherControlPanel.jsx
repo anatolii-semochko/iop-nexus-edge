@@ -49,7 +49,7 @@ const WeatherControlPanel = ({ process }) => {
   const level = typeof lightLevel === 'string' ? LEVEL_BY_KEY[lightLevel] : undefined
 
   return (
-    <div className="p-3 pt-0">
+    <div className="pt-0 pb-3 px-2">
       <CRow className="align-items-center g-4">
         <Reading label="Temperature" value={temperature} unit="°C" />
         <Reading label="Humidity" value={humidity} unit="%RH" />
