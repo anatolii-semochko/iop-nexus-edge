@@ -221,7 +221,7 @@ const NodesList = () => {
         {!error && !nodes && <CSpinner color="primary" />}
         {!error && nodes && (
           <>
-            <CRow className="mb-3 g-2 align-items-center">
+            <CRow className="mb-2 mx-1 g-2 align-items-center">
               <CCol xs="auto">
                 <CFormSelect
                   size="sm"

@@ -354,7 +354,7 @@ const ProcessesTable = ({
 
   return (
     <>
-      <CRow className="mb-3 g-2 align-items-center">
+      <CRow className="mb-2 mx-1 g-2 align-items-center">
         {filters.group && (
           <CCol xs="auto">
             <CFormSelect
@@ -418,7 +418,7 @@ const ProcessesTable = ({
         <CAlert color="info">{emptyMessage}</CAlert>
       ) : (
         <>
-          <CTable responsive>
+          <CTable>
             <CTableHead>
               <CTableRow>
                 {/* "Status" (col 1, OK/Warning/Error) vs "Power" (col 2,
