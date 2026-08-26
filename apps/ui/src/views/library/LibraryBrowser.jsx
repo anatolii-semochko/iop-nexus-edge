@@ -310,7 +310,13 @@ const LibraryBrowser = () => {
     <CCard className="mb-4">
       <CCardHeader className="d-flex justify-content-between align-items-center">
         <strong>Library</strong>
-        <CButton color="secondary" variant="outline" size="sm" onClick={handleSync} disabled={syncing}>
+        <CButton
+          color="secondary"
+          variant="outline"
+          size="sm"
+          onClick={handleSync}
+          disabled={syncing}
+        >
           <CIcon icon={cilReload} className="me-1" />
           {syncing ? 'Syncing...' : 'Sync'}
         </CButton>
@@ -391,9 +397,13 @@ const LibraryBrowser = () => {
                     {row.type === 'category' ? (
                       '-'
                     ) : row.usedInProject ? (
-                      <CBadge color="success">Used</CBadge>
+                      <CBadge color="success" className="mb-1">
+                        Used
+                      </CBadge>
                     ) : (
-                      <CBadge color="secondary">Not used</CBadge>
+                      <CBadge color="secondary" className="mb-1">
+                        Not used
+                      </CBadge>
                     )}
                   </CTableDataCell>
                   {kind === 'process' && (

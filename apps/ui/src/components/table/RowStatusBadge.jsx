@@ -22,7 +22,7 @@ const LABELS = {
 
 const RowStatusBadge = ({ rowColor }) => {
   const { text, color } = LABELS[rowColor] ?? { text: 'OK', color: 'success' }
-  return <CBadge color={color}>{text}</CBadge>
+  return <CBadge color={color} className='mb-1'>{text}</CBadge>
 }
 
 export default RowStatusBadge

@@ -140,7 +140,9 @@ const DeviceSimulatorRow = ({ device, onError }) => {
       </CTableDataCell>
       <CTableDataCell>
         {mode ? (
-          <CBadge color={modeColor(mode)}>{mode}</CBadge>
+          <CBadge color={modeColor(mode)} className="mb-1">
+            {mode}
+          </CBadge>
         ) : (
           <span className="text-body-secondary">&mdash;</span>
         )}

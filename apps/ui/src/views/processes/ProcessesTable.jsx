@@ -150,14 +150,18 @@ const ProcessRow = ({
         </CTableDataCell>
         <CTableDataCell className={noBorderWhenExpanded}>
           {status ? (
-            <CBadge color={statusColor(status)}>{status.toUpperCase()}</CBadge>
+            <CBadge color={statusColor(status)} className="mb-1">
+              {status.toUpperCase()}
+            </CBadge>
           ) : (
-            <CBadge color="info">Running</CBadge>
+            <CBadge color="info" className="mb-1">
+              Running
+            </CBadge>
           )}
           {pendingRestart && (
             <CBadge
               color="warning"
-              className="ms-1"
+              className="ms-1 mb-1"
               title="This kind isn't loaded in the running orchestrator yet - restart it to activate."
             >
               Pending restart

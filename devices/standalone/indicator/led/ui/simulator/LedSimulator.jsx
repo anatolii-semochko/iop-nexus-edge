@@ -19,13 +19,13 @@ const LedSimulator = ({ value, color = DEFAULT_COLOR, onChange }) => {
       type="button"
       onClick={() => onChange(!active)}
       style={{
-        width: 32,
-        height: 32,
+        width: 25,
+        height: 25,
         borderRadius: '50%',
         border: '3px solid #000',
         backgroundColor: active ? color : INACTIVE_FILL,
         boxSizing: 'border-box',
-        padding: 0,
+        padding: 5,
         cursor: 'pointer',
       }}
       aria-pressed={active}

@@ -318,7 +318,9 @@ const LiveEvents = () => {
                   </CTableDataCell>
                   <CTableDataCell>
                     {row.event.mode ? (
-                      <CBadge color={modeColor(row.event.mode)}>{row.event.mode}</CBadge>
+                      <CBadge color={modeColor(row.event.mode)} className="mb-1">
+                        {row.event.mode}
+                      </CBadge>
                     ) : (
                       '-'
                     )}

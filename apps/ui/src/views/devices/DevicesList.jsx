@@ -111,7 +111,12 @@ const ValueCell = ({ value }) => {
     )
   }
   if (typeof value === 'number') return <span>{value}</span>
-  if (typeof value === 'object') return <CBadge color="secondary">JSON</CBadge>
+  if (typeof value === 'object')
+    return (
+      <CBadge color="secondary" className="mb-1">
+        JSON
+      </CBadge>
+    )
   return <span>{String(value)}</span>
 }
 
@@ -382,7 +387,9 @@ const DeviceRow = ({
           <RowStatusBadge rowColor={rowColor} />
         </CTableDataCell>
         <CTableDataCell className={noBorderWhenExpanded}>
-          <CBadge color={backendColor(device.backend)}>{device.backend}</CBadge>
+          <CBadge color={backendColor(device.backend)} className="mb-1">
+            {device.backend}
+          </CBadge>
         </CTableDataCell>
         <CTableDataCell className={noBorderWhenExpanded}>
           <DeviceIcon

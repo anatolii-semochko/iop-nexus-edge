@@ -204,13 +204,13 @@ const UsersList = () => {
                           {user.roles.length === 0
                             ? '-'
                             : user.roles.map((role) => (
-                                <CBadge key={role} color="info" className="me-1">
+                                <CBadge key={role} color="info" className="me-1 mb-1">
                                   {role}
                                 </CBadge>
                               ))}
                         </CTableDataCell>
                         <CTableDataCell>
-                          <CBadge color={user.active ? 'success' : 'secondary'}>
+                          <CBadge color={user.active ? 'success' : 'secondary'} className="mb-1">
                             {user.active ? 'Active' : 'Inactive'}
                           </CBadge>
                         </CTableDataCell>

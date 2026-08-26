@@ -171,10 +171,14 @@ const ProcessMessageLogsTab = ({
                           )}
                         </span>
                       ) : (
-                        <CBadge color="secondary">Read</CBadge>
+                        <CBadge color="secondary" className="mb-1">
+                          Read
+                        </CBadge>
                       )
                     ) : (
-                      <CBadge color="info">Unread</CBadge>
+                      <CBadge color="info" className="mb-1">
+                        Unread
+                      </CBadge>
                     )}
                   </CTableDataCell>
                 </CTableRow>
