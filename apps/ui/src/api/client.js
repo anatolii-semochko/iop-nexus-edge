@@ -294,6 +294,9 @@ export const api = {
     request(`/library/browse?kind=${kind}${categoryId ? `&categoryId=${categoryId}` : ''}`),
   searchLibrary: (kind, q) => request(`/library/search?kind=${kind}&q=${encodeURIComponent(q)}`),
   syncLibrary: () => request('/library/sync', { method: 'POST' }),
+  // Expanded-row detail (AGENTS_TO_DO.md, 2026-08-27) - read fresh from
+  // disk on every call, not part of the synced catalog itself.
+  getLibraryItemDetail: (id) => request(`/library/items/${encodeURIComponent(id)}/detail`),
   // Auth (AGENTS.md section 13 - UI login only, not per-endpoint API
   // authorization).
   login: (username, password) =>

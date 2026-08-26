@@ -29,8 +29,11 @@ import {
 import CIcon from '@coreui/icons-react'
 import { cilLibrary, cilReload } from '@coreui/icons'
 import { api } from '../../api/client'
+import ExpandToggleButton from '../../components/table/ExpandToggleButton'
 import TableSearchInput from '../../components/table/TableSearchInput'
+import { useExpandableRows } from '../../hooks/useExpandableRows'
 import upIcon from '../../assets/images/up.png'
+import LibraryItemDetailRow from './LibraryItemDetailRow'
 
 const KINDS = [
   { value: 'device', label: 'Devices' },
@@ -244,6 +247,8 @@ const LibraryBrowser = () => {
   const [syncMessage, setSyncMessage] = useState(null)
   const [addProcessItem, setAddProcessItem] = useState(null)
   const [createdMessage, setCreatedMessage] = useState(null)
+  const [expandedIds, setExpandedIds] = useState([])
+  const { isExpanded, toggleOne } = useExpandableRows(expandedIds, setExpandedIds)
 
   const loadBrowse = (nextKind, nextCategoryId) => {
     setError(null)
@@ -283,10 +288,12 @@ const LibraryBrowser = () => {
     setKind(nextKind)
     setCategoryId(null)
     setSearch('')
+    setExpandedIds([])
   }
 
   const handleNavigate = (nextCategoryId) => {
     setCategoryId(nextCategoryId)
+    setExpandedIds([])
   }
 
   const handleSync = async () => {
@@ -368,60 +375,82 @@ const LibraryBrowser = () => {
                 <CTableHeaderCell>Description</CTableHeaderCell>
                 <CTableHeaderCell>Used in project</CTableHeaderCell>
                 {kind === 'process' && <CTableHeaderCell></CTableHeaderCell>}
+                <CTableHeaderCell style={{ width: 40 }}></CTableHeaderCell>
               </CTableRow>
             </CTableHead>
             <CTableBody>
-              {rows.map((row) => (
-                <CTableRow key={`${row.type ?? 'item'}:${row.id}`}>
-                  <CTableDataCell>
-                    <RowIcon iconPath={row.iconPath} />
-                  </CTableDataCell>
-                  <CTableDataCell>
-                    {row.type === 'category' ? (
-                      <a
-                        href="#"
-                        className="link-primary"
-                        onClick={(e) => {
-                          e.preventDefault()
-                          handleNavigate(row.id)
-                        }}
-                      >
-                        {row.name}
-                      </a>
-                    ) : (
-                      row.name
-                    )}
-                  </CTableDataCell>
-                  <CTableDataCell>{row.description ?? '-'}</CTableDataCell>
-                  <CTableDataCell>
-                    {row.type === 'category' ? (
-                      '-'
-                    ) : row.usedInProject ? (
-                      <CBadge color="success" className="mb-1">
-                        Used
-                      </CBadge>
-                    ) : (
-                      <CBadge color="secondary" className="mb-1">
-                        Not used
-                      </CBadge>
-                    )}
-                  </CTableDataCell>
-                  {kind === 'process' && (
-                    <CTableDataCell>
-                      {row.type === 'item' && (
-                        <CButton
-                          size="sm"
-                          color="primary"
-                          variant="outline"
-                          onClick={() => setAddProcessItem(row)}
-                        >
-                          Add process
-                        </CButton>
+              {rows.map((row) => {
+                const expandedRow = row.type === 'item' && isExpanded(row.id)
+                const columnCount = kind === 'process' ? 6 : 5
+                return (
+                  <React.Fragment key={`${row.type ?? 'item'}:${row.id}`}>
+                    <CTableRow className={expandedRow ? 'border-bottom-0' : undefined}>
+                      <CTableDataCell>
+                        <RowIcon iconPath={row.iconPath} />
+                      </CTableDataCell>
+                      <CTableDataCell>
+                        {row.type === 'category' ? (
+                          <a
+                            href="#"
+                            className="link-primary"
+                            onClick={(e) => {
+                              e.preventDefault()
+                              handleNavigate(row.id)
+                            }}
+                          >
+                            {row.name}
+                          </a>
+                        ) : (
+                          row.name
+                        )}
+                      </CTableDataCell>
+                      <CTableDataCell>{row.description ?? '-'}</CTableDataCell>
+                      <CTableDataCell>
+                        {row.type === 'category' ? (
+                          '-'
+                        ) : row.usedInProject ? (
+                          <CBadge color="success" className="mb-1">
+                            Used
+                          </CBadge>
+                        ) : (
+                          <CBadge color="secondary" className="mb-1">
+                            Not used
+                          </CBadge>
+                        )}
+                      </CTableDataCell>
+                      {kind === 'process' && (
+                        <CTableDataCell>
+                          {row.type === 'item' && (
+                            <CButton
+                              size="sm"
+                              color="primary"
+                              variant="outline"
+                              onClick={() => setAddProcessItem(row)}
+                            >
+                              Add process
+                            </CButton>
+                          )}
+                        </CTableDataCell>
                       )}
-                    </CTableDataCell>
-                  )}
-                </CTableRow>
-              ))}
+                      <CTableDataCell>
+                        {row.type === 'item' && (
+                          <ExpandToggleButton
+                            expanded={expandedRow}
+                            onClick={() => toggleOne(row.id)}
+                          />
+                        )}
+                      </CTableDataCell>
+                    </CTableRow>
+                    {expandedRow && (
+                      <CTableRow>
+                        <CTableDataCell colSpan={columnCount} className="p-0">
+                          <LibraryItemDetailRow row={row} kind={kind} />
+                        </CTableDataCell>
+                      </CTableRow>
+                    )}
+                  </React.Fragment>
+                )
+              })}
             </CTableBody>
           </CTable>
         )}
