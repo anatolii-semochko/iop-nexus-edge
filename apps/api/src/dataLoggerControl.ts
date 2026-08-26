@@ -46,6 +46,26 @@ export interface DataLoggerSettings {
   tickLoggingEnabled: boolean;
 }
 
+/** A device whose `data_logger_control` column has never been written
+ * (or was seeded as the column's own `DEFAULT '{}'::jsonb`) comes back
+ * from Postgres as a genuinely empty object - `warning`/`error` are
+ * `undefined`, not `null`, breaking this interface's own promise that
+ * they're always one or the other (confirmed live: DataLoggerEditModal.jsx's
+ * `value !== null` check treats `undefined` as "enabled", then crashes
+ * reading `.numberSkippedPeriods` off it - AGENTS_TO_DO.md 2026-08-26).
+ * Applied at every read/write boundary below so nothing downstream ever
+ * sees a sparse object again. */
+function normalizeDataLoggerControl(
+  config: Partial<DataLoggerControlConfig> | null | undefined,
+): DataLoggerControlConfig {
+  return {
+    writeEnabled: config?.writeEnabled ?? false,
+    periodSeconds: config?.periodSeconds ?? null,
+    warning: config?.warning ?? null,
+    error: config?.error ?? null,
+  };
+}
+
 function lastLoggedKey(deviceId: number): string {
   return `data-logger:${deviceId}:lastLoggedAt`;
 }
@@ -149,7 +169,7 @@ export async function listDataLoggerControls(): Promise<DataLoggerControlEntry[]
     rows.map(async (row) => ({
       id: row.id,
       name: row.name,
-      dataLoggerControl: row.data_logger_control,
+      dataLoggerControl: normalizeDataLoggerControl(row.data_logger_control),
       lastLoggedAt: await getLastLoggedAt(row.id),
     })),
   );
@@ -181,7 +201,7 @@ export async function updateDataLoggerControl(
   );
   const config = rows[0]?.data_logger_control;
   if (!config) throw new NotFoundError();
-  return config;
+  return normalizeDataLoggerControl(config);
 }
 
 export class NoPeriodConfiguredError extends Error {}
@@ -195,8 +215,8 @@ export async function setWriteEnabled(deviceId: number, enabled: boolean): Promi
     `SELECT data_logger_control FROM devices WHERE id = $1`,
     [deviceId],
   );
-  const config = rows[0]?.data_logger_control;
-  if (!config) throw new NotFoundError();
+  const config = normalizeDataLoggerControl(rows[0]?.data_logger_control);
+  if (!rows[0]) throw new NotFoundError();
   if (enabled && config.periodSeconds === null) throw new NoPeriodConfiguredError();
 
   const { rows: updated } = await pool.query<{ data_logger_control: DataLoggerControlConfig }>(
@@ -206,7 +226,7 @@ export async function setWriteEnabled(deviceId: number, enabled: boolean): Promi
      RETURNING data_logger_control`,
     [enabled, deviceId],
   );
-  return updated[0].data_logger_control;
+  return normalizeDataLoggerControl(updated[0].data_logger_control);
 }
 
 /** The "Data Logger" process's own two global switches, kept in its

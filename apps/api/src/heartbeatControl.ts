@@ -56,6 +56,27 @@ export interface HeartbeatControlEntry {
   staleness: StalenessLevel;
 }
 
+/** An entity whose `heartbeat_control` column has never been written (or
+ * was seeded as the column's own `DEFAULT '{}'::jsonb`) comes back from
+ * Postgres as a genuinely empty object - `warning`/`error` are
+ * `undefined`, not `null`, breaking this interface's own promise that
+ * they're always one or the other (confirmed live: HeartbeatEditModal.jsx's
+ * `value !== null` check treats `undefined` as "enabled", then crashes
+ * reading `.numberSkippedTicks` off it - AGENTS_TO_DO.md 2026-08-26,
+ * same root cause as dataLoggerControl.ts's own normalizer). Applied at
+ * every read/write boundary below - `stoppable` defaults to `false`
+ * (refuse-to-stop is the safer failure mode for a field that's supposed
+ * to be system-set, never actually missing in practice). */
+function normalizeHeartbeatControl(
+  config: Partial<HeartbeatControlConfig> | null | undefined,
+): HeartbeatControlConfig {
+  return {
+    stoppable: config?.stoppable ?? false,
+    warning: config?.warning ?? null,
+    error: config?.error ?? null,
+  };
+}
+
 function stoppedKey(type: EntityType, id: number): string {
   return `heartbeat:${type}:${id}:stopped`;
 }
@@ -101,8 +122,8 @@ export async function setMonitoringStopped(type: EntityType, id: number, stopped
     `SELECT heartbeat_control FROM ${TABLE_BY_TYPE[type]} WHERE id = $1`,
     [id],
   );
-  const config = rows[0]?.heartbeat_control;
-  if (!config) throw new NotFoundError();
+  if (!rows[0]) throw new NotFoundError();
+  const config = normalizeHeartbeatControl(rows[0].heartbeat_control);
   if (!config.stoppable && stopped) throw new NotStoppableError();
 
   if (stopped) {
@@ -276,18 +297,19 @@ async function listEntities(type: EntityType): Promise<HeartbeatControlEntry[]> 
       // Control section) - "process" and "node" (2026-08-09, the
       // control-node's own Heartbeat device) both do.
       const lastSeenAt = type === "process" || type === "node" ? await getLastSeenAt(type, row.id) : null;
+      const heartbeatControl = normalizeHeartbeatControl(row.heartbeat_control);
       return {
         type,
         id: row.id,
         name: row.name,
-        heartbeatControl: row.heartbeat_control,
+        heartbeatControl,
         stopped,
         lastSeenAt,
         iconPath: row.icon_path,
         staleness:
           type === "node"
-            ? nodeHeartbeatStaleness(row.heartbeat_control, row.simulated, stopped, lastSeenAt)
-            : computeStaleness(row.heartbeat_control, stopped, lastSeenAt),
+            ? nodeHeartbeatStaleness(heartbeatControl, row.simulated, stopped, lastSeenAt)
+            : computeStaleness(heartbeatControl, stopped, lastSeenAt),
       };
     }),
   );
@@ -323,7 +345,6 @@ export async function updateHeartbeatControl(
      RETURNING heartbeat_control`,
     [JSON.stringify({ warning: patch.warning, error: patch.error }), id],
   );
-  const config = rows[0]?.heartbeat_control;
-  if (!config) throw new NotFoundError();
-  return config;
+  if (!rows[0]) throw new NotFoundError();
+  return normalizeHeartbeatControl(rows[0].heartbeat_control);
 }
