@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react'
 import { CAlert, CBadge, CSpinner, CTab, CTabList, CTabs } from '@coreui/react'
 import CIcon from '@coreui/icons-react'
 import { cilLibrary } from '@coreui/icons'
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { api } from '../../api/client'
 
 const TABS = [
@@ -42,31 +44,88 @@ const OverviewTab = ({ row, detail }) => {
   )
 }
 
-// Rendered as preformatted monospace text, not parsed markdown - these
-// files are already written to read fine as plain text (short
-// paragraphs, `code` spans), and pulling in a markdown-rendering
-// dependency for this one read-only view isn't worth it (AGENTS_TO_DO.md,
-// 2026-08-27).
-const DocumentationTab = ({ detail }) =>
-  detail.readme || detail.changelog ? (
+// `library-item://<id>` - the app-internal link scheme
+// libraryCatalog.ts's own rewriteDocLinks() substitutes for a cross-item
+// relative markdown link (`[label](../../other-item/docs/README.md)`)
+// server-side, since a real `.md` file path has no route of its own for
+// react-router to resolve. Intercepted below instead of left as a normal
+// anchor.
+const LIBRARY_ITEM_LINK_PREFIX = 'library-item://'
+
+// react-markdown's own default `urlTransform` only passes through a
+// fixed safe list of URL schemes (http/https/mailto/tel/relative) and
+// silently blanks anything else - `library-item://` would otherwise be
+// stripped to an empty href before the `a` component below ever sees it.
+const urlTransform = (url) =>
+  url.startsWith(LIBRARY_ITEM_LINK_PREFIX) ? url : defaultUrlTransform(url)
+
+// GFM tables (remark-gfm) render as bare <table>/<th>/<td> by default -
+// these two mappings are the only styling needed to match the rest of
+// the app's own Bootstrap table look. `node` (react-markdown's own mdast
+// node, passed to every custom renderer) is destructured out and
+// dropped rather than spread - it isn't a valid DOM attribute.
+const markdownComponents = (onNavigateToItem) => ({
+  table: ({ node, ...props }) => <table className="table table-sm" {...props} />,
+  a: ({ node, href, children, ...props }) => {
+    if (href?.startsWith(LIBRARY_ITEM_LINK_PREFIX)) {
+      const id = href.slice(LIBRARY_ITEM_LINK_PREFIX.length)
+      return (
+        <a
+          href="#"
+          className="link-primary"
+          onClick={(e) => {
+            e.preventDefault()
+            onNavigateToItem(id)
+          }}
+          {...props}
+        >
+          {children}
+        </a>
+      )
+    }
+    return (
+      <a href={href} target="_blank" rel="noreferrer" {...props}>
+        {children}
+      </a>
+    )
+  },
+})
+
+// Real markdown rendering (react-markdown + remark-gfm for tables) -
+// these docs/README.md files use headers, tables, and cross-item links
+// (AGENTS_TO_DO.md, 2026-08-27 "markdown-viewer" follow-up) that plain
+// preformatted text couldn't express.
+const DocumentationTab = ({ detail, onNavigateToItem }) => {
+  if (!detail.readme && !detail.changelog) {
+    return <Empty>No docs/README.md or CHANGELOG.md for this item yet.</Empty>
+  }
+  const components = markdownComponents(onNavigateToItem)
+  return (
     <div style={{ maxHeight: 400, overflowY: 'auto' }}>
       {detail.readme && (
-        <pre className="small" style={{ whiteSpace: 'pre-wrap' }}>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={components}
+          urlTransform={urlTransform}
+        >
           {detail.readme}
-        </pre>
+        </ReactMarkdown>
       )}
       {detail.changelog && (
         <>
           <hr />
-          <pre className="small" style={{ whiteSpace: 'pre-wrap' }}>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={components}
+            urlTransform={urlTransform}
+          >
             {detail.changelog}
-          </pre>
+          </ReactMarkdown>
         </>
       )}
     </div>
-  ) : (
-    <Empty>No docs/README.md or CHANGELOG.md for this item yet.</Empty>
   )
+}
 
 const CompatibilityTab = ({ kind, detail }) => (
   <>
@@ -187,7 +246,7 @@ const TechnicalTab = ({ detail }) => {
  * CTabPanel" idiom AquariumLightControlPanel.jsx already uses, so
  * switching tabs doesn't re-fetch.
  */
-const LibraryItemDetailRow = ({ row, kind }) => {
+const LibraryItemDetailRow = ({ row, kind, onNavigateToItem }) => {
   const [activeTab, setActiveTab] = useState('overview')
   const [detail, setDetail] = useState(null)
   const [error, setError] = useState(null)
@@ -222,7 +281,9 @@ const LibraryItemDetailRow = ({ row, kind }) => {
         </CTabList>
       </CTabs>
       {activeTab === 'overview' && <OverviewTab row={row} detail={detail} />}
-      {activeTab === 'documentation' && <DocumentationTab detail={detail} />}
+      {activeTab === 'documentation' && (
+        <DocumentationTab detail={detail} onNavigateToItem={onNavigateToItem} />
+      )}
       {activeTab === 'compatibility' && <CompatibilityTab kind={kind} detail={detail} />}
       {activeTab === 'technical' && <TechnicalTab detail={detail} />}
     </div>

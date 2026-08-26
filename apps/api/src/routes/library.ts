@@ -126,6 +126,22 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
     return getLibraryItemDetail(rows[0].folder_path, rows[0].kind, rows[0].type_name);
   });
 
+  // Cross-item doc-link navigation (AGENTS_TO_DO.md, 2026-08-27 markdown-
+  // viewer follow-up) - the Documentation tab's `library-item://<id>`
+  // links (rewritten server-side by libraryCatalog.ts's own
+  // rewriteDocLinks) resolve to a target item that may live in a
+  // different kind/category than whatever's currently browsed; this is
+  // just enough for LibraryBrowser.jsx to re-navigate there (`kind` +
+  // `categoryId`) before expanding it, not a full item payload.
+  app.get<{ Params: { id: string } }>("/library/items/:id/location", async (request, reply) => {
+    const { rows } = await pool.query<{ kind: Kind; category_id: number | null }>(
+      `SELECT kind, category_id FROM library_items WHERE id = $1`,
+      [request.params.id],
+    );
+    if (!rows[0]) return reply.code(404).send({ error: "not found" });
+    return { kind: rows[0].kind, categoryId: rows[0].category_id };
+  });
+
   // Flat, cross-category search by name/description (AGENTS_TO_DO.md: "для
   // пошуку" was an explicit goal) - not scoped to the currently browsed
   // folder.

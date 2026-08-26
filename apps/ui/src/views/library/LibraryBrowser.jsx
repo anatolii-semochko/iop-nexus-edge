@@ -249,6 +249,13 @@ const LibraryBrowser = () => {
   const [createdMessage, setCreatedMessage] = useState(null)
   const [expandedIds, setExpandedIds] = useState([])
   const { isExpanded, toggleOne } = useExpandableRows(expandedIds, setExpandedIds)
+  // A `library-item://<id>` doc link (LibraryItemDetailRow.jsx's own
+  // Documentation tab) may point at an item in a different kind/category
+  // than whatever's currently browsed - this holds the target id between
+  // "re-navigate there" and "its row actually showed up in `children`",
+  // since that's a separate async fetch (AGENTS_TO_DO.md, 2026-08-27
+  // "markdown-viewer" follow-up).
+  const [pendingExpandId, setPendingExpandId] = useState(null)
 
   const loadBrowse = (nextKind, nextCategoryId) => {
     setError(null)
@@ -295,6 +302,39 @@ const LibraryBrowser = () => {
     setCategoryId(nextCategoryId)
     setExpandedIds([])
   }
+
+  // A doc link's target item may live under a different kind and/or
+  // category than what's on screen - look up where it actually is, then
+  // navigate there; the effect below finishes the job (expand + scroll)
+  // once that navigation's own `children` fetch lands.
+  const handleNavigateToItem = async (id) => {
+    setError(null)
+    try {
+      const location = await api.getLibraryItemLocation(id)
+      setSearch('')
+      setKind(location.kind)
+      setCategoryId(location.categoryId)
+      setExpandedIds([])
+      setPendingExpandId(id)
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  useEffect(() => {
+    if (!pendingExpandId || !children) return
+    if (!children.some((c) => c.type === 'item' && c.id === pendingExpandId)) return
+    // Reacting to `children` finishing its own fetch (an external
+    // system, from this effect's point of view) - same accepted pattern
+    // as this file's own kind/categoryId-driven loadBrowse effect above.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setExpandedIds([pendingExpandId])
+    document.getElementById(`library-row-${pendingExpandId}`)?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'center',
+    })
+    setPendingExpandId(null)
+  }, [children, pendingExpandId])
 
   const handleSync = async () => {
     setSyncing(true)
@@ -384,7 +424,7 @@ const LibraryBrowser = () => {
                 const columnCount = kind === 'process' ? 6 : 5
                 return (
                   <React.Fragment key={`${row.type ?? 'item'}:${row.id}`}>
-                    <CTableRow>
+                    <CTableRow id={row.type === 'item' ? `library-row-${row.id}` : undefined}>
                       <CTableDataCell className={expandedRow ? 'border-bottom-0' : undefined}>
                         <RowIcon iconPath={row.iconPath} />
                       </CTableDataCell>
@@ -446,7 +486,11 @@ const LibraryBrowser = () => {
                     {expandedRow && (
                       <CTableRow>
                         <CTableDataCell colSpan={columnCount} className="p-0">
-                          <LibraryItemDetailRow row={row} kind={kind} />
+                          <LibraryItemDetailRow
+                            row={row}
+                            kind={kind}
+                            onNavigateToItem={handleNavigateToItem}
+                          />
                         </CTableDataCell>
                       </CTableRow>
                     )}

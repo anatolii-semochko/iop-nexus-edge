@@ -272,6 +272,67 @@ function resolveAbsDir(folderPath: string): string {
   return path.join(config.apiPlugins.builtinDevicesDir, folderPath);
 }
 
+/** Inverse of resolveAbsDir() - an on-disk package directory back to its
+ * `folder_path` key, or `null` if it isn't under either known root (e.g.
+ * a doc link pointing outside the Library entirely). Used by
+ * rewriteDocLinks() below to turn a cross-item relative markdown link
+ * into a lookup key. */
+function absDirToFolderPath(absDir: string): string | null {
+  const relBuiltin = path.relative(config.apiPlugins.builtinDevicesDir, absDir);
+  if (relBuiltin && !relBuiltin.startsWith("..") && !path.isAbsolute(relBuiltin)) {
+    return relBuiltin.split(path.sep).join("/");
+  }
+  if (config.apiPlugins.extraDir) {
+    const relPrivate = path.relative(config.apiPlugins.extraDir, absDir);
+    if (relPrivate && !relPrivate.startsWith("..") && !path.isAbsolute(relPrivate)) {
+      return path.posix.join("private", relPrivate.split(path.sep).join("/"));
+    }
+  }
+  return null;
+}
+
+// `[label](../../other-item/docs/README.md)` style relative links between
+// two Library items' own docs/README.md|CHANGELOG.md (AGENTS_TO_DO.md,
+// 2026-08-27 "розгортки елементів бібліотеки" - the markdown-viewer
+// follow-up). Deliberately narrow: only `../`-relative `.md` links, not
+// every possible markdown link shape.
+const RELATIVE_MD_LINK_RE = /\[([^\]]+)\]\((\.\.?\/[^)\s]+\.md)\)/g;
+
+/** Rewrites cross-item relative doc links in `text` (resolved against
+ * `baseDir` - the directory the file containing `text` actually lives
+ * in, e.g. `<pkg>/docs` for a README, `<pkg>` for a CHANGELOG) into an
+ * app-internal `library-item://<id>` href the UI's Documentation tab
+ * intercepts instead of navigating to a raw `.md` file path that has no
+ * route of its own. A link whose target isn't itself a known Library
+ * item's own package directory (typo, moved file, non-cross-item
+ * relative link) is left exactly as written - best-effort, not a sync
+ * failure. */
+async function rewriteDocLinks(text: string, baseDir: string): Promise<string> {
+  const matches = [...text.matchAll(RELATIVE_MD_LINK_RE)];
+  if (matches.length === 0) return text;
+
+  let result = text;
+  for (const [full, label, relPath] of matches) {
+    const resolvedFile = path.resolve(baseDir, relPath);
+    // A link into another item's `docs/README.md` resolves one level
+    // too deep for that item's own package directory - step back out of
+    // `docs/`. Anything else (e.g. a CHANGELOG.md at the package root)
+    // is already the package directory once its own filename is dropped.
+    const packageDir =
+      path.basename(path.dirname(resolvedFile)) === "docs"
+        ? path.dirname(path.dirname(resolvedFile))
+        : path.dirname(resolvedFile);
+    const folderPath = absDirToFolderPath(packageDir);
+    if (!folderPath) continue;
+    const { rows } = await pool.query<{ id: string }>(`SELECT id FROM library_items WHERE folder_path = $1`, [
+      folderPath,
+    ]);
+    if (!rows[0]) continue;
+    result = result.replace(full, `[${label}](library-item://${rows[0].id})`);
+  }
+  return result;
+}
+
 /** On-demand detail read for one Library item's expanded row (AGENTS_TO_DO.md,
  * 2026-08-27 "розгортки елементів бібліотеки") - deliberately NOT synced
  * into Postgres alongside the rest of the catalog: this content
@@ -291,10 +352,14 @@ export async function getLibraryItemDetail(
 ): Promise<LibraryItemDetail> {
   const absDir = resolveAbsDir(folderPath);
 
-  const [readme, changelog, safety] = await Promise.all([
+  const [readmeRaw, changelogRaw, safety] = await Promise.all([
     readTextIfExists(path.join(absDir, "docs", "README.md")),
     readTextIfExists(path.join(absDir, "CHANGELOG.md")),
     readYamlIfExists<SafetyFile>(path.join(absDir, "safety.yaml")),
+  ]);
+  const [readme, changelog] = await Promise.all([
+    readmeRaw ? rewriteDocLinks(readmeRaw, path.join(absDir, "docs")) : Promise.resolve(null),
+    changelogRaw ? rewriteDocLinks(changelogRaw, absDir) : Promise.resolve(null),
   ]);
   const forbidden = safety?.forbidden && safety.forbidden.length > 0 ? safety.forbidden : null;
 
