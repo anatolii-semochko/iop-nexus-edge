@@ -367,7 +367,7 @@ const LibraryBrowser = () => {
         ) : rows.length === 0 ? (
           <CAlert color="info">{showingSearch ? 'No matches.' : 'Nothing here yet.'}</CAlert>
         ) : (
-          <CTable hover responsive>
+          <CTable responsive>
             <CTableHead>
               <CTableRow>
                 <CTableHeaderCell style={{ width: 40 }}></CTableHeaderCell>
@@ -384,11 +384,11 @@ const LibraryBrowser = () => {
                 const columnCount = kind === 'process' ? 6 : 5
                 return (
                   <React.Fragment key={`${row.type ?? 'item'}:${row.id}`}>
-                    <CTableRow className={expandedRow ? 'border-bottom-0' : undefined}>
-                      <CTableDataCell>
+                    <CTableRow>
+                      <CTableDataCell className={expandedRow ? 'border-bottom-0' : undefined}>
                         <RowIcon iconPath={row.iconPath} />
                       </CTableDataCell>
-                      <CTableDataCell>
+                      <CTableDataCell className={expandedRow ? 'border-bottom-0' : undefined}>
                         {row.type === 'category' ? (
                           <a
                             href="#"
@@ -404,8 +404,10 @@ const LibraryBrowser = () => {
                           row.name
                         )}
                       </CTableDataCell>
-                      <CTableDataCell>{row.description ?? '-'}</CTableDataCell>
-                      <CTableDataCell>
+                      <CTableDataCell className={expandedRow ? 'border-bottom-0' : undefined}>
+                        {row.description ?? '-'}
+                      </CTableDataCell>
+                      <CTableDataCell className={expandedRow ? 'border-bottom-0' : undefined}>
                         {row.type === 'category' ? (
                           '-'
                         ) : row.usedInProject ? (
@@ -419,7 +421,7 @@ const LibraryBrowser = () => {
                         )}
                       </CTableDataCell>
                       {kind === 'process' && (
-                        <CTableDataCell>
+                        <CTableDataCell className={expandedRow ? 'border-bottom-0' : undefined}>
                           {row.type === 'item' && (
                             <CButton
                               size="sm"
@@ -432,7 +434,7 @@ const LibraryBrowser = () => {
                           )}
                         </CTableDataCell>
                       )}
-                      <CTableDataCell>
+                      <CTableDataCell className={expandedRow ? 'border-bottom-0' : undefined}>
                         {row.type === 'item' && (
                           <ExpandToggleButton
                             expanded={expandedRow}

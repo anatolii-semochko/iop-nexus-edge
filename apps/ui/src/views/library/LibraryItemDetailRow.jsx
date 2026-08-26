@@ -211,7 +211,7 @@ const LibraryItemDetailRow = ({ row, kind }) => {
   if (!detail) return <CSpinner size="sm" />
 
   return (
-    <div className="p-3">
+    <div className="pt-0 pb-3 px-2">
       <CTabs activeItemKey={activeTab} onChange={setActiveTab}>
         <CTabList variant="tabs" className="mb-3">
           {TABS.map((tab) => (
