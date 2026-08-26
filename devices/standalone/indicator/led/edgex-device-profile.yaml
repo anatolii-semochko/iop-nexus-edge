@@ -1,0 +1,16 @@
+name: "NexusEdge-Led"
+manufacturer: "NexusEdge"
+model: "led"
+labels:
+  - "indicator"
+description: "Single-color status LED - atomic device, one Bool value"
+
+deviceResources:
+  - name: "Led"
+    isHidden: false
+    description: "LED on/off state"
+    properties:
+      valueType: "Bool"
+      readWrite: "RW"
+
+deviceCommands: []

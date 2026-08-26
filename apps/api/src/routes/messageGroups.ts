@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 
 import { pool } from "../db.js";
+import * as processRegistry from "../processRegistry.js";
 
 // Message Groups (AGENTS.md section 22) - WEM notification routing: which
 // recipient gets which processes' warnings/errors/messages. Deliberately
@@ -41,6 +42,37 @@ export async function messageGroupRoutes(app: FastifyInstance): Promise<void> {
   app.get("/message-groups", async () => {
     const result = await pool.query<MessageGroupRow>("SELECT * FROM message_groups ORDER BY name");
     return Promise.all(result.rows.map(withProcessIds));
+  });
+
+  // Alarm Annunciator (AGENTS_TO_DO.md, 2026-08-02) - "does this group
+  // currently have an active error/warning", scoped by group membership
+  // rather than fleet-wide like Active Zummer's own alarm consumer.
+  // Message Groups were purely inert metadata before this - the first
+  // thing that actually reads process_message_groups at runtime. Same
+  // simplification the existing buzzer already makes (AGENTS.md section
+  // 27): a process's critical/warning flag carries no level of its own,
+  // so an active flag here always means "level 1" - nothing produces a
+  // real level 2-4 today.
+  app.get("/message-groups/active-state", async () => {
+    const groups = await pool.query<{ id: number }>("SELECT id FROM message_groups");
+    return Promise.all(
+      groups.rows.map(async (group) => {
+        const members = await pool.query<{ process_id: number }>(
+          "SELECT process_id FROM process_message_groups WHERE message_group_id = $1",
+          [group.id],
+        );
+        const states = await Promise.all(
+          members.rows.map((row) =>
+            Promise.all([processRegistry.getCritical(row.process_id), processRegistry.getWarning(row.process_id)]),
+          ),
+        );
+        return {
+          id: group.id,
+          hasActiveError: states.some(([critical]) => critical),
+          hasActiveWarning: states.some(([, warning]) => warning),
+        };
+      }),
+    );
   });
 
   app.post<{ Body: { name: string } }>("/message-groups", async (request, reply) => {

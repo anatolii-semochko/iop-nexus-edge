@@ -1,0 +1,9 @@
+# Forbidden-state rules for this device type, consumed by the central
+# Model State Validator (apps/api/src/validator.ts) - see AGENTS.md
+# section 7/30/32. Always empty - this device is never written through
+# any command path the validator guards (see contract.schema.ts's own
+# comment - it's written by the weather-control process directly via
+# PUT /devices/:id/reading, not PUT /devices/:id/auto), so there is no
+# forbidden-state rule that could ever apply here. Exists anyway so every
+# device type has the same predictable shape.
+forbidden: []

@@ -55,7 +55,7 @@ func (t *Transport) Read(deviceName string, props models.ProtocolProperties, req
 			return nil, fmt.Errorf("resource %s: %w", req.DeviceResourceName, err)
 		}
 
-		frame, ok := bus.Latest(mapping.ArbitrationID)
+		frame, receivedAt, ok := bus.Latest(mapping.ArbitrationID)
 		if !ok {
 			return nil, fmt.Errorf("resource %s: no data received yet for CAN ID 0x%X", req.DeviceResourceName, mapping.ArbitrationID)
 		}
@@ -70,7 +70,12 @@ func (t *Transport) Read(deviceName string, props models.ProtocolProperties, req
 			return nil, fmt.Errorf("resource %s: %w", req.DeviceResourceName, err)
 		}
 
-		cv, err := sdkModels.NewCommandValue(req.DeviceResourceName, req.Type, value)
+		// Origin is the frame's own true receipt time, not time.Now() (see
+		// bus.go's Latest doc comment) - a resource whose CAN frame hasn't
+		// actually been re-broadcast in a while must report itself as that
+		// old, not freshly read, or every downstream staleness check
+		// (Devices list, Data Logger) is silently defeated.
+		cv, err := sdkModels.NewCommandValueWithOrigin(req.DeviceResourceName, req.Type, value, receivedAt.UnixNano())
 		if err != nil {
 			return nil, fmt.Errorf("resource %s: %w", req.DeviceResourceName, err)
 		}
@@ -101,7 +106,8 @@ func (t *Transport) Write(deviceName string, props models.ProtocolProperties, re
 		data := make([]byte, frameLen)
 		// Preserve the other signals already carried by this arbitration ID,
 		// since one CAN ID may in principle be shared - see mapping.go.
-		if existing, ok := bus.Latest(mapping.ArbitrationID); ok {
+		// receivedAt is irrelevant here, only the byte layout is reused.
+		if existing, _, ok := bus.Latest(mapping.ArbitrationID); ok {
 			n := copy(data, existing.Data)
 			if n < len(existing.Data) {
 				data = append(data, existing.Data[n:]...)

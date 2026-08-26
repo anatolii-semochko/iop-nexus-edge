@@ -2,7 +2,7 @@
 
 Read `AGENTS.md` (living technical reference — architecture, per-feature
 design, section-numbered) and `../AGENTS_TO_DO.md` (shared roadmap/
-journal for the whole iop package, Ukrainian) each session. If they ever
+journal for the whole iot package, Ukrainian) each session. If they ever
 disagree on this project's current state, trust `AGENTS.md`.
 
 ## Conventions (apply to every file in this repo)
@@ -29,6 +29,6 @@ disagree on this project's current state, trust `AGENTS.md`.
   published `postgres-mcp` package currently needs `mcp<2.0` pinned — its
   own dependency spec allows `mcp>=1.5.0` with no upper bound, but it
   breaks against the `mcp` 2.x module layout.
-- `/stack-status` slash command (defined at the `iop/` level, applies to
+- `/stack-status` slash command (defined at the `iot/` level, applies to
   all sibling projects) — `docker compose ps` + recent logs for any
   unhealthy service.

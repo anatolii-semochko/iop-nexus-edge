@@ -1,0 +1,5 @@
+{
+  "id": "device-light-level",
+  "name": "Light level",
+  "description": "Categorical daylight level (very-sunny..dark), computed by the weather-control process from a raw light reading. No hardware backend."
+}

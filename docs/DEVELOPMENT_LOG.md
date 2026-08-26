@@ -143,7 +143,7 @@ a `readOnly` resource (a pure sensor) has no AUTO/MANUAL concept at all,
 rather than a misleading default-AUTO. New `PUT
 .../resources/:resource/simulate` endpoint writes straight to EdgeX for
 such sensors, bypassing the Dual Devices Model entirely.
-`devices/standalone/light-regulator/` became the platform's first real
+`devices/standalone/actuator/light-regulator/` became the platform's first real
 (non-smoke-test) device type, following the full type-vs-instance layout
 above. **Real bugs found**: EdgeX device-profile `minimum`/`maximum` must
 be YAML numbers, not quoted strings (a stringified `"0"` broke profile
@@ -335,7 +335,7 @@ outlined/white the whole time instead of solid yellow).
 
 **Active Zummer** - the platform's first sound-output device and process
 (full design in `AGENTS.md`'s Active Zummer section). A single-resource
-virtual actuator (`devices/standalone/active-buzzer/`, same real-device-
+virtual actuator (`devices/standalone/indicator/active-buzzer/`, same real-device-
 type layout as light-regulator), driven by a new `active-buzzer` process
 kind against a shared, reusable alarm-priority policy
 (`apps/orchestrator/src/alarmPolicy.ts`) - error outranks warning today,

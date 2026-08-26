@@ -1,0 +1,7 @@
+# Initial value for a `backend: virtual` instance of this device type
+# (seeded into apps/device-service's Virtual Node Runtime via the
+# "initial.Light" protocol property) - not meaningful for a real
+# physical (CAN) instance, which just reports whatever the sensor reads.
+# A mid-range daylight-ish default on a 0-4095 (12-bit ADC) scale, not a
+# real reading.
+Light: 2048

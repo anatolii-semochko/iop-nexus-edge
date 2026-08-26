@@ -119,6 +119,25 @@ export async function publishReading(deviceId: number, value: unknown, source: s
   await publishDeviceEvent({ domain: "device", entityId: deviceId, value, timestamp, source });
 }
 
+/**
+ * Reads back what publishReading() above last wrote into the `state:*`
+ * cache - the only way to get a value for a Device with no EdgeX/hardware
+ * backend at all (e.g. `light-level`, AGENTS.md section 66), since
+ * routes/devices.ts's GET /devices/:id otherwise only ever sources
+ * `value` from a live EdgeX readValue() call, which requires a
+ * resolvable EdgeX device name. Returns null if nothing has been
+ * published yet (a fresh Device row, never written).
+ */
+export async function getReading(
+  deviceId: number,
+): Promise<{ value: unknown; updatedAt: string; source: string } | null> {
+  const raw = await redis.get(`state:${deviceId}`);
+  if (raw === null) return null;
+  const decoded = decode(raw);
+  if (typeof decoded !== "object" || decoded === null) return null;
+  return decoded as { value: unknown; updatedAt: string; source: string };
+}
+
 export async function getState(deviceId: number): Promise<DeviceState> {
   const k = keysFor(deviceId);
   const [mode, rawAuto, rawManual] = await Promise.all([

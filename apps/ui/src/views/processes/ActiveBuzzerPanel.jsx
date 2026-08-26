@@ -29,7 +29,7 @@ const ActiveBuzzerPanel = ({ process }) => {
   const active = (live.value !== undefined ? live.value : device.value) === true
 
   return (
-    <div className="p-3 pt-0 d-flex align-items-center gap-3">
+    <div className="d-flex align-items-center gap-3 pt-0 pb-3 px-2">
       <BuzzerIndicator active={active} />
       <div className="text-body-secondary small">
         Beep pattern is set per WEM level in Processes -&gt; Settings -&gt; Message Levels.

@@ -48,6 +48,33 @@ export interface HeartbeatControlEntry {
   // Live (Redis) - only ever populated for processes today (the only
   // entity type with a real heartbeat producer so far - AGENTS.md).
   lastSeenAt: string | null;
+  // AGENTS_TO_DO.md, 2026-08-16 - the panel's own row icon (Library
+  // Catalog, joined by (kind, type_name) same as Devices/Nodes/Processes
+  // already do individually) and its computed staleness, for the panel's
+  // own status filter/row highlight - see computeStaleness below.
+  iconPath: string | null;
+  staleness: StalenessLevel;
+}
+
+/** An entity whose `heartbeat_control` column has never been written (or
+ * was seeded as the column's own `DEFAULT '{}'::jsonb`) comes back from
+ * Postgres as a genuinely empty object - `warning`/`error` are
+ * `undefined`, not `null`, breaking this interface's own promise that
+ * they're always one or the other (confirmed live: HeartbeatEditModal.jsx's
+ * `value !== null` check treats `undefined` as "enabled", then crashes
+ * reading `.numberSkippedTicks` off it - AGENTS_TO_DO.md 2026-08-26,
+ * same root cause as dataLoggerControl.ts's own normalizer). Applied at
+ * every read/write boundary below - `stoppable` defaults to `false`
+ * (refuse-to-stop is the safer failure mode for a field that's supposed
+ * to be system-set, never actually missing in practice). */
+function normalizeHeartbeatControl(
+  config: Partial<HeartbeatControlConfig> | null | undefined,
+): HeartbeatControlConfig {
+  return {
+    stoppable: config?.stoppable ?? false,
+    warning: config?.warning ?? null,
+    error: config?.error ?? null,
+  };
 }
 
 function stoppedKey(type: EntityType, id: number): string {
@@ -95,8 +122,8 @@ export async function setMonitoringStopped(type: EntityType, id: number, stopped
     `SELECT heartbeat_control FROM ${TABLE_BY_TYPE[type]} WHERE id = $1`,
     [id],
   );
-  const config = rows[0]?.heartbeat_control;
-  if (!config) throw new NotFoundError();
+  if (!rows[0]) throw new NotFoundError();
+  const config = normalizeHeartbeatControl(rows[0].heartbeat_control);
   if (!config.stoppable && stopped) throw new NotStoppableError();
 
   if (stopped) {
@@ -137,25 +164,154 @@ export async function getProcessHeartbeatStopped(processId: number): Promise<boo
   return isMonitoringStopped("process", processId);
 }
 
+/** The node-side counterpart of touchHeartbeats above (AGENTS_TO_DO.md,
+ * 2026-08-09 "НОДА КОНТРОЛЮ") - the first real heartbeat producer for a
+ * node. Unlike a process (which self-reports "my own tick just ran"), a
+ * physical node has no way to push into this API directly - its own
+ * permanent process (apps/orchestrator/src/processes/controlNode.ts)
+ * calls this once per tick, but only when that node's `Heartbeat` device
+ * resource actually *changed* since the last tick (see that device
+ * type's own contract.schema.ts for why a changed value, not just any
+ * value, is what proves freshness against EdgeX's non-expiring CAN frame
+ * cache).
+ *
+ * Also updates the legacy `nodes.last_heartbeat_at` column - present
+ * since the original Node/Device scaffold and already rendered by
+ * NodesList.jsx, but never written by anything until now (a real,
+ * pre-existing gap, not introduced here) - a free correctness fix now
+ * that a real producer exists, no separate migration needed since the
+ * column already exists. */
+export async function touchNodeHeartbeats(nodeIds: number[]): Promise<void> {
+  if (nodeIds.length === 0) return;
+  const now = String(Date.now());
+  const pipeline = redis.pipeline();
+  for (const id of nodeIds) {
+    pipeline.set(lastSeenKey("node", id), now);
+  }
+  await pipeline.exec();
+  await pool.query(
+    `UPDATE nodes SET last_heartbeat_at = now() WHERE id = ANY($1::int[])`,
+    [nodeIds],
+  );
+}
+
+export async function getNodeLastSeenAt(nodeId: number): Promise<string | null> {
+  return getLastSeenAt("node", nodeId);
+}
+
+export async function getNodeHeartbeatStopped(nodeId: number): Promise<boolean> {
+  return isMonitoringStopped("node", nodeId);
+}
+
+export type StalenessLevel = "ok" | "warning" | "error";
+
+// Mirrors apps/orchestrator/src/tickInterval.ts's own constant - kept as a
+// separate local copy rather than a cross-service import, same reasoning
+// as that file's own header comment (a fixed platform interval, not meant
+// to vary independently per service).
+const TICK_INTERVAL_MS = 1000;
+
+function skippedTicks(lastSeenAt: string | null): number | null {
+  if (!lastSeenAt) return null;
+  return Math.floor((Date.now() - new Date(lastSeenAt).getTime()) / TICK_INTERVAL_MS);
+}
+
+/** Request-time replica of apps/orchestrator/src/processes/heartbeatControl.ts's
+ * own evaluate() (a single entity's own share of it) - needed so a live
+ * request can expose a real staleness signal directly (AGENTS_TO_DO.md,
+ * 2026-08-15: the orchestrator's own evaluate() only ever surfaces this as
+ * WEM/critical/warning on the Heartbeating Control process's own row, never
+ * writes anything back onto the monitored entity itself). Pure/sync - takes
+ * whatever `stopped`/`lastSeenAt` values the caller already has from Redis,
+ * rather than re-querying. Shared by `nodeHeartbeatStaleness` below (adds
+ * the node-only `simulated` skip) and `listEntities` (the Heartbeating
+ * Control panel's own per-row status, 2026-08-16) - process and device
+ * entities have no `simulated` concept, so they call this directly. */
+export function computeStaleness(
+  config: HeartbeatControlConfig,
+  stopped: boolean,
+  lastSeenAt: string | null,
+): StalenessLevel {
+  const { stoppable, warning, error } = config;
+  if (stoppable && stopped) return "ok";
+  if (!warning && !error) return "ok";
+
+  const ticks = skippedTicks(lastSeenAt);
+  if (ticks === null) return "ok";
+
+  if (error && ticks >= error.numberSkippedTicks) return "error";
+  if (warning && ticks >= warning.numberSkippedTicks) return "warning";
+  return "ok";
+}
+
+/** Node-specific wrapper around computeStaleness above - `GET /nodes`'s own
+ * signature unchanged (AGENTS.md section 58). A simulated node is skipped
+ * entirely, not just quietly stale - same reasoning as the orchestrator's
+ * own evaluate() (there is no real hardware link for it to be stale *from*
+ * while deliberately in bench-test/service mode). */
+export function nodeHeartbeatStaleness(
+  config: HeartbeatControlConfig,
+  simulated: boolean,
+  stopped: boolean,
+  lastSeenAt: string | null,
+): StalenessLevel {
+  if (simulated) return "ok";
+  return computeStaleness(config, stopped, lastSeenAt);
+}
+
+// Which column on each entity's own table holds the "type name" the
+// Library Catalog indexes icons by (same key routes/devices.ts and
+// routes/library.ts's usedTypeNames() already join on, per kind) -
+// `processes.kind`, `devices.type`, `nodes.type`.
+const TYPE_COLUMN_BY_TYPE: Record<EntityType, string> = {
+  process: "kind",
+  device: "type",
+  node: "type",
+};
+
 interface EntityRow {
   id: number;
   name: string;
   heartbeat_control: HeartbeatControlConfig;
+  simulated: boolean;
+  icon_path: string | null;
 }
 
 async function listEntities(type: EntityType): Promise<HeartbeatControlEntry[]> {
+  const typeColumn = TYPE_COLUMN_BY_TYPE[type];
+  // `simulated` only exists on `nodes` - selected as a literal `false` for
+  // process/device so this stays one query shape across all three types.
   const { rows } = await pool.query<EntityRow>(
-    `SELECT id, name, heartbeat_control FROM ${TABLE_BY_TYPE[type]} ORDER BY name`,
+    `SELECT e.id, e.name, e.heartbeat_control,
+       ${type === "node" ? "e.simulated" : "false"} AS simulated,
+       li.icon_path
+     FROM ${TABLE_BY_TYPE[type]} e
+     LEFT JOIN library_items li ON li.type_name = e.${typeColumn} AND li.kind = $1
+     ORDER BY e.name`,
+    [type],
   );
   return Promise.all(
-    rows.map(async (row) => ({
-      type,
-      id: row.id,
-      name: row.name,
-      heartbeatControl: row.heartbeat_control,
-      stopped: await isMonitoringStopped(type, row.id),
-      lastSeenAt: type === "process" ? await getLastSeenAt(type, row.id) : null,
-    })),
+    rows.map(async (row) => {
+      const stopped = await isMonitoringStopped(type, row.id);
+      // "device" has no real producer yet (AGENTS.md's Heartbeating
+      // Control section) - "process" and "node" (2026-08-09, the
+      // control-node's own Heartbeat device) both do.
+      const lastSeenAt = type === "process" || type === "node" ? await getLastSeenAt(type, row.id) : null;
+      const heartbeatControl = normalizeHeartbeatControl(row.heartbeat_control);
+      return {
+        type,
+        id: row.id,
+        name: row.name,
+        heartbeatControl,
+        stopped,
+        lastSeenAt,
+        iconPath: row.icon_path,
+        staleness:
+          type === "node"
+            ? nodeHeartbeatStaleness(heartbeatControl, row.simulated, stopped, lastSeenAt)
+            : computeStaleness(heartbeatControl, stopped, lastSeenAt),
+      };
+    }),
   );
 }
 
@@ -189,7 +345,6 @@ export async function updateHeartbeatControl(
      RETURNING heartbeat_control`,
     [JSON.stringify({ warning: patch.warning, error: patch.error }), id],
   );
-  const config = rows[0]?.heartbeat_control;
-  if (!config) throw new NotFoundError();
-  return config;
+  if (!rows[0]) throw new NotFoundError();
+  return normalizeHeartbeatControl(rows[0].heartbeat_control);
 }

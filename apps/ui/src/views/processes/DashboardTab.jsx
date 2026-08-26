@@ -52,6 +52,7 @@ const DashboardTab = ({
   messageGroups,
   onGroupsChange,
   onResetFilters,
+  registeredKinds,
 }) => {
   const live = useProcessesLiveState()
   const flagged = processes.filter((p) => {
@@ -93,6 +94,7 @@ const DashboardTab = ({
       messageGroups={messageGroups}
       onGroupsChange={onGroupsChange}
       onResetFilters={onResetFilters}
+      registeredKinds={registeredKinds}
       renderExtraRowAction={(process) => {
         const liveEntry = live[process.id]
         const hasActiveWem = liveEntry ? liveEntry.hasActiveWem : process.hasActiveWem

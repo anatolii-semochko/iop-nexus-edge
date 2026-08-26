@@ -12,6 +12,14 @@ const SERIES = [
   { key: 'cpu', color: '#0d6efd', label: 'CPU' },
   { key: 'ram', color: '#6f42c1', label: 'RAM' },
   { key: 'disk', color: '#20c997', label: 'Disk' },
+  // Degrees Celsius sharing the same 0-100 y-axis as the three percentages
+  // above - not strictly the same unit, but CPU/SoC temps stay well under
+  // 100C in normal operation (this project's Raspberry Pi target throttles
+  // around 80C), so the shared axis reads fine in practice without a
+  // second scale. A sample missing `temp` (host with no readable thermal
+  // zone) just draws as 0 on this line, same as any other undefined key
+  // below.
+  { key: 'temp', color: '#fd7e14', label: 'Temp' },
 ]
 
 const clamp = (n) => Math.min(100, Math.max(0, n))

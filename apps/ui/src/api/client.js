@@ -9,7 +9,11 @@
  */
 const BASE = '/api'
 
-async function request(path, options = {}) {
+// Exported (AGENTS.md section 31) - lets a target project's own private
+// UI (plugins/*/ui/*, reached via the `src/` alias) call its own private
+// API routes (plugins/*/api.ts) the same way every method on `api` below
+// already does, without needing those routes added to this shared object.
+export async function request(path, options = {}) {
   // FormData (avatar upload) needs the browser to set its own multipart
   // boundary in Content-Type - never set it ourselves for that case.
   const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData
@@ -50,6 +54,12 @@ export const api = {
     request(`/nodes/${id}/group`, { method: 'PATCH', body: JSON.stringify({ groupId }) }),
   renameNode: (id, name) =>
     request(`/nodes/${id}/name`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+  setNodeLocation: (id, location) =>
+    request(`/nodes/${id}/location`, { method: 'PATCH', body: JSON.stringify({ location }) }),
+  // Partial physical network (AGENTS_TO_DO.md, 2026-08-09/10) - a node
+  // switches every attached device's EdgeX redirect at once.
+  setNodeSimulated: (id, simulated) =>
+    request(`/nodes/${id}/simulated`, { method: 'PATCH', body: JSON.stringify({ simulated }) }),
   listDevices: () => request('/devices'),
   getDevice: (id) => request(`/devices/${id}`),
   // Per-device Device Group membership (multiple at once - shared devices
@@ -66,6 +76,16 @@ export const api = {
     request(`/devices/${id}/node`, { method: 'PATCH', body: JSON.stringify({ nodeId }) }),
   renameDevice: (id, name) =>
     request(`/devices/${id}/name`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+  // Same as setNodeSimulated above, for a standalone device (no node) -
+  // rejected server-side for a node-attached one (toggle the node
+  // instead).
+  setDeviceSimulated: (id, simulated) =>
+    request(`/devices/${id}/simulated`, { method: 'PATCH', body: JSON.stringify({ simulated }) }),
+  // UI redesign (AGENTS_TO_DO.md, 2026-08-14) - partial merge onto
+  // device.capabilities (color/physicalId for now, generic for any
+  // future key).
+  setDeviceCapabilities: (id, patch) =>
+    request(`/devices/${id}/capabilities`, { method: 'PATCH', body: JSON.stringify(patch) }),
   // A UI write is always a manual override (Dual Devices Model MANUAL mode
   // - see AGENTS.md section 6). No `resource` param anymore (AGENTS_TO_DO.md's
   // 2026-07-27 Device/Node refactor) - a Device is atomic, exactly one value.
@@ -92,6 +112,14 @@ export const api = {
     request(`/processes/${id}/config`, { method: 'PATCH', body: JSON.stringify(config) }),
   doProcessAction: (id, action) =>
     request(`/processes/${id}/action`, { method: 'POST', body: JSON.stringify({ action }) }),
+  // Process management (AGENTS_TO_DO.md, 2026-08-14) - live create/delete,
+  // plus which kinds the running orchestrator actually has loaded right
+  // now (a row whose kind isn't in this list needs an orchestrator
+  // restart before it does anything - see ProcessesList.jsx's own
+  // "pending restart" badge).
+  createProcess: (data) => request('/processes', { method: 'POST', body: JSON.stringify(data) }),
+  deleteProcess: (id) => request(`/processes/${id}`, { method: 'DELETE' }),
+  getRegisteredProcessKinds: () => request('/processes/registered-kinds'),
   // WEM (AGENTS.md section 22/25) - global dismiss (who/when is recorded
   // server-side from the session cookie, not sent here). `/log-messages`
   // (renamed from `/process-messages`, AGENTS_TO_DO.md's 2026-07-27 Device/Node

@@ -1,0 +1,5 @@
+{
+  "id": "device-pulse",
+  "name": "Pulse",
+  "description": "Written once/sec by the orchestrator, every tick - proves NexusEdge is alive to the node's own firmware watchdog. The value itself is arbitrary; only arrival matters."
+}

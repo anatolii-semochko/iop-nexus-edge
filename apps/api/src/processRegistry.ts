@@ -21,11 +21,15 @@ import { redis } from "./redis.js";
 
 export type ProcessStatus = "on" | "off";
 
-export interface ProcessMetrics {
-  cpu: number;
-  ram: number;
-  disk: number;
-}
+// Generic (not `{cpu, ram, disk}` specifically) since 2026-08-09 - a
+// second process kind ("control-node", AGENTS_TO_DO.md "НОДА КОНТРОЛЮ")
+// now pushes its own differently-shaped reading (`{temperature,
+// humidity}`) through this exact same storage/broadcast path. Loose
+// jsonb-style, interpreted entirely by whichever UI panel reads a given
+// process kind's own metrics (ResourceMonitorPanel.jsx vs. a future
+// ControlNodePanel.jsx) - same convention `processes.config` already
+// uses.
+export type ProcessMetrics = Record<string, number>;
 
 export interface ProcessPublicMessage {
   id: number;

@@ -1,0 +1,4 @@
+# Initial simulated value - same "initial.Buzzer" protocol property shape
+# as ../active-buzzer, kept here as this device type's own declared
+# default (AGENTS.md section 7).
+Buzzer: false

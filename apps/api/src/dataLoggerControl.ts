@@ -46,6 +46,26 @@ export interface DataLoggerSettings {
   tickLoggingEnabled: boolean;
 }
 
+/** A device whose `data_logger_control` column has never been written
+ * (or was seeded as the column's own `DEFAULT '{}'::jsonb`) comes back
+ * from Postgres as a genuinely empty object - `warning`/`error` are
+ * `undefined`, not `null`, breaking this interface's own promise that
+ * they're always one or the other (confirmed live: DataLoggerEditModal.jsx's
+ * `value !== null` check treats `undefined` as "enabled", then crashes
+ * reading `.numberSkippedPeriods` off it - AGENTS_TO_DO.md 2026-08-26).
+ * Applied at every read/write boundary below so nothing downstream ever
+ * sees a sparse object again. */
+function normalizeDataLoggerControl(
+  config: Partial<DataLoggerControlConfig> | null | undefined,
+): DataLoggerControlConfig {
+  return {
+    writeEnabled: config?.writeEnabled ?? false,
+    periodSeconds: config?.periodSeconds ?? null,
+    warning: config?.warning ?? null,
+    error: config?.error ?? null,
+  };
+}
+
 function lastLoggedKey(deviceId: number): string {
   return `data-logger:${deviceId}:lastLoggedAt`;
 }
@@ -53,6 +73,65 @@ function lastLoggedKey(deviceId: number): string {
 async function getLastLoggedAt(deviceId: number): Promise<string | null> {
   const raw = await redis.get(lastLoggedKey(deviceId));
   return raw ? new Date(Number(raw)).toISOString() : null;
+}
+
+/** AGENTS_TO_DO.md, 2026-08-16 - moves the Devices list's own overdue/
+ * staleness check (previously computed client-side, DevicesList.jsx)
+ * server-side, mirroring nodeHeartbeatStaleness's own role for Nodes. A
+ * pure function, deliberately - `readingOriginMs`/`nowMs` are both passed
+ * in rather than read here, same reasoning as that function's own
+ * request-time-only stance (no caching, always as fresh as whatever
+ * reading triggered this call). */
+export function computeOverdue(
+  config: DataLoggerControlConfig,
+  readingOriginMs: number | null,
+  nowMs: number,
+): { isOverdue: boolean; expiresAt: number | null } {
+  const maxAgeMs =
+    config.periodSeconds && config.error?.numberSkippedPeriods
+      ? config.periodSeconds * config.error.numberSkippedPeriods * 1000
+      : null;
+  if (maxAgeMs === null || readingOriginMs === null) {
+    return { isOverdue: false, expiresAt: null };
+  }
+  const expiresAt = readingOriginMs + maxAgeMs;
+  return { isOverdue: nowMs > expiresAt, expiresAt };
+}
+
+function overdueSnapshotKey(deviceId: number): string {
+  return `data-logger:${deviceId}:overdueSnapshot`;
+}
+
+/** Write-only cache of computeOverdue's own last result per device
+ * (AGENTS_TO_DO.md, 2026-08-16) - routes/devices.ts's publishDeviceReading
+ * writes this on every read (mount fetch, Data Logger's own touch/write),
+ * alongside its live publish. Exists purely so `GET /devices` (the list
+ * route) can offer a cheap, "last known" isOverdue per device for the
+ * Devices list's own status filter, without doing a live EdgeX read for
+ * every device on every list load (deliberately never done anywhere else
+ * in this app - see SELECT_DEVICE_LIST_BASE's own reasoning). Necessarily
+ * a snapshot, not live - it only refreshes as often as something actually
+ * reads that specific device (a mount fetch, Data Logger's own
+ * `periodSeconds` cadence), same staleness profile as the value itself. */
+export async function setOverdueSnapshot(deviceId: number, isOverdue: boolean, expiresAt: number | null): Promise<void> {
+  await redis.set(overdueSnapshotKey(deviceId), JSON.stringify({ isOverdue, expiresAt }));
+}
+
+/** Batch read for the list route above - one Redis MGET for every device
+ * id on the page rather than N round-trips. Missing entries (a device
+ * nothing has read yet this deploy) are simply omitted, left for the
+ * caller to default to "not overdue" - same "unproven, not flagged"
+ * stance `computeOverdue` itself takes for a `null` reading. */
+export async function getOverdueSnapshots(
+  deviceIds: number[],
+): Promise<Map<number, { isOverdue: boolean; expiresAt: number | null }>> {
+  const result = new Map<number, { isOverdue: boolean; expiresAt: number | null }>();
+  if (deviceIds.length === 0) return result;
+  const raw = await redis.mget(deviceIds.map(overdueSnapshotKey));
+  raw.forEach((value, index) => {
+    if (value) result.set(deviceIds[index], JSON.parse(value));
+  });
+  return result;
 }
 
 /** Called by the orchestrator runner right after it successfully writes a
@@ -90,7 +169,7 @@ export async function listDataLoggerControls(): Promise<DataLoggerControlEntry[]
     rows.map(async (row) => ({
       id: row.id,
       name: row.name,
-      dataLoggerControl: row.data_logger_control,
+      dataLoggerControl: normalizeDataLoggerControl(row.data_logger_control),
       lastLoggedAt: await getLastLoggedAt(row.id),
     })),
   );
@@ -122,7 +201,7 @@ export async function updateDataLoggerControl(
   );
   const config = rows[0]?.data_logger_control;
   if (!config) throw new NotFoundError();
-  return config;
+  return normalizeDataLoggerControl(config);
 }
 
 export class NoPeriodConfiguredError extends Error {}
@@ -136,8 +215,8 @@ export async function setWriteEnabled(deviceId: number, enabled: boolean): Promi
     `SELECT data_logger_control FROM devices WHERE id = $1`,
     [deviceId],
   );
-  const config = rows[0]?.data_logger_control;
-  if (!config) throw new NotFoundError();
+  const config = normalizeDataLoggerControl(rows[0]?.data_logger_control);
+  if (!rows[0]) throw new NotFoundError();
   if (enabled && config.periodSeconds === null) throw new NoPeriodConfiguredError();
 
   const { rows: updated } = await pool.query<{ data_logger_control: DataLoggerControlConfig }>(
@@ -147,7 +226,7 @@ export async function setWriteEnabled(deviceId: number, enabled: boolean): Promi
      RETURNING data_logger_control`,
     [enabled, deviceId],
   );
-  return updated[0].data_logger_control;
+  return normalizeDataLoggerControl(updated[0].data_logger_control);
 }
 
 /** The "Data Logger" process's own two global switches, kept in its

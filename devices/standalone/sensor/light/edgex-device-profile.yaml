@@ -1,0 +1,24 @@
+# Source of truth for this device type's EdgeX-facing shape. The copy
+# actually loaded by apps/device-service lives at
+# apps/device-service/res/profiles/NexusEdge-Light.yaml - there is no
+# provisioning flow yet that reads this file directly (AGENTS.md section
+# 7), so the two must be kept in sync by hand. Identical content.
+name: "NexusEdge-Light"
+manufacturer: "NexusEdge"
+model: "light"
+labels:
+  - "sensor"
+description: "Raw photoresistor light-level reading - atomic device, one Uint16 value"
+
+deviceResources:
+  - name: "Light"
+    isHidden: false
+    description: "Raw photoresistor (LDR) ADC reading, uncalibrated"
+    properties:
+      valueType: "Uint16"
+      # RW at the EdgeX/core-command level even though this is conceptually
+      # read-only - same reasoning as ../temperature's own profile.
+      readWrite: "RW"
+      units: "raw"
+
+deviceCommands: []

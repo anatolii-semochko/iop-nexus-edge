@@ -1,23 +1,31 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import {
   CAlert,
   CButton,
+  CCol,
   CFormCheck,
+  CFormSelect,
   CModal,
   CModalBody,
   CModalFooter,
   CModalHeader,
   CModalTitle,
+  CRow,
   CSpinner,
+  CTab,
+  CTabList,
+  CTabs,
 } from '@coreui/react'
 import { api } from '../../api/client'
+import { processSettingsSections, processSettingsConfigFields } from '../../processTypeRegistry'
 
 // One checkbox section - fetches this process's current membership in
-// `items` (Tab Groups or Message Groups, whichever `entity` names) when
-// the modal opens, exposes the locally-edited selection back to the
-// parent via `onChange` so a single Save can persist both sections at
-// once (AGENTS.md section 22 - Tab Groups and Message Groups are
-// independent entities, but both edited from the same popup).
+// `items` (Tab Groups or Message Casting Groups, whichever `entity`
+// names) when the modal opens, exposes the locally-edited selection
+// back to the parent via `onChange` so a single Save can persist both
+// sections at once (AGENTS.md section 22 - Tab Groups and Message
+// Casting Groups are independent entities, but both edited from the
+// same popup).
 const GroupCheckboxSection = ({ title, items, fetchSelected, selectedIds, onChange, busy }) => {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -88,34 +96,87 @@ const GroupCheckboxSection = ({ title, items, fetchSelected, selectedIds, onChan
 
 /**
  * Per-process Settings popup (AGENTS.md section 22) - opened from the
- * first action button on a process's row. Two independent checkbox
- * sections: Tab Groups (which of the operator's curated page tabs this
- * process shows up in) and Message Groups (which notification routing
- * groups this process's WEM goes to) - structurally identical, but
- * genuinely separate entities (a process can be in either, both, or
- * neither, independently), each with its own Save-time PUT.
+ * first action button on a process's row. Standard sections first (Tab
+ * Groups, Message Casting Groups - which notification routing groups
+ * this process CASTS its WEM into, AGENTS_TO_DO.md 2026-08-02 rename
+ * disambiguating from the not-yet-built inverse "Message Receiving
+ * Groups" some future process kinds will have), then one optional
+ * kind-specific block below (`processSettingsSections`, processTypeRegistry.js) - single popup
+ * per process, not a separate kind-specific modal (AGENTS_TO_DO.md,
+ * 2026-08-02 - Alarm Annunciator's own slot-binding UI used to be a
+ * second modal opened from the expanded panel; consolidated here).
+ * The underlying Message Groups entity/table/route/field names
+ * (`message_groups`, `/message-groups`, `messageGroupId`) are
+ * deliberately unchanged - this is a display-label rename only, scoped
+ * to this popup (the one place users actually see the ambiguity).
  *
  * `tabGroups`/`messageGroups` (already loaded/ordered at the page level)
  * are passed in rather than fetched here - the same lists every row's
  * popup would otherwise re-fetch identically. Only this process's own
- * current membership in each is fetched on open.
+ * current membership in each is fetched on open; the extra section's own
+ * data (`process.config.slots`) is already on `process`, no separate
+ * fetch needed.
+ *
+ * Settings tabs (opt-in, AGENTS_TO_DO.md 2026-08-25 "cosmetic
+ * improvements") - a kind whose own ExtraSection has grown too large for
+ * one flat scroll (Aquarium Light Control's first real case) can declare
+ * `ExtraSection.settingsTabs = ['Configuration', 'Channels']` (a plain
+ * static array on the component, no new registry needed) to split the
+ * popup into a "System" tab (this component's own Tabs/Message Casting
+ * Groups sections, unchanged) plus one tab per declared label, each
+ * rendered by the SAME ExtraSection instance (passed the active tab's
+ * lowercased label as `activeSettingsTab`, so it can pick which of its
+ * own pieces to show) - same "conditionally rendered, not CTabContent/
+ * CTabPanel" idiom `AquariumLightControlPanel.jsx`'s own tabs already
+ * use, so an inactive tab's own fetch/render doesn't run. A kind with no
+ * `settingsTabs` (every other kind today) renders exactly as before -
+ * no CTabs wrapper at all.
  */
 const ProcessSettingsModal = ({ visible, onClose, process, tabGroups, messageGroups, onSaved }) => {
   const [selectedTabGroupIds, setSelectedTabGroupIds] = useState(new Set())
   const [selectedMessageGroupIds, setSelectedMessageGroupIds] = useState(new Set())
+  // Not React state - the active ExtraSection (mounts fresh each open,
+  // see AnnunciatorSlotsSection's own comment) writes an edited value
+  // here from its own onChange handler; `null` means "untouched this
+  // session", so handleSave falls back to the process's own current
+  // config (a no-op write, not data loss). Reset on close so a
+  // cancelled edit for one process can never leak into a later save for
+  // another.
+  const extraConfigRef = useRef(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
+  const [activeSettingsTab, setActiveSettingsTab] = useState('system')
+
+  const ExtraSection = process && processSettingsSections[process.kind]
+  const extraConfigField = process && processSettingsConfigFields[process.kind]
+  const settingsTabs = ExtraSection?.settingsTabs
+
+  const handleClose = () => {
+    extraConfigRef.current = null
+    setActiveSettingsTab('system')
+    onClose()
+  }
 
   const handleSave = async () => {
     setBusy(true)
     setError(null)
     try {
-      await Promise.all([
+      const writes = [
         api.setProcessTabGroups(process.id, [...selectedTabGroupIds]),
         api.setProcessMessageGroups(process.id, [...selectedMessageGroupIds]),
-      ])
+      ]
+      if (ExtraSection && extraConfigField === '*') {
+        writes.push(api.setProcessConfig(process.id, extraConfigRef.current ?? {}))
+      } else if (ExtraSection && extraConfigField) {
+        writes.push(
+          api.setProcessConfig(process.id, {
+            [extraConfigField]: extraConfigRef.current ?? process.config[extraConfigField],
+          }),
+        )
+      }
+      await Promise.all(writes)
       onSaved?.()
-      onClose()
+      handleClose()
     } catch (err) {
       setError(err.message)
     } finally {
@@ -123,8 +184,29 @@ const ProcessSettingsModal = ({ visible, onClose, process, tabGroups, messageGro
     }
   }
 
+  const groupSections = (
+    <>
+      <GroupCheckboxSection
+        title="Tabs"
+        items={tabGroups}
+        fetchSelected={() => api.getProcessTabGroups(process.id)}
+        selectedIds={selectedTabGroupIds}
+        onChange={setSelectedTabGroupIds}
+        busy={busy}
+      />
+      <GroupCheckboxSection
+        title="Message Casting Groups"
+        items={messageGroups}
+        fetchSelected={() => api.getProcessMessageGroups(process.id)}
+        selectedIds={selectedMessageGroupIds}
+        onChange={setSelectedMessageGroupIds}
+        busy={busy}
+      />
+    </>
+  )
+
   return (
-    <CModal visible={visible} onClose={onClose}>
+    <CModal visible={visible} onClose={handleClose} size="lg">
       <CModalHeader>
         <CModalTitle>{process?.name} settings</CModalTitle>
       </CModalHeader>
@@ -136,29 +218,50 @@ const ProcessSettingsModal = ({ visible, onClose, process, tabGroups, messageGro
             membership for a process nobody has opened Settings for yet.
             Unmounting on close is also what gives a reopen a fresh fetch,
             no separate loading-reset plumbing needed. */}
-        {visible && process && (
+        {visible && process && settingsTabs && (
           <>
-            <GroupCheckboxSection
-              title="Tab Groups"
-              items={tabGroups}
-              fetchSelected={() => api.getProcessTabGroups(process.id)}
-              selectedIds={selectedTabGroupIds}
-              onChange={setSelectedTabGroupIds}
-              busy={busy}
-            />
-            <GroupCheckboxSection
-              title="Message Groups"
-              items={messageGroups}
-              fetchSelected={() => api.getProcessMessageGroups(process.id)}
-              selectedIds={selectedMessageGroupIds}
-              onChange={setSelectedMessageGroupIds}
-              busy={busy}
-            />
+            <CTabs activeItemKey={activeSettingsTab} onChange={setActiveSettingsTab}>
+              <CTabList variant="tabs" className="mb-3">
+                <CTab itemKey="system">System</CTab>
+                {settingsTabs.map((label) => (
+                  <CTab key={label} itemKey={label.toLowerCase()}>
+                    {label}
+                  </CTab>
+                ))}
+              </CTabList>
+            </CTabs>
+            {activeSettingsTab === 'system' && groupSections}
+            {/* ExtraSection stays mounted across a System <-> Configuration/
+                Channels round-trip (CSS-hidden, not unmounted) so its own
+                internal `useState` (staged edits) survives switching tabs -
+                unmounting and remounting would re-run that initializer
+                against the process's still-unsaved-on-the-server config,
+                silently discarding whatever the user had just typed. */}
+            <div style={{ display: activeSettingsTab === 'system' ? 'none' : undefined }}>
+              <ExtraSection
+                process={process}
+                groups={messageGroups}
+                extraConfigRef={extraConfigRef}
+                activeSettingsTab={activeSettingsTab}
+              />
+            </div>
+          </>
+        )}
+        {visible && process && !settingsTabs && (
+          <>
+            {groupSections}
+            {ExtraSection && (
+              <ExtraSection
+                process={process}
+                groups={messageGroups}
+                extraConfigRef={extraConfigRef}
+              />
+            )}
           </>
         )}
       </CModalBody>
       <CModalFooter>
-        <CButton color="secondary" variant="outline" onClick={onClose} disabled={busy}>
+        <CButton color="secondary" variant="outline" onClick={handleClose} disabled={busy}>
           Cancel
         </CButton>
         <CButton color="success" onClick={handleSave} disabled={busy}>

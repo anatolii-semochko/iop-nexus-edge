@@ -460,8 +460,9 @@ actual Heater/Cooler interlock rule staying on the node type's own
 physical assembly, section 30 already got this half right), not
 duplicated into either device type's.
 
-`devices/standalone/light-regulator/` and `devices/standalone/
-active-buzzer/` are real device types built to this layout - `runtime/`
+`devices/standalone/actuator/light-regulator/` and
+`devices/standalone/speaker/active-buzzer/` are real device types
+built to this layout - `runtime/`
 and `firmware/` are deliberately absent for both (nothing for either to
 add over the generic Virtual Node Runtime yet, no hardware to target),
 everything else (`contract.schema.ts`, `edgex-device-profile.yaml`,
@@ -577,8 +578,9 @@ for controllable devices, and renames "Release to Auto" to "Auto", shown
 only while a device is actually `MANUAL`.
 
 `devices/` device-type components are imported straight into `apps/ui` from
-outside its own package (`import ... from 'devices/standalone/light-
-regulator/ui/simulator/LightRegulatorSimulator.jsx'`) via a `'devices/'`
+outside its own package (`import ... from
+'devices/standalone/actuator/light-regulator/ui/simulator/LightRegulatorSimulator.jsx'`)
+via a `'devices/'`
 Vite resolve alias (`apps/ui/vite.config.mjs`) pointing at the repo-root
 `devices/` folder, which also needs `COPY devices devices` added to `apps/
 ui/Dockerfile`'s build stage to be present in the build context at all.
@@ -1275,6 +1277,33 @@ subsystems (GPU, bluetooth, USB, battery, etc.) for a project whose stated
 target is Raspberry-Pi minimalism — not worth the weight for three numbers
 Node already exposes directly.
 
+**Temperature (`temp`, added 2026-08-08)**: same no-dependency stance,
+extended rather than abandoned once the question came up — reads
+`/sys/class/thermal/thermal_zone*/temp` directly (`readTempCelsius` in
+`resourceMonitor.ts`), no `systeminformation`, no `vcgencmd` shellout. On
+Raspberry Pi OS the kernel's own `bcm2835_thermal` driver exposes the SoC
+temperature at `thermal_zone0` with no extra tooling; a generic x86 dev
+machine can expose several zones (`acpitz`, `x86_pkg_temp`, `nvme`,
+`iwlwifi`, ...) with no single well-known "the CPU" index, so the reading
+reported is the **highest value across every zone found**, keeping this a
+single number like the other three metrics and matching the existing
+critical/warning model's own framing ("is anything on this host over
+threshold"), not per-sensor alerting. Requires the container to see host
+sysfs, which is Docker's default behavior, not a bind-mount this project
+adds — if `/sys/class/thermal` isn't present or isn't readable at all
+(most likely on a dev machine without that access), `readTempCelsius`
+returns `undefined`, `ProcessMetrics.temp` is omitted from that tick's
+payload entirely (not sent as `0`, which would misread as "freezing"), and
+every temp-related critical/warning/message check below is skipped for
+that tick only — the same "absent, not defaulted" treatment CPU's own
+first-tick-after-restart case already gets. Unlike the other three
+metrics, `tempMax`/`tempWarnMax` are degrees Celsius, not a percentage —
+seeded defaults (migration `..._add-temp-thresholds-to-resource-monitor`)
+are 70/80°C, taken from the Raspberry Pi SoC's own documented throttling
+points (soft throttle ~80°C, hard throttle steps at 85°C) rather than an
+arbitrary round number, since this project's actual deployment target is a
+Pi.
+
 **Container vs. host accuracy** (a real open question, not silently
 assumed): CPU/RAM read from `/proc` inside the orchestrator container
 reflect the real *host* values, and disk usage from the container's own
@@ -1291,12 +1320,12 @@ not attempted here).
 generic `PATCH /processes/:id/config` every other kind's config already
 uses (the handler merges whatever fields a request body actually contains,
 rather than hardcoding `min`/`max`). Two tiers per metric: `cpuMax`/
-`ramMax`/`diskMax` (error — red row, the original `critical` concept) and
-`cpuWarnMax`/`ramWarnMax`/`diskWarnMax` (warning — yellow row, a second,
-less severe Redis flag added alongside `critical`). **A threshold of 0 (or
-omitted) disables that specific check** — per metric, independently, not
-an all-or-nothing gate on the whole tick the way temperature-monitor's
-`min`/`max` are.
+`ramMax`/`diskMax`/`tempMax` (error — red row, the original `critical`
+concept) and `cpuWarnMax`/`ramWarnMax`/`diskWarnMax`/`tempWarnMax`
+(warning — yellow row, a second, less severe Redis flag added alongside
+`critical`). **A threshold of 0 (or omitted) disables that specific
+check** — per metric, independently, not an all-or-nothing gate on the
+whole tick the way temperature-monitor's `min`/`max` are.
 
 Live readings **are** pushed through the WebSocket feed, same as `status`/
 `critical`/`warning` — though the mechanism underneath changed in section
@@ -1341,13 +1370,17 @@ threshold, the state, and the row color.
 per process) since disk usage barely moves and `statfsSync` gains nothing
 from being called every second.
 
-**UI** (`apps/ui/src/views/processes/ResourceMonitorPanel.jsx`): three
-rows, not three processes — CPU/RAM/Disk, each with its live % in large
-type, a "Warning Max%" `NumericStepper` and, right after it, an "Error
-Max%" one (step 1, same component `TemperatureProcessPanel` uses, clamped
-`min={0} max={100}` here since these are percentages - see section 7's
-`NumericStepper` entry for the hold-to-repeat mechanism itself) for that
-metric's own two thresholds. The row itself (`ProcessesList.jsx`) picks
+**UI** (`apps/ui/src/views/processes/ResourceMonitorPanel.jsx`): four
+rows, not four processes — CPU/RAM/Disk/Temp, each with its live reading in
+large type, a "Warning Max" `NumericStepper` and, right after it, an
+"Error Max" one (step 1, same component `TemperatureProcessPanel` uses -
+see section 7's `NumericStepper` entry for the hold-to-repeat mechanism
+itself) for that metric's own two thresholds. `METRIC_ROWS` carries each
+row's own `unit`/`stepperMax` rather than hardcoding `%`/100 everywhere,
+since Temp's unit is °C and its steppers are clamped `min={0} max={150}`
+instead of the `100` the three percentages use - a live reading of
+`undefined` (Temp on a host with no readable thermal zone) renders as `-`,
+same placeholder the panel already used for CPU's own first-tick gap. The row itself (`ProcessesList.jsx`) picks
 `danger`/red over `warning`/yellow over nothing, same precedence as the
 orchestrator's own critical-wins-over-warning logic — confirmed live by
 dropping `cpuMax` to 1% (row turns red), then raising it back above the
@@ -1363,9 +1396,14 @@ readable against the row's own tinted `danger`/`warning` background rather
 than assuming a plain one.
 
 **1-minute levels chart** (`ResourceLevelsChart.jsx`, sitting to the right
-of the three rows): a rolling 60-second CPU/RAM/Disk line chart, one hand-
-rolled inline SVG, not a charting dependency - same "Node built-ins/no
-extra package" call already made for the metrics themselves. There is no
+of the four rows): a rolling 60-second CPU/RAM/Disk/Temp line chart, one
+hand-rolled inline SVG, not a charting dependency - same "Node built-ins/no
+extra package" call already made for the metrics themselves. Temp's line
+shares the same 0-100 y-axis as the three percentages despite being °C, not
+a second scale — this project's Raspberry Pi target throttles around 80°C,
+comfortably inside that range for normal operation, so the shared axis
+reads fine in practice; a sample with no `temp` (thermal zone unreadable)
+just draws as 0 on that one line, same as any other undefined key would. There is no
 server-side history endpoint; the chart is fed purely from the panel's own
 `useProcessLiveState` subscription (the same live feed that already drives
 `metrics` for the three rows), buffered client-side into a `history` array
@@ -2324,7 +2362,7 @@ The platform's first physical-alarm device and the first real consumer of
 Message Levels (section 22/23's `message_levels` table, which sat as
 config-storage only until now). A single active buzzer - built-in tone
 generator, driven purely 0/1 - modeled as a real device type under
-`devices/standalone/active-buzzer/` (same layout as `light-regulator`,
+`devices/standalone/speaker/active-buzzer/` (same layout as `light-regulator`,
 section 7): `contract.schema.ts`, `edgex-device-profile.yaml` (mirrored
 into `apps/device-service/res/profiles/NexusEdge-ActiveBuzzer.yaml` +
 `res/devices/active-buzzer-devices.yaml`, seeded into Postgres by
@@ -2434,7 +2472,7 @@ entry) - no config to edit (unlike Temperature Control), just a live
 visualization via the shared `BuzzerIndicator` atom (section 26 - built
 ahead of time, unwired, specifically for this) fed by
 `useDeviceLiveState(process.device_id)`, same live-preferred-over-REST
-pattern as `TemperatureProcessPanel`. `devices/standalone/active-buzzer/
+pattern as `TemperatureProcessPanel`. `devices/standalone/speaker/active-buzzer/
 ui/control/ActiveBuzzerControl.jsx` (registered in `DeviceDetail.jsx`'s
 `DEVICE_TYPE_CONTROLS`, matching light-regulator's convention) is a
 separate, self-contained lamp - device-type components can't import
@@ -2901,7 +2939,7 @@ every write, same as before.
   the same `contract.schema.ts`/`edgex-device-profile.yaml`/`safety.yaml`/
   `config/default-state.yaml`/`docs/README.md`/`tests/README.md`/
   `CHANGELOG.md` template already established by
-  `devices/standalone/light-regulator`. New convention established here
+  `devices/standalone/actuator/light-regulator`. New convention established here
   (no prior precedent existed): a node-attached Device's own `safety.yaml`
   is always empty - a cross-device forbidden-state rule (e.g. "heater and
   cooler can't both be on") is declared once, on the **Node's**
@@ -2968,7 +3006,12 @@ special-casing "official" vs "private" anywhere below.
   would work too, for a target project wanting tighter integration) but
   the plugin loader above is the recommended path - it needs no
   npm package/Dockerfile of the target project's own, matching every
-  other extension point's low ceremony.
+  other extension point's low ceremony. `apiClient`'s own generic
+  `request<T>(path, options)` (added section 71) is a plugin's own way to
+  reach its private API routes (the point above) - the same `request()`
+  every already-typed `apiClient` method already uses internally, rather
+  than adding a one-off typed method here for each private route as it
+  comes up.
 - **`apps/ui`'s `deviceTypeRegistry`** (`src/deviceTypeRegistry.js`) -
   plain objects `deviceControls`/`deviceSimulators`, written to via
   `registerControl`/`registerSimulator`, read via bracket access
@@ -2979,6 +3022,13 @@ special-casing "official" vs "private" anywhere below.
   side-effect, from `index.jsx`); a target project's own types register
   the same way from its own `plugins/*/ui/register.js` - see the UI
   point below for how that file gets bundled in at all.
+- **`apps/ui`'s `processTypeRegistry`** (`src/processTypeRegistry.js`,
+  added section 71) - the process-kind sibling of `deviceTypeRegistry`
+  above, same shape: `processPanels`/`processSettingsSections`/
+  `processSettingsConfigFields`, `registerPanel`/`registerSettingsSection`,
+  built-ins from `builtinProcessTypes.js`, a target project's own kinds
+  from the SAME `plugins/*/ui/register.js` file device types use (one
+  file can call both registries).
 - **`apps/api`'s command-API plugin loader** (`src/apiPlugins.ts`,
   `loadApiPlugins()`) - recursively scans `config.apiPlugins.
   builtinDevicesDir` (`/workspace/devices`, Library - `devices/` is
@@ -2994,6 +3044,27 @@ special-casing "official" vs "private" anywhere below.
   `app.register()` - same shape every `routes/*.ts` in this app already
   exports. Only needed when the generic Device API (write/auto/simulate)
   and Process API aren't enough; nothing in the Library needs one today.
+  A target project's own private route can't reach this repo's own
+  `apps/api/src/db.ts` `pool` via a relative import (loaded via a plain
+  runtime `import()` from an arbitrary on-disk path, same as
+  `process.ts` below) - `loadApiPlugins()` passes its own already-open
+  shared `pool` as the plugin's own Fastify `opts` instead
+  (`app.register(mod.default, { pool })`), the same "receive
+  dependencies as arguments, don't import them" reasoning
+  `process.ts`'s own `apiClient`/`logger` injection already uses
+  (section 71) - a bare `import { Pool } from "pg"` from that file's own
+  on-disk location fails at runtime regardless (`ERR_MODULE_NOT_FOUND` -
+  `pg` is only hoisted under this package's own `node_modules`).
+- **`apps/api`'s Library Catalog private node-type packages**
+  (`src/libraryCatalog.ts`'s `syncLibrary()`, added section 71) - a
+  target project's own `plugins/devices/<type>/` and `plugins/nodes/
+  <type>/` (full packages - `node.yaml`/`library.json`/`icon.svg`/
+  `firmware/` for the node case) sync into `library_items` the same way
+  this repo's own `devices/standalone/`/`devices/nodes/` do, kind
+  `"device"`/`"node"` respectively - `library_items.id` (not
+  `folder_path`) is the `ON CONFLICT` key, so a package that moves
+  between a public and private location updates its existing row rather
+  than duplicating one.
 - **`apps/device-service`'s `EXTRA_RES_DIR`**
   (`internal/extrares/extrares.go`, `Merge()`) - the EdgeX SDK's
   `Device.ProfilesDir`/`DevicesDir` config keys are each exactly one
@@ -3568,9 +3639,12 @@ and visibly stops if they do.
 
 ### The pulse itself
 
-`apps/ui/src/scss/style.scss`'s `@keyframes system-tick-pulse` (~450ms:
-long enough to register at a glance, short enough to have fully settled
-before the next tick arrives a second later) - scale 1 -> 1.25 -> 1,
+`apps/ui/src/scss/style.scss`'s `@keyframes system-tick-pulse` (100ms,
+shortened 2026-08-09 from an initial 450ms - see AGENTS_TO_DO.md's
+"НОДА КОНТРОЛЮ" thread, which picked this same pulse duration for its
+firmware LED and found 450ms too long/laggy for a quick flash; 100ms
+still registers at a glance and stays well clear of the next tick a
+second later) - scale 1 -> 1.25 -> 1,
 opacity 1 -> 1 -> 0.35, a `currentColor` glow (`box-shadow`) that
 blooms then vanishes. `color: var(--cui-success)` on the base
 `.system-tick-dot` (not a hardcoded hex) so both the fill and the glow
@@ -4079,3 +4153,2542 @@ clean, `eslint`/`tsc --noEmit` clean on both `apps/api` and
 `apps/orchestrator`, `alarmPolicy.test.ts`'s 7 tests updated for the
 new shape and passing. Test config reset back to the original all-`off`
 baseline afterward.
+
+## 43. Target-project README: fix nexus-edge link broken on GitHub (local path reused as a public URL)
+
+`templates/target-project/README.md`'s "built on nexus-edge" link and
+its `docs/CREATING_A_TARGET_PROJECT.md` reference both reused
+`NEXUS_EDGE_SOURCE_PATH` - a genuine local filesystem path
+(`scripts/new-project.sh`: `realpath --relative-to="$TARGET_DIR"
+"$NEXUS_EDGE_DIR"`, correctly needed for `.env`'s docker-compose build
+context and the Makefile's version-drift check). Reused as a markdown
+link target it breaks on GitHub in a non-obvious way: a target project
+lives in its own separate repo, so a relative link like `../nexus-edge`
+resolves against *that repo's own* blob URL - GitHub reads
+`.../iot-nexus-edge-aquarium/blob/main/README.md` + `../nexus-edge` as
+`.../iot-nexus-edge-aquarium/blob/nexus-edge`, i.e. "nexus-edge" gets
+interpreted as a *branch name inside the aquarium repo*, not a path to
+a different one. User caught this by the resulting broken URL showing
+up in the rendered README.
+
+Fixed by introducing a second, separate placeholder,
+`NEXUS_EDGE_REPO_URL` - a real cross-repo URL, derived from this
+checkout's own `origin` remote (`git remote get-url origin`, SSH form
+rewritten to `https://`, `.git` suffix stripped; falls back to the
+known public URL if there is no `origin`, e.g. a from-scratch tarball
+checkout) - substituted alongside `NEXUS_EDGE_SOURCE_PATH`, which is
+untouched everywhere else (docker-compose, `.env.example`, Makefile
+version check - all still need the real local path). The doc-link line
+now shows both: a `github.com/.../blob/main/...` link that works from
+anywhere, plus the local path in parens for whoever's on the machine
+that generated the project.
+
+Same fix applied by hand to the two already-generated target projects
+(`nexus-edge-aquarium/README.md`, `nexus-edge-smart-house/README.md`) -
+their `NEXUS_EDGE_SOURCE_PATH`-derived `../nexus-edge` links replaced
+with the same `https://github.com/anatolii-semochko/iot-nexus-edge`
+URL; regenerating them via `make new-project` wasn't an option (would
+discard real project state).
+
+Verified live: ran `scripts/new-project.sh` against a scratch target
+directory, confirmed the generated `README.md` carries the correct
+`https://github.com/anatolii-semochko/iot-nexus-edge` link and the
+`.../blob/main/docs/CREATING_A_TARGET_PROJECT.md` doc link, `sh -n`
+clean, scratch directory removed afterward.
+
+## 44. Elementary components library: first real category tree, icons, 4 new lightweight devices
+
+Starter package toward the user's own wider goal ("пакет базових
+пристроїв" - button/switch/encoder, sensors, actuators, indicator
+LEDs/buzzers) - section 33's Library Catalog sync (`category.json` /
+`library.json` / optional `icon.svg` per folder) already supported
+nested categories in full, just unused until now (only the
+`_synctest` fixture had ever exercised it).
+
+**Category tree** - four new `devices/standalone/{input,sensor,
+actuator,indicator}/category.json` folders (`{name, description}`,
+matching `CategoryDescriptor`), populated by:
+
+**Recategorizing all 6 existing devices** into them (`git mv`, content
+untouched): `switch` -> `input/`, `temperature` -> `sensor/`,
+`active-buzzer` -> `indicator/`, `light-regulator`/`heater`/`cooler`
+-> `actuator/`. Real blast radius turned out wider than "just move
+folders": `apps/ui/src/builtinDeviceTypes.js` has *static* imports
+keyed to the old paths for `light-regulator`'s and `active-buzzer`'s
+UI control/simulator components (`import ... from 'devices/standalone/
+light-regulator/ui/control/...'`) - missing this would have broken
+the UI build silently until someone opened a Devices page. Updated in
+lockstep. Also swept every doc/comment "source of truth is
+`devices/standalone/<old-path>`" pointer across `AGENTS.md`,
+`README.md`, `docs/DEVELOPMENT_LOG.md`, two migrations, three
+`apps/device-service/res/` YAML files, and the moved `active-buzzer`
+device's own self-referencing `docs/README.md` - none of these break
+anything if left stale, but a wrong "source of truth" pointer is
+exactly the kind of thing that costs someone real time later.
+
+**Icons** - schematic/IEC-style line-art SVGs (`#495057` stroke,
+`stroke-width 3`, 64x64 viewBox, no `currentColor` - `LibraryBrowser.
+jsx`'s `RowIcon` renders via a plain `<img src>`, which doesn't
+inherit page CSS, so the color has to be baked into the file). Style
+sample (switch + LED) shown to the user as a published Artifact before
+producing the rest, per their own explicit ask ("хотів би для них
+іконку - схемотехнічне зображення") - approved with no changes. One
+`icon.svg` per device, all hand-drawn to read at both the actual
+24px Library-table thumbnail size and enlarged: switch (open-contact
+break + terminal dots), LED (diode wedge + cathode bar + emission
+arrows), thermometer (capsule + bulb + tick marks), speaker+arcs
+(active-buzzer), rheostat (light-regulator - resistor box + diagonal
+arrow), zigzag resistor + heat waves (heater), snowflake (cooler),
+momentary pushbutton (terminal dots + open bar + push arrow), sine
+wave (analog), coil + switch contact (relay).
+
+**4 new lightweight devices** - `input/button`, `sensor/analog`,
+`actuator/relay`, `indicator/led`. Deliberately NOT the full 8-file
+device-kind shape `switch/` etc. use (`contract.schema.ts`,
+`edgex-device-profile.yaml`, `config/default-state.yaml`,
+`safety.yaml`, `tests/README.md`) - confirmed with the user
+("робимо мінімум... розширимо, коли будемо точно знати, чого
+бракує"): none of these have real hardware yet, so building the full
+machinery now would be ~8 files x 20 devices of pure boilerplate for
+things nothing reads. Each gets just `library.json` (`{id, name,
+description}`) + `icon.svg` + a short `docs/README.md` stub with a
+`## Status` section explicitly marking it catalog-only and pointing at
+`switch/` as the shape to graduate into once it has a real node/
+process. `led` deliberately stays single-color - the original request
+listed `led R`/`G`/`B`/`RGB` separately, but three copies of one
+device with no real multi-channel contract isn't worth it yet; noted
+in the doc as a deferred decision, not forgotten.
+
+Device-detail drill-down (model, docs, links, images beyond the small
+icon) explicitly deferred - the user hasn't decided the shape of that
+yet either ("ще не визначився з стилем і деталями... розширимо, коли
+будемо точно знати").
+
+Verified live: rebuilt the `api` image (`devices/` is baked in at
+build time, no bind mount), `POST /library/sync` -> `{categories: 4,
+items: 11}` (10 devices + the pre-existing `example-thermal-node`),
+confirmed every icon path resolves (`GET /library-assets/library/
+standalone/<category>/<device>/icon.svg` -> 200) and renders correctly
+in all four categories in the browser at real thumbnail size, `light-
+regulator-01`'s device detail page still renders its control (the
+moved-import risk), console clean throughout.
+
+## 45. Alarm Annunciator - operator panel node/process, second sound-output consumer
+
+An operator panel: 16 LED indicators (8 red/error + 8 yellow/warning,
+one pair per Message Group "slot") plus its own buzzer, so an operator
+can see which Message Groups have active warnings/errors at a glance,
+without the UI. Confirmed with the user before building (plain-text
+questions, not `AskUserQuestion` - its UI was hard to work with mid-
+session): severity level does **not** change an LED's own behavior -
+red/yellow are plain present/absent per group, all active groups lit
+simultaneously; the buzzer alone reflects the fleet-wide highest
+active level (unchanged Active Zummer policy). Test buttons are
+**momentary and UI-only** - no physical Button device backs them; the
+real panel hardware is only the 16 LEDs + buzzer. A bound-less slot's
+Test button is disabled (explicit user follow-up, easy to miss:
+"кнопки, які не прив'язані до групи - disabled").
+
+**Library**: `devices/nodes/alarm-annunciator/` (`supports: [led,
+active-buzzer]`, `bus.type: null` - virtual only, same as every other
+node type today). `indicator/led` graduated from its catalog-only
+entry (section 44) to the full 8-file device-kind shape - first real
+consumer.
+
+**Seed** (`1690000000043_seed-alarm-annunciator.ts`, one migration, ~50
+lines of "array + loop" reusing `1690000000031_seed-example-thermal-
+node.ts`'s own shape): 1 node row, 17 device rows (`annunciator-
+error-1..8`, `annunciator-warning-1..8` - type `led`; `annunciator-
+buzzer-01` - type `active-buzzer`, reuses the existing EdgeX profile,
+no new one needed), 1 process row (`kind: 'alarm-annunciator'`,
+`device_id` = the buzzer). `heartbeat_control`/`data_logger_control`
+are explicitly set to the same rich defaults the 2026-08-01 backfill
+migrations gave every already-existing row at the time - the bare
+column-level default (`{}`) breaks any code path that reads
+`.warning.level` unconditionally, which several already do.
+
+**Config shape** (`processes.config`, generic `PATCH /processes/:id/
+config` - no new route, same endpoint every other kind's settings
+already use): `slots: [{redDeviceId, yellowDeviceId, messageGroupId}]`
+x8 (device ids fixed at seed time, `messageGroupId` admin-editable via
+a new `AnnunciatorEditModal.jsx`, matching `HeartbeatEditModal.jsx`'s
+own "Edit" idiom) plus `testLevel`/`testSlotIndex` - the process
+panel's own momentary test-button state, written through this same
+route on mousedown/mouseup rather than a dedicated endpoint (a human
+clicking, not a hot loop).
+
+**Message Groups: first real reader.** Before this, `process_message_
+groups` was pure inert metadata - nothing computed "does this group
+have an active error/warning" (confirmed by research: the existing
+buzzer/Active Zummer derives its alarm condition fleet-wide from every
+process's `critical`/`warning`, never scoped by group). New route `GET
+/message-groups/active-state` (`routes/messageGroups.ts`) does the
+aggregation: for each group, does any member process (`process_
+message_groups`) currently have `critical`/`warning` true (Redis, via
+`processRegistry`). Same simplification the buzzer already makes: a
+process's critical/warning flag carries no WEM level of its own, so a
+real active flag always reads as level 1 - nothing produces a real
+level 2-4 today. A held test button additionally contributes its own
+operator-chosen level (1-4), which is the *only* way to exercise
+levels 2-4 anywhere in the system right now.
+
+**Shared burst engine** (`apps/orchestrator/src/soundOutput.ts`, new)
+- extracted whole from `activeBuzzer.ts` (section 42's burst-pattern
+engine) the moment a second sound-output consumer existed. One
+function, `driveSoundOutput(processId, deviceId, plan)`, handles
+constant/off/burst dispatch and the `bursts`/`lastSignature` Maps
+(now keyed across every sound-output process, not just one) -
+`activeBuzzer.ts` shrank to just computing its own fleet-wide
+`AlarmPlan` and handing it off; `alarmAnnunciator.ts` does the same
+with its own group-scoped plan. Neither file duplicates the pulse-
+timer logic anymore.
+
+**Per-tick logic** (`processes/alarmAnnunciator.ts`): for each of the 8
+slots, `errorActive = group.hasActiveError || (thisSlotIsBeingTested
+&& testLevel.type === 'error')` (same shape for warning) - writes both
+LEDs unconditionally every tick (safe: `PUT /devices/:id/auto`
+already dedupes unchanged reassertions in `log_command`, section 22's
+2026-08-01 fix). Builds `{error: [...], warning: [...]}` level arrays
+(real activity = level 1, held test = the chosen level) and calls the
+*unmodified* `determineAlarmPlan` (`alarmPolicy.ts`) - the annunciator
+needed zero changes to alarm-priority logic, only a different input.
+
+**Real bug found and fixed along the way**: `GET /devices` started
+returning `edgex: null` for the buzzer plus the last two LEDs right
+after seeding - looked like a provisioning failure, but `core-metadata`
+had all 17 devices registered and `UP` (confirmed directly). Root
+cause: `apps/api/src/edgex.ts`'s `listEdgeXDevices()` called `/api/v3/
+device/all` with no `limit` param - EdgeX's own default page size
+(empirically 20) silently truncated the fleet once total device count
+crossed it, something nobody had hit before this feature added 17
+devices at once. Fixed with `?limit=-1` (EdgeX's own "no limit"
+convention) - a real, previously-latent bug, not specific to this
+feature's devices.
+
+Verified live: full `make up-all` + one extra `api` rebuild for the
+`limit=-1` fix, migration ran clean, all 19 devices (fleet-wide, not
+just this feature's 17) confirmed `edgex.operatingState: UP` after the
+fix. Created a real Message Group, bound Heartbeating Control's own
+`critical` flag to it (the process that actually raises fleet
+critical/warning - not `heartbeat-control-test` itself, a mistake
+caught mid-verification, same confusion as a past session), bound
+Alarm Annunciator's slot 1 to it, drove a real error via `heartbeat-
+control-test`'s `simulate: true` and confirmed: slot 1's red LED
+(device value) went `true`, the buzzer burst-toggled per the
+configured `longBeep` pattern, unbound slots' LEDs stayed `false`.
+Separately verified the test-button path directly (`PATCH testSlotIndex/
+testLevel`): holding warning-tests slot 1 while its real error was
+already active lit *both* red and yellow simultaneously; releasing
+dropped yellow back to `false` while red (still really active) stayed
+`true` - simultaneous-not-priority behavior confirmed exactly as
+specified. Browser: process list shows "Alarm Annunciator", expanded
+panel shows live-updating LED colors, disabled Test buttons on unbound
+slots, Edit modal correctly lists/saves group bindings. Console clean,
+`tsc --noEmit`/`vitest` clean on `apps/api` and `apps/orchestrator`.
+All test state (message group, group membership, slot binding, message
+level config, simulate flag) reset to baseline afterward.
+
+## 46. CORE minimized to system-only processes; sound-output kinds move to target projects; process-settings/list UI consolidation
+
+Follow-up to section 45, driven by the user's own framing of the CORE/
+target-project split: CORE should stay "чистим і порожнім" (clean and
+empty) - only genuinely system-level processes seeded here, everything
+project-specific (which Message Groups matter, which rooms have
+buzzers) belongs in the target project that actually has that context.
+Confirmed narrowly before implementing (plain-text questions in
+`AGENTS_TO_DO.md`, not `AskUserQuestion` - unusable for this user
+mid-session, see below): **only the `processes` row and its
+orchestrator runner move** - the Library node type (`alarm-
+annunciator`) and every device instance (17 LEDs/buzzer for the
+annunciator, the buzzer for Active Zummer) stay seeded in CORE, since
+they're reusable hardware/library definitions, not project-specific
+policy. Node->Device and Process->Node dependencies stay documentation-
+only for now (not enforced), deliberately shaped so a future "Process
+Library Import: process->nodes->devices" automation could read them
+later - same for `node.yaml`'s `supports:` field.
+
+CORE's `processes` table now seeds exactly 4 rows: Data Logger,
+Heartbeating Control, Resource Monitor, Heartbeating control test.
+Active Zummer (section 42) and Alarm Annunciator (section 45) both
+moved to `nexus-edge-smart-house` as **plugin process kinds**, following
+the extension-point mechanism `processPlugins.ts` already documented
+(section 31/45's own note on it) - `plugins/active-buzzer/process.ts`
+and `plugins/alarm-annunciator/process.ts`, each a near-verbatim port of
+the deleted CORE files (`processes/activeBuzzer.ts`, `processes/
+alarmAnnunciator.ts`, both removed from this repo entirely - no runner
+left here for either kind). Removed via new migrations
+(`1690000000044_remove-active-buzzer-process-unconditionally.ts`,
+`1690000000045_remove-alarm-annunciator-process-unconditionally.ts`,
+same unconditional-delete shape as section 30's temperature-control
+removal, migration 035) - deletes only the `processes` row, node/device
+rows explicitly untouched.
+
+**Plugin context grew two new members.** Both moved processes need the
+same beep-pattern/burst-timer engine and alarm-priority logic CORE
+already has (`soundOutput.ts`'s `driveSoundOutput`/
+`silenceSoundOutput`, `alarmPolicy.ts`'s `determineAlarmPlan`) - rather
+than duplicate that logic per plugin, `processPlugins.ts`'s injected
+context object (`apps/orchestrator/src/processPlugins.ts:48-54`) grew
+from `{apiClient, logger}` to include all three, passed as plain
+function arguments into every plugin's default export alongside
+`register` - still zero imports from `@nexus-edge/orchestrator` itself,
+for the same reason as before (confirmed again: a `package.json`
+`exports` entry would not resolve at runtime for a plugin file mounted
+outside the pnpm workspace's `node_modules` graph). A target project
+that specifically wants tighter integration can still add a real `file:`
+dependency on the package instead - this loader just doesn't require it.
+
+**Message Groups renamed to "Message Casting Groups" - display label
+only, scoped to `ProcessSettingsModal.jsx`.** Disambiguates from a
+not-yet-built inverse ("Message Receiving Groups" or similar, for a
+future process kind that reacts to a group's state rather than casting
+into it - Alarm Annunciator is arguably already this shape, but its own
+UI names it "slot bindings", not the group-membership language this
+section covers). Deliberately NOT renamed anywhere else - the
+underlying entity/table/route/field names (`message_groups`, `/message-
+groups`, `messageGroupId`), and the Settings page's own card header,
+are all unchanged (confirmed narrowly with the user: rename is scoped
+to "у кожному попапі процесу", the popup only).
+
+**`ProcessSettingsModal.jsx` consolidated into the single popup already
+opened from a process row's first action button** - previously Alarm
+Annunciator's slot bindings lived in a second, kind-specific modal
+(`AnnunciatorEditModal.jsx`, opened from a gear button added to the
+expanded panel) opened alongside the general Tab Groups/Message Groups
+popup; the user asked for one popup only ("один основний попап з
+конфігом... загальні стандартні опції, а після того блок унікальних для
+процесу опцій"). `AnnunciatorEditModal.jsx` deleted; its slot-editing UI
+now renders as an extra section below the standard Tab Groups/Message
+Casting Groups pair, dispatched by process kind via a plain `kind ->
+component` map (`EXTRA_SETTINGS_SECTIONS`, mirrors `ProcessesTable.jsx`'s
+own `KIND_PANELS` idiom) - today only `alarm-annunciator` has an entry,
+but the shape scales the same way that one does. State ownership needed
+two passes to satisfy this codebase's stricter lint rules
+(`react-hooks/set-state-in-effect`, `react-hooks/refs`): the extra
+section owns its own `slots` state via a plain `useState` initializer
+(safe because it only ever mounts while the modal is actually open, so
+every reopen is a fresh mount - no reset effect needed), and writes its
+latest edit into a parent-owned `slotsRef` only from the `CFormSelect`'s
+own `onChange` handler (a ref write during a real event is always safe;
+during render or inside an effect body, both got rejected live). The
+parent's Save handler reads `slotsRef.current ?? process.config.slots`
+- `null` means "untouched this session", a no-op write rather than data
+loss - and `handleClose` resets the ref so a cancelled edit for one
+process can never leak into a later save for a different one.
+
+**`AnnunciatorPanel.jsx`** lost its gear button (config now lives
+entirely in the consolidated popup above) and gained a mini
+`BuzzerIndicator` for the process's own buzzer live state in its header
+row next to the level selector - previously missing entirely, the
+panel showed the 16 slot LEDs but nothing for the buzzer itself.
+
+**New MINI indicator size** (`components/indicators/constants.js`):
+`MINI_INDICATOR_SIZE = 30`, `MINI_BORDER_WIDTH = 3`, alongside the
+existing full `INDICATOR_SIZE = 48`/`BORDER_WIDTH = 5`.
+`StatusIndicator`/`BuzzerIndicator` both took optional `size`/
+`borderWidth` props (defaulting to the full constants, so every existing
+call site is unchanged) - `BuzzerIndicator`'s internal grille size is
+now `size * 0.3` rather than a hardcoded module-level constant. Used at
+the mini size in `AnnunciatorPanel.jsx`'s 16 slot LEDs (dense panel,
+`radius 30px, border 3px` per the user's own spec) and the new buzzer
+indicator above; used at the existing full size in the new Devices-list
+expansion below.
+
+**Nodes and Devices list pages gained expandable detail rows**, reusing
+`useExpandableRows`/`ExpandToggleButton`/`ExpandAllToggleButton`
+(section 39's hook, built for Processes and explicitly designed for
+reuse) rather than anything new - `expandedIds` joined each page's own
+`usePersistedState` defaults, a header-level `ExpandAllToggleButton`
+sits next to "Actions". **Nodes**' detail row shows the raw node object
+as formatted JSON (`JSON.stringify(node, null, 2)` - already have the
+full row from the list, no extra fetch; user's own framing: "Поки що
+показуємо стан ноди. Можеш показувати JSON. Потім будемо
+допрацьовувати" - deliberately deferred, not a final design). **Devices**'
+detail row (`DeviceDetailRow`) fetches the device once on expand
+(`api.getDevice`, same "get once then overlay live" shape
+`ActiveBuzzerPanel.jsx` already used) and overlays `useDeviceLiveState`
+for the current value; renders a full-size `BuzzerIndicator`/
+`StatusIndicator` for `active-buzzer`/`led` device types (matching what
+Processes -> Active Zummer already shows), raw `String(value)` for
+every other type for now (explicit user answer: "Показуй поки що сире
+значення").
+
+**Two more real, pre-existing bugs found live during this section's own
+verification pass**, both fixed via new non-destructive migrations (CORE
+via `node-pg-migrate`, smart-house via a new numbered `migrate-extra`
+SQL file) rather than editing already-applied ones:
+
+- **`ON CONFLICT (name)` idempotency mismatch** in smart-house's own
+  `migrations/001_seed_thermal.sql`: `migrate-extra` re-runs every SQL
+  file on every container start (section 31), so its seed INSERT must
+  stay idempotent - but `name` is the user-editable display name, and
+  these three devices had since been renamed via the UI ("Сенсор
+  температури"/"Нагрівач"/"Охолоджувач"), so the old conflict target no
+  longer matched and every restart attempted a fresh INSERT, colliding
+  instead on the separate `devices_edgex_device_name_key` constraint -
+  `nexus-edge-smart-house-migrate-extra` was crash-looping on this found
+  live while seeding this section's own `house-buzzer-01`. Fixed by
+  switching the conflict target to `edgex_device_name` (the stable
+  identity column) in `001_seed_thermal.sql` and the new
+  `002_seed_house_buzzer.sql`.
+- **Nodes' `heartbeat_control` stuck at the bare `{}` column default**:
+  migration `1690000000025_add-heartbeat-control-to-entities.ts`'s own
+  backfill only covered `processes`/`devices` ("No nodes exist yet...
+  nothing to backfill", true when written) - nodes created since
+  (`example-thermal-node-01`, migration 031; `alarm-annunciator-01`,
+  migration 043) inherited the bare default and were never backfilled.
+  `GET /heartbeat-controls` already lists node-type entries alongside
+  devices/processes, and `HeartbeatEditModal.jsx` reads `.warning.level`
+  unconditionally - would crash for any node whose `heartbeat_control`
+  is missing the key entirely (same bug class as the device-side gap
+  section 45 already fixed once). Fixed with CORE migration
+  `1690000000046_backfill-node-heartbeat-control-defaults.ts` and
+  matching smart-house migration
+  `005_backfill_thermal_node_heartbeat_defaults.sql` (same rich shape as
+  migration 025's own backfill). Verified: CORE's node now shows a
+  proper rich `heartbeatControl`; smart-house's backfill affected 3 rows
+  (`thermal-node-01` plus two renamed rows), confirmed via `GET /nodes`.
+
+Verified live end to end: full `make up-all` in both `nexus-edge` and
+`nexus-edge-smart-house` (the latter needed a second full rebuild after
+an earlier verification pass mistakenly only restarted `migrate-extra`,
+leaving the UI container stale and the new settings-modal section
+invisible until caught). CORE's Processes list shows exactly the 4
+system rows. Smart-house's Processes list shows Active Zummer and Alarm
+Annunciator, both running; opening Alarm Annunciator's settings shows
+Tab Groups, Message Casting Groups, and the consolidated "Alarm
+Annunciator - slot bindings" section together in one popup; the panel's
+16 LEDs render visibly smaller than the Devices page's 48px indicators,
+with a mini buzzer indicator next to the level selector. CORE's own Data
+Logger settings popup confirms the rename displays correctly there too
+("Message Casting Groups" with real checkboxes). Devices list expansion
+shows live LED/buzzer indicators for the relevant device types. Both
+tabs' consoles clean throughout.
+
+## 47. Control Node - Raspberry Pi watchdog board (CORE library + first real CAN backend + Heartbeating Control for nodes)
+
+`devices/nodes/control-node/` (AGENTS_TO_DO.md, 2026-08-09 "НОДА
+КОНТРОЛЮ", spread across several rounds of Q&A - read that thread for
+the full requirement derivation, this section is the distilled result).
+An STM32F103C8T6 ("Blue Pill") + WCMCU-230 (VP230 chip, a pin-compatible
+SN65HVD230 clone, 3.3V-native - corrected 2026-08-11 from an earlier
+MCP2551 speculation once real hardware was in hand) board, mounted in
+the same enclosure as the Raspberry Pi running NexusEdge, on the
+enclosure's own CAN bus. Two entirely independent heartbeat directions,
+both real for the first time in this platform:
+
+- **Node -> NexusEdge** (does the board's firmware/link work?): a new
+  `sensor/heartbeat` device type (a free-running `Uint32` counter,
+  incremented once/sec by firmware) is the first real producer
+  Heartbeating Control (section 28) has ever had for a *node* - that
+  feature was process-only until now (its own runner's comment used to
+  say so explicitly). Closing this gap needed real backend work, not
+  just a config value: `apps/api/src/heartbeatControl.ts` gained
+  `touchNodeHeartbeats`/`getNodeLastSeenAt`/`getNodeHeartbeatStopped`
+  (node-typed siblings of the process-only functions already there),
+  `routes/nodes.ts` gained `POST /nodes/heartbeat` (node-side
+  counterpart of `POST /processes/heartbeat`) and now merges live
+  `heartbeatStopped`/`heartbeatLastSeenAt` into `GET /nodes` the same
+  way `routes/processes.ts` already did for processes.
+  `apps/orchestrator/src/processes/heartbeatControl.ts`'s `runHeartbeatControl`
+  now evaluates nodes too (refactored its process-only loop into a
+  shared `evaluate()` helper called for both `apiClient.listProcesses()`
+  and the new `apiClient.listNodes()|` - same `skippedTicks`/WEM logic,
+  `stale_process_*`/`stale_node_*` WEM codes keep the two kinds from
+  colliding). Bonus fix along the way: `nodes.last_heartbeat_at` (a
+  legacy column from the original scaffold, already displayed by
+  `NodesList.jsx` but never written by anything - a real pre-existing
+  gap, not introduced here) is now populated by the same
+  `touchNodeHeartbeats` call.
+- **NexusEdge -> node** (does the control system have a pulse?): a new
+  `actuator/pulse` device (`Bool`, written `true` every orchestrator
+  tick) - the node's firmware watches for this arriving over CAN and
+  drives its own 100% autonomous LED/buzzer/reset-attempt escalation
+  entirely independent of NexusEdge, since the whole point is it must
+  keep signaling even after NexusEdge itself has crashed. None of that
+  escalation logic exists anywhere in this repo - it's firmware-only, see
+  `devices/nodes/control-node/firmware/`.
+
+**Why two new device types, not one "environment" device**: the target
+sensor (AHT10/AHT20, chosen over the originally-proposed DHT11 for its
+I2C hardware peripheral vs. DHT's fragile software-bit-bang timing) is
+one physical chip reporting both temperature and humidity, but this
+library's Device is atomic (section 30/32) - `sensor/temperature`
+(reused as-is, its "Example" EdgeX profile branding is cosmetic, not
+shown in nexus-edge's own UI) plus a new `sensor/humidity`, not a
+compound device. A DS18B20 (1-Wire, temperature-only) is a temporary
+bring-up stand-in before AHT10/AHT20 physically arrives - same
+`sensor/temperature` device type, just a different firmware driver
+(`config.h`'s `SENSOR_USE_AHT`), and the humidity device simply isn't
+wired to anything real yet on that instance (`humidityDeviceId` absent/
+null in the process's own config - see below).
+
+**`input/button` graduated** from its catalog-only entry (library.json +
+icon.svg + docs stub, section 44) to the full file set - the "Mute
+Beeper" button is its first real consumer, same graduation `led`/
+`active-buzzer` already went through for Alarm Annunciator (section 45).
+
+**LED/buzzer got real Dev Simulator visuals for the first time** -
+`LedControl`/`LedSimulator` (new) and `ActiveBuzzerSimulator` (new,
+alongside the pre-existing `ActiveBuzzerControl`), registered in
+`builtinDeviceTypes.js`. `led` gained an optional `capabilities.color`
+hex hint (consumed by both `LedControl` and `DevicesList.jsx`'s own
+inline `StatusIndicator` usage) so this node's green/yellow/red trio (and
+any future instance) can render its actual intended color instead of
+every LED in the app looking identical - backward compatible, absent
+`color` still falls back to `StatusIndicator`'s existing default blue
+(Alarm Annunciator's 16 LEDs unaffected). **Real bug found and fixed
+live**: `DevSimulator.jsx`'s `CustomSimulator` branch always called
+`handleSimulate` (the readOnly-only `.../simulate` endpoint) regardless
+of the underlying device's own `readOnly` flag - worked by accident for
+the one prior `CustomSimulator` (`light-regulator`) only because that
+happens to be readOnly; broke immediately (400 "not read-only") the
+moment a non-readOnly type (`led`, `active-buzzer`) got one. Fixed to
+match the same `readOnly ? handleSimulate : handleWrite` branch the
+generic `NumericStepper` path already used.
+
+**`ProcessMetrics` generalized** (`apps/api/src/processRegistry.ts`,
+`Record<string, number>` instead of a hardcoded `{cpu, ram, disk}`) -
+`control-node`'s own `{temperature, humidity}` reading now shares the
+exact same `POST /processes/:id/metrics`/live-broadcast path
+`resource-monitor` (section 21) already established, not a parallel
+mechanism.
+
+**Where the process runner lives**: `nexus-edge-aquarium/plugins/
+control-node/process.ts` (the target project owns the real instance's
+behavior), *not* this repo - same split `temperature-control` already
+established (AGENTS_TO_DO.md, 2026-07-29 "chistiy proekt"). Each tick:
+writes `Pulse`, reads `Heartbeat` and touches the node's liveness only on
+an actual value *change* (EdgeX's CAN transport caches "latest frame"
+with no expiry - a value that never changes would misread as "still
+alive" forever, see `sensor/heartbeat`'s own contract.schema.ts), reads
+Temperature/(optional)Humidity for two-sided min/max/warnMin/warnMax WEM
+checks (unlike resource-monitor's own ceiling-only thresholds - both a
+floor and a ceiling matter for an enclosure reading). Config field names
+are `env`-prefixed (`envTempMin`/`envTempMax`/...) specifically to avoid
+colliding with resource-monitor's own plain `tempMax`/`tempWarnMax` on
+the *same* `ProcessRecord.config` TypeScript type (a real duplicate-key
+compile error caught during this session, not a hypothetical). **This
+process kind's own detail panel** (`ControlNodePanel.jsx`, CORE's
+`KIND_PANELS`) stays in this repo though, same precedent as
+`TemperatureProcessPanel.jsx` - four steppers per metric (Warning/Error
+× Min/Max), humidity row only rendered when the process's own config
+actually has a `humidityDeviceId`.
+
+**CAN backend - first real (non-`virtual`) physical device in this
+project.** `apps/device-service`'s `physical`/`transport: can` backend
+(`internal/driver/backend.go`, `internal/transport/can/`) was already
+fully implemented but had never been exercised by an actual device
+profile before this. This node's 9 devices are still seeded
+`backend: virtual` in `nexus-edge-aquarium/extra-res/devices/
+control-node-devices.yaml` for now (matching `example-thermal-node`/
+Alarm Annunciator's own dev-first precedent) - concrete CAN arbitration
+IDs are assigned and documented in `devices/nodes/control-node/
+firmware/src/config.h` and `devices/nodes/control-node/docs/
+wiring.md`, ready to copy into that device-list's `protocols.transport`
+block once the board and its CAN transceiver are physically wired to the
+enclosure's bus.
+
+**Firmware** (`devices/nodes/control-node/firmware/`, PlatformIO +
+STM32duino/Arduino framework, not raw CMSIS/HAL): `config.h` centralizes
+every timing/pin/CAN-ID constant per explicit instruction ("ВСІ часові
+таймери... ПРОПИШИ В КОНСТАНТИ"); `watchdog.cpp` is the core autonomous
+state machine (`launched` flag latches true forever on first pulse, one
+shared "time since last pulse" clock drives the `>2s` LED-alarm
+threshold, the 1/2/3-minute buzzer escalation, and the 5/15/30-minute
+forced-reset schedule - all as literal constants traceable to the
+user's own spec in AGENTS_TO_DO.md); zero dependency on CAN/NexusEdge
+being reachable, by design. **Written but not yet build/flash-tested
+against real hardware** (Blue Pills hadn't arrived when this was
+written) - see the firmware's own README.md for what to verify once they
+do.
+
+Verified live (the software/backend half only - no physical board
+exists yet): full `nexus-edge-aquarium` stack (`make up-all`, alongside
+nexus-edge's own already-running stack, container names/host ports
+checked for collisions first per this package's own `../CLAUDE.md`
+convention). Migration applied idempotently (`node/9 devices/process`
+inserted, re-run-safe via `ON CONFLICT (edgex_device_name)` - not
+`(name)`, the exact bug class documented on smart-house's own
+`001_seed_thermal.sql` history). `device-service` registered all 9
+devices with `core-metadata`. `GET /processes` showed the resolved
+config (device ids, thresholds) and live `{temperature: 22, humidity:
+45}` metrics. Simulated the `Heartbeat` counter changing twice via
+`PUT /devices/:id/simulate` - `GET /nodes` correctly populated
+`heartbeatLastSeenAt`/`last_heartbeat_at`; left it unchanged afterward
+and confirmed Heartbeating Control correctly raised a critical WEM entry
+("hasn't sent a heartbeat in N ticks") once past its 10-tick error
+threshold, then confirmed it cleared on the next simulated change.
+Dev Simulator: clicking the green LED/buzzer rows now shows the correct
+green/red color (not a generic checkbox, and not a 400 error - the
+readOnly-branch bug above was caught by this exact click). Control
+Node's own detail panel renders both metric rows with the seeded
+threshold defaults. Console clean throughout.
+
+## 48. Partial physical network - live physical/simulated redirect per Node or standalone Device
+
+AGENTS_TO_DO.md, 2026-08-09/10 - lets a Node (or a standalone Device,
+`node_id IS NULL`) be switched between its physical EdgeX identity and
+an opt-in simulated twin, **live**, from the UI. Directly revisits
+section 6's own "physical/virtual is config-time only, not a live UI
+toggle... nobody actually needs day-to-day" call - a second real need
+showed up (dev/prod bench-testing: some nodes physically on the bench,
+others simulated, switching which is which without a redeploy) - but
+does **not** touch that flag or `apps/device-service`'s own config-time
+`backend` resolution at all. This is a deliberately separate, additive
+axis living entirely in `apps/api` - `backend.go`'s own hot-swap-safety
+reasoning stays exactly as valid as it always was for what it actually
+governs.
+
+**Why not two Postgres device rows** (the earliest shape considered):
+would double Node/Device Group membership, fragment
+`log_command`/`log_device` history across a switch, and force every
+list view to somehow show "which of these two rows is the *real* one"
+right now. Real finding that made the alternative cheap instead:
+`dualDevicesModel.publishReading`/every other bus-facing call already
+keys everything off the stable Postgres `device.id`, never the EdgeX
+device name - nothing downstream (UI, the live WS feed, a process's own
+`apiClient.getDevice(id)`) has ever seen an EdgeX name at all. So one
+row, two possible EdgeX identities, redirect only where the name is
+actually resolved:
+
+- **Schema** (migration `1690000000048_add-simulated-mode`):
+  `nodes.simulated boolean`, `devices.simulated boolean`,
+  `devices.edgex_device_name_simulated text` (nullable). `simulated`
+  only carries independent meaning for a standalone device - a node-
+  attached one always defers to its own node's flag instead (the
+  switching granularity the user asked for: "для нод і пристроїв-
+  сиріт", not per-device-within-a-node). "Opt-in" needed no separate
+  flag - a device with no twin provisioned (`edgex_device_name_simulated`
+  null) simply has nothing to redirect to.
+- **Resolver** (`routes/devices.ts`'s new exported `resolveEdgexName`):
+  one function, called everywhere `device.edgex_device_name` used to be
+  read directly (~8 call sites - `GET /devices`, `GET /devices/:id`,
+  the four write paths via a generalized `requireEdgeXDevice` returning
+  `resolvedEdgexName`, `POST /devices/:id/log`, and the Model State
+  Validator's own sibling-device reads in `checkForbidden`). Needed a
+  `SELECT_DEVICE_WITH_NODE` join (`devices` LEFT JOIN `nodes` for
+  `node.simulated`) alongside the existing `SELECT_DEVICE_LIST_BASE`,
+  since `findDevice`/`findDeviceByNodeAndName` previously queried
+  `devices` bare, with nothing to resolve a node-attached device's
+  *effective* simulated-ness against.
+- **API**: `PATCH /nodes/:id/simulated` (rejects turning simulated on
+  when not one single child device has a twin - otherwise it would
+  silently be a no-op, indistinguishable from a bug) and
+  `PATCH /devices/:id/simulated` (rejects outright for a node-attached
+  device - "toggle the node's own simulated mode instead", not a
+  silent no-op either, since `resolveEdgexName` never even reads that
+  device's own column once it has a `node_id`). Both `requireAuth`;
+  `log_command`'s own `action` CHECK constraint gained `'simulated-on'`/
+  `'simulated-off'` (same migration) - the node-level entry has no
+  `device_id`/`process_id` to attach to (that table has no `node_id`
+  column, not added in this pass), so its `value` just carries the
+  node's own id/name instead of being omitted entirely.
+- **UI**: a compact `IconButton` (swap-horizontal icon, `secondary`/
+  outline when physical, `info`/solid when simulated, disabled when no
+  twin exists) on `NodesList.jsx` and `DevicesList.jsx` (standalone rows
+  only - hidden entirely, not shown-disabled, for a node-attached
+  device), placed between the existing Settings (gear) and Expand
+  buttons per the user's own explicit placement ask. `GET /nodes` grew
+  a computed `has_simulated_twin` (`EXISTS` subquery against `devices`)
+  so the list view can disable/enable the switch without a second
+  per-row fetch, same "resolve everything the list needs in one query"
+  idiom `SELECT_DEVICE_LIST_BASE` already established for Devices.
+
+**Explicitly deferred, per the user's own direction** (confirmed
+2026-08-10, "сервісний режим... на відповідальність інженера"), not
+forgotten:
+- **No safety guard on switching an actuator mid-command.** Flipping a
+  node from physical to simulated while it's actively driving real
+  hardware leaves the physical side exactly where it last was - nothing
+  forces a safe/neutral value on the way out. Left as a hook point for
+  a future guard (possibly firmware-side too, per the user), not built
+  now.
+- **No value-continuity seeding.** A freshly-simulated twin does not
+  inherit the physical side's last reading - confirmed live (see
+  below): switching a temperature device from physical (22°C) to
+  simulated (30°C, the twin's own separately-seeded value) is a real
+  discontinuity, deliberately left as an engineer-managed concern.
+
+Verified live end to end on `control-node-01` (nexus-edge-aquarium) -
+provisioned two representative simulated twins (`control-node-led-
+green-sim` Bool, `control-node-temperature-sim` Float32 - deliberately
+different seeded values, 22°C vs 30°C / false vs true, specifically so
+switching is visually unambiguous), linked via a plain `UPDATE` in
+`001_seed_control_node.sql` (not part of the base `INSERT`, so which
+devices get twins stays independent of the base seed). Real bug caught
+and fixed during this verification: `SELECT_DEVICE_LIST_BASE`'s new
+`n.simulated AS node_simulated` column broke both of its own `GROUP BY
+d.id, n.name` call sites (`42803`, Postgres requiring every selected
+non-aggregate column in the `GROUP BY`) - `GET /devices` returned a raw
+500 until both were extended to `GROUP BY d.id, n.name, n.simulated`.
+Confirmed via curl: `GET /devices/13` read `22` before toggling
+`control-node-01` to simulated, `30` immediately after, with no restart
+and no change to the request itself. Wrote `false` to the LED while
+simulated, switched back to physical, and confirmed the physical side's
+own value was untouched (`false`, its own pre-existing state, not
+overwritten by the simulated-side write) - twin isolation working as
+designed. Confirmed both rejection paths (`PATCH .../simulated` on a
+node-attached device; `PATCH /nodes/:id/simulated` with no twin
+anywhere - exercised via `alarm-annunciator-01`, which has none). In
+the browser: `NodesList.jsx`'s switch went solid blue on toggle, gray
+again on toggle-back, `alarm-annunciator-01`'s own switch stayed
+disabled throughout (no twin provisioned for that node at all).
+
+**Visual polish follow-up (2026-08-10):** the IconButton toggle above
+was replaced with the existing `Switch` component (gray/`#d3d3d3` when
+physical, red/`#e55353` when simulated - not the earlier blue "info"
+state) on both `NodesList.jsx`/`DevicesList.jsx`, and a simulated row
+(main row *and* its own expanded detail row) now gets `color="warning"`
+- the same contextual-row-tint convention already used elsewhere for
+critical/warning state. `DevicesList.jsx`'s tint uses a computed
+`effectivelySimulated` (`node_id === null ? device.simulated :
+device.node_simulated`) so a node-attached device tints correctly by
+its *parent's* flag, not its own always-`false` column. Both list pages
+also gained the same `border-bottom-0`-when-expanded idiom
+`ProcessesTable.jsx` already used (removes the line between a row and
+its own expansion) - a plain visual-consistency request, unrelated to
+simulated mode itself, done at the same time since both list pages were
+already being touched.
+
+**Investigated separately, not a bug:** enabling `simulated` on
+`control-node-01` and immediately seeing Heartbeating Control flag it
+critical ("hasn't sent a heartbeat in 11833 ticks") turned out to be
+unrelated to the toggle - `control-node-heartbeat` has no simulated
+twin at all, so `resolveEdgexName` returns its physical name either
+way. The real cause: restarting `device-service` earlier in this same
+session (to load the two new `-sim` device-list entries) reset every
+virtual device's value back to its own YAML `initial.X`, including
+`Heartbeat` back to `0` - and nothing auto-increments it in this all-
+virtual dev setup except a manual `.../simulate` call, so it had simply
+sat stale for the ~3.3 hours since. Confirmed live: a fresh simulated
+write to `Heartbeat` cleared the alarm instantly with `simulated` still
+on. Real firmware (once flashed) increments this every second on its
+own, so this specific staleness mode won't recur outside this all-
+virtual bring-up state.
+
+**Correction (2026-08-10) - that diagnosis was incomplete.** The user
+reported the same alarm recurring minutes later, still with `simulated`
+on - correctly pointed out this needed a real fix, not just an
+explanation. The actual gap: `simulated` mode is meant for bench-
+testing/service state (the user's own framing, "сервісний режим") -
+a node in that state has, by definition, no real hardware link for a
+heartbeat to arrive on, so `heartbeatControl.ts`'s own staleness check
+was raising a **permanent, un-actionable** alarm for any node currently
+simulated, not a transient one that would self-resolve. Fixed:
+`NodeRecord` (orchestrator `apiClient.ts`) gained `simulated`;
+`heartbeatControl.ts`'s shared `evaluate()` now skips any entity with
+`simulated: true` outright, before even checking `stoppable`/
+thresholds - a node's own heartbeat is simply not evaluated at all
+while simulated, the same way `stoppable` already exempts an entity
+from evaluation, just on a different, orthogonal condition. Verified
+live both directions: switching `control-node-01` to `physical` while
+its `Heartbeat` device was still stale correctly re-raised the same
+error immediately; switching back to `simulated` correctly suppressed
+it again, staying clear well past the point it would otherwise have
+tripped.
+
+## 49. Control Node firmware - first real hardware milestone (build + flash succeed)
+
+2026-08-10/11 - the user's Blue Pill and ST-Link V2 (clone, `A73-
+STLINK-V2`) arrived; this is the first point section 47's firmware
+(`devices/nodes/control-node/firmware/`, written untested) actually met
+real silicon.
+
+**Toolchain, from nothing to a working flash, in order:**
+- `stlink-tools` (apt) for `st-info`/basic SWD probing - confirmed the
+  ST-Link enumerates over USB but `st-info --probe` initially failed
+  without `sudo` (`access error`) even though the package's own udev
+  rule (`MODE:="0666"`) was already correct - the board had been
+  plugged in *before* the package installed that rule, so it never
+  retroactively applied; an unplug/replug (or `udevadm control
+  --reload-rules && udevadm trigger`) fixed it. Confirmed device:
+  `STM32F1xx_MD`, chipid `0x410`, 20KB SRAM, **128KB flash** - not the
+  nominal 64KB a "C8T6" implies, a well-documented trait of many C8T6
+  clones actually carrying a CBT6 die underneath; harmless bonus, not
+  something this firmware currently relies on (still builds against
+  the board definition's own 64KB figure).
+- PlatformIO Core, via the official `get-platformio.py` installer
+  (isolated venv at `~/.platformio/penv`, no system Python pollution,
+  no `sudo` needed for the installer itself) - needed `python3.12-venv`
+  (apt, `sudo`) first, the installer fails cleanly with that exact
+  instruction if it's missing.
+
+**Real build bug, found and fixed**: `pio run` failed compiling the
+STM32_CAN library - `CAN_HandleTypeDef`/`CAN_BS2_*TQ`/`HAL_CAN_*`
+symbols all "not declared", `struct stm32_can_t` reported as having no
+`handle` member. Root cause: STM32duino's default HAL config
+(`stm32f1xx_hal_conf_default.h`) does define `HAL_CAN_MODULE_ENABLED`,
+but only when nothing overrides it - this board/library combination
+needed it forced explicitly via `platformio.ini`'s `build_flags`
+(`-D HAL_CAN_MODULE_ENABLED`) rather than relying on the default path;
+the STM32_CAN library's own header (`STM32_CAN.h`) documents this exact
+flag as the fix in a comment, once you know to go looking for it. Not
+a design flaw in this firmware's own code - a real gap in how the
+STM32_CAN library documents its own prerequisites, same "real bug
+caught live" pattern as everything else in this journal.
+
+**Real hardware correction**: the CAN transceiver actually in hand is a
+WCMCU-230 (VP230 chip, pin-compatible SN65HVD230 clone, 3.3V-native) -
+not the MCP2551 (5V part) speculated in section 47/`docs/wiring.md`
+before hardware existed. `docs/wiring.md` and `node.yaml` corrected;
+arguably a better fit for this board than a 5V transceiver would have
+been anyway (no logic-level mismatch to reason about between the Blue
+Pill's own 3.3V I/O and the transceiver's TXD/RXD).
+
+**Verified so far**: `pio run` builds clean (RAM 7.7%/1568B, Flash
+44.5%/29180B against the nominal 64KB figure). `pio run --target
+upload` via `openocd`+`stlink`: "Programming Started" -> "Programming
+Finished" -> "Verify Started" -> "Verified OK" -> "Resetting Target".
+
+**Not yet verified**: the firmware was flashed to an otherwise-unwired
+chip (no LEDs/buzzer/sensor/CAN transceiver connected yet at flash
+time) - only "builds, flashes, resets without hanging" is confirmed,
+not any of `watchdog.cpp`'s actual behavior. Next planned check (not
+yet done): wire a single LED to PA1 (yellow) and confirm a ~1Hz blink,
+proving the state machine genuinely runs in real time before wiring
+the rest of the board.
+
+## 50. Control Node - pulse/heartbeat switched to real CAN, container CAN access, a profile/device update gotcha
+
+2026-08-13 - continuing from section 49, with the board now on a real
+CAN bus reachable from the dev host via a Y4126-CAN-PRO-2 USB-CAN
+adapter (enumerates as `0c72:000c PEAK System PCAN-USB`, a compatible
+clone; picked up by the kernel's own `peak_usb` driver, exposed as
+plain SocketCAN `can0` - no vendor software needed).
+
+**Two of the node's nine devices switched from `virtual` to
+`physical`/CAN** - `control-node-pulse` and `control-node-heartbeat`
+only (`nexus-edge-aquarium/extra-res/devices/control-node-devices.yaml`),
+deliberately not the other seven (LEDs/buzzer/sensor/button), whose own
+physical wiring/bench-testing hasn't happened yet. Each device now
+carries `protocols.transport: {type: can, bus: can0}`; the CAN
+arbitration ID itself (`canId: "0x300"`/`"0x301"`) was added to the
+`NexusEdge-Pulse`/`NexusEdge-Heartbeat` **profiles**
+(`devices/standalone/actuator/pulse/`,
+`devices/standalone/sensor/heartbeat/`, plus their baked
+`apps/device-service/res/profiles/` copies) - confirmed by reading
+`internal/transport/can/mapping.go`/`transport.go` directly that
+`canId`/`byteOffset` resolve from the EdgeX device **profile's**
+resource attributes (`req.Attributes`, populated by device-sdk-go from
+`DeviceResource.Attributes`), not from anything per-device-instance.
+This is a real, load-bearing limitation worth flagging: **a profile
+shared by multiple device instances can only ever have one CAN mapping
+for all of them.** `NexusEdge-Pulse`/`NexusEdge-Heartbeat` are safe
+today (control-node is the only device using either profile anywhere in
+the package), but `NexusEdge-Led` is not - it's shared by all three of
+control-node's own LEDs (green/yellow/red), which the real firmware
+distinguishes only by `byteOffset` within one shared CAN ID (`0x303`).
+Going physical for the LEDs as currently modeled would make all three
+resolve to the same mapping. Not fixed now (LEDs are still virtual) -
+whoever does that migration will need either per-instance profiles
+(`NexusEdge-Led-Green`/`-Yellow`/`-Red`) or a code change letting
+`protocols.transport` on the device instance override/supplement the
+profile's attributes. The `control-node-devices.yaml` file's own
+original comment claiming `canId`/`byteOffset` belonged on the
+per-device `protocols.transport` block (written before this transport
+code existed) was simply wrong and has been corrected in place.
+
+**Gotcha found live: editing a profile/device YAML on disk does nothing
+to an already-seeded EdgeX instance.** device-sdk-go's own bootstrap
+only creates a profile/device if the name doesn't already exist yet -
+restarting `device-service` after editing `NexusEdge-Pulse.yaml` logged
+`"Device Profile NexusEdge-Pulse exists, using the existing one"` and
+genuinely left the live profile (verified via `GET
+/api/v3/deviceprofile/name/NexusEdge-Pulse` against core-metadata,
+`127.0.0.1:59982` on this dev host) with no `canId` attribute at all.
+Same story for the device's own `protocols` block. Fixed by pushing the
+change directly against core-metadata's own API instead of relying on
+device-service's own seed-on-boot path:
+
+```
+curl -X PUT -F "file=@apps/device-service/res/profiles/NexusEdge-Pulse.yaml" \
+  http://127.0.0.1:59982/api/v3/deviceprofile/uploadfile
+
+curl -X PATCH http://127.0.0.1:59982/api/v3/device -H "Content-Type: application/json" \
+  -d '[{"apiVersion":"v3","device":{"name":"control-node-pulse","protocols":{...}}}]'
+```
+
+(`PATCH /api/v3/device` needed a top-level `"apiVersion":"v3"` sibling
+of `"device"` - EdgeX's `Versionable` embed - a 400 without it, easy to
+miss.) Worth remembering for any future edit to an already-seeded
+device/profile, not just this one - the "safe" path of just editing the
+YAML and restarting the container only actually works for a *brand
+new* device/profile name that's never existed before.
+
+**Container access to the real CAN bus**: discussed two options with
+the user - `network_mode: host` for the `device-service` container
+(the textbook Docker+SocketCAN pattern) vs. moving just the `can0`
+interface into that container's own network namespace. Investigating
+`device-service`'s actual startup path
+(`CMD ["./device-service", "-cp=keeper.http://edgex-core-keeper:59890",
+"--registry"]`, `docker-compose.edgex.yml`) showed `network_mode: host`
+would be far more invasive than it first looked: it resolves
+`edgex-core-keeper` (and, via keeper's own shared config, core-metadata/
+core-data/core-command/the message bus) purely by compose-network DNS
+name, none of which exist under host networking - fixing it would mean
+republishing several currently-internal-only ports across at least
+four other compose services (one, `edgex-core-metadata`, is already
+published but on a *remapped* host port, `59982`, which would need to
+become `59881` to line up) plus `extra_hosts` entries pointing every
+one of those names back at `127.0.0.1`. The netns-move option touches
+none of that - `device-service` keeps its normal compose network for
+everything else, gains only the one interface. Chosen. Implemented as
+`nexus-edge-aquarium/scripts/attach-can-bus.sh` (+ `make
+attach-can-bus`) - `sudo ip link set can0 netns <device-service's PID>`
+then bitrate/up inside that namespace via `nsenter`. Deliberately not
+wired into `up-all`/`edgex-up` - CAN hardware isn't present on every
+dev machine or every target project.
+
+**Correction, live-verified same day**: the "a plain `docker restart`
+reuses the existing netns" assumption above turned out to be wrong for
+this container - restarting `device-service` returned `can0` to the
+*host*'s root namespace (confirmed by seeing it reappear there), not
+just any full recreate. So `make attach-can-bus` needs re-running after
+*any* container restart, not only `--force-recreate`/rebuild/`down`+
+`up` as originally guessed - a smaller but real correction to the
+tradeoff that led to picking this approach; still meaningfully less
+invasive than `network_mode: host` would have been.
+
+**A second gotcha found during the same live test**: `device-service`'s
+`busConn` (one cached raw CAN socket per interface name, opened lazily
+on first use, "no expiry" by design - see `internal/transport/can/
+bus.go`) went stale after `can0` was moved out of and back into the
+container's namespace for diagnostics (to isolate a wiring problem from
+a container problem - see below). The cached socket kept accepting
+writes into a void and errored on send with `no such device or
+address`, silently, until `device-service` itself was restarted to open
+a fresh socket against the now-stable interface. Anything that
+manipulates `can0`'s namespace after `device-service` has already
+opened it needs a `docker restart nexus-edge-aquarium-device-service`
+afterward, every time - not just once at initial attach.
+
+**End-to-end live verification, 2026-08-13**: with `control-node-pulse`/
+`control-node-heartbeat` on `physical`/CAN and `can0` correctly attached
+to the container's namespace, `candump` inside the container showed
+NexusEdge's own `CAN_ID_PULSE` (0x300) writes reaching the bus
+continuously and the board's `CAN_ID_LEDS` mirror (0x303) settling into
+`00 00 00` (green blinking/off between blinks) rather than cycling back
+to `Booting`/`PulseLost` - the full physical loop closed with no manual
+`cansend` involved, matching section 49's "next step" exactly. One
+red herring along the way, worth remembering for next time: an
+apparent zero-RX/zero-errors dead bus (rx_packets stuck at 0, no
+errors at all) turned out to be a real loose/miswired CAN connection on
+the user's bench, not a software problem - confirmed by testing `can0`
+directly on the host (bypassing the container/netns entirely) before
+and after the physical fix, which is a good general bisection technique
+for "is this the software or the wire" on this kind of setup.
+
+**Also found stale and fixed**: `nexus-edge-aquarium/migrations/
+001_seed_control_node.sql`'s own `backend` column for these two devices
+(hardcoded `'virtual'` at INSERT time) - purely informational/UI-facing
+(the actual EdgeX-side switch is what's described above), but was
+showing `virtual` in the Devices API/UI despite the real backend now
+being physical. Fixed in the migration file for future/fresh
+deployments, and via a direct `UPDATE devices SET backend = 'physical'
+WHERE edgex_device_name IN (...)` against the already-seeded row, since
+this migration's own `ON CONFLICT DO NOTHING` idempotency (by design,
+see the migration's own header) means editing the migration file alone
+never retroactively touches a row that already exists - the same
+"editing the source doesn't touch an already-seeded/already-created
+thing" shape as the EdgeX profile/device gotcha above, just one layer
+further out (Postgres, not EdgeX metadata).
+
+## 51. Control Node - buzzer crackle bug, LEDs/buzzer live-verified, passwordless attach-can-bus
+
+2026-08-14 - LEDs and the buzzer wired to real peripherals and
+confirmed working ("Світлодіоди і функціонал STM32 працюють супер").
+
+**Real firmware bug found and fixed**: the buzzer crackled/broke up
+periodically while sounding, on every stage. Not a hardware quirk -
+`buzzer.cpp`'s `buzzerUpdate()` called `tone()`/`noTone()`
+unconditionally every time it ran, and it runs every `loop()`
+iteration with no throttling (`main.cpp` calls it unconditionally each
+pass). STM32duino's `tone()` resets the underlying hardware timer on
+every call; at `loop()`'s effectively-unbounded rate that reset the
+waveform hundreds to thousands of times a second, audible as a crackle
+riding on top of the actual tone. Fixed by tracking the currently-
+playing frequency in a static and only calling `tone()`/`noTone()`
+again when the target actually changes (0 Hz = silent) - one small
+`setTone()` helper, same idea in all three stages (short beep, long
+beep, the two-tone continuous alarm). Rebuilt, reflashed via ST-Link,
+user-confirmed crackle gone on all three stages.
+
+**Passwordless `make attach-can-bus`**: the script from section 50
+needed the user to type a sudo password on every single invocation
+(every device-service restart, per that section's own correction).
+Split it in two rather than granting blanket `NOPASSWD` on raw `ip`/
+`nsenter` (a much coarser grant - any local process could then remap
+network namespaces without a password): `scripts/attach-can-bus.sh`
+stays unprivileged (resolves the container PID, no sudo of its own),
+`scripts/attach-can-bus-root.sh` is the entire privileged surface (the
+actual `ip link .../nsenter` calls), invoked via exactly one `sudo`
+call. A `/etc/sudoers.d/attach-can-bus` drop-in
+(`visudo -f /etc/sudoers.d/attach-can-bus`, never edit sudoers files
+directly - a syntax error there can break `sudo` system-wide) grants
+`NOPASSWD` for that one script path only:
+
+```
+anatolii ALL=(root) NOPASSWD: /home/anatolii/Projects/iot/nexus-edge-aquarium/scripts/attach-can-bus-root.sh
+```
+
+The sudoers rule is per-machine/per-user setup, not something committed
+anywhere - `visudo` catches syntax errors before saving (confirmed live:
+a `NOPASWD` typo, missing the second S, was caught and re-prompted for
+a fix rather than silently breaking sudo).
+
+## 52. Process management - a Library catalog for process kinds, live create/delete, "pending restart"
+
+2026-08-14 - two gaps the user raised together: (1) `processes` rows
+could only ever be added/removed via a hand-written seed migration, no
+live management surface at all; (2) there was no discoverable catalog
+of reusable process *kinds* the way `devices/` already is one for
+device/node types - a target project wanting a new process kind had to
+write one from scratch, copy-paste from another target project, or
+know CORE's own `apps/orchestrator/src/processes/*.ts` existed at all.
+
+**Design choice, per the user's own framing ("каталог має бути в
+Library")**: rather than a parallel catalog system, `library_categories`/
+`library_items` (section 32) gained a third `kind = 'process'` value
+alongside the existing `device`/`node`, sourced from a new
+`devices/processes/` tree (same `library.json`/`category.json`/
+`icon.svg` conventions, same sync-on-startup + `POST /library/sync`
+mechanism, `libraryCatalog.ts`'s `walk()` just gained a third top-level
+call) - no new Postgres tables, no new Dockerfile `COPY`, no new static
+mount; `devices/` already gets baked into the api image and already
+serves `/library-assets/library/*`. `usedTypeNames()` for kind
+`"process"` joins against `processes.kind` (already exactly the right
+column) instead of `devices.type`/`nodes.type`.
+
+**One example catalog entry**: `devices/processes/example-threshold-
+monitor/` - a real, working (not fake) starter template: watches one
+Device against a two-sided min/max/warn range, same shape as CORE's own
+`resourceMonitor.ts` and control-node's own `process.ts`, reduced to one
+generic device. Explicitly labeled "(template)" - deliberately not a
+migration of any real target-project process (control-node,
+temperature-control, alarm-annunciator, ...) into the catalog, which
+would be a separate, larger, per-process risk/sign-off decision, not
+bundled into this infrastructure change.
+
+**Live CRUD** (`routes/processes.ts`, both `requireAuth`): `POST
+/processes` (name, groupId, type, kind, actions, deviceId, config) and
+`DELETE /processes/:id` - deliberately unrestricted, no special-casing
+"official"/`permanent` kinds, same "no special-casing" principle
+`processRegistry.register()` itself already follows. Both are fully
+live with no restart needed for a `kind` whose plugin is already
+loaded: `server.ts`'s `tick()` calls `apiClient.listProcesses()` fresh
+every tick (no caching), so a new row starts being ticked, or a deleted
+one stops, within about a second either way.
+
+**What's NOT live**: a `kind` whose plugin code isn't loaded in the
+running orchestrator yet. `registerBuiltinProcessKinds()`/
+`loadProcessPlugins()` (section on extension points, `processPlugins.ts`)
+both run exactly once, right before `setInterval(tick, ...)` starts -
+no periodic re-scan. A row created for a brand-new kind just sits
+inert (`processRegistry.get(kind)` returns `undefined`, `tick()`
+silently skips it, no error) until the orchestrator container restarts.
+
+**"Pending restart" signal**: `processRegistry.list()` (orchestrator,
+new) exposes currently-loaded kind names via a new `GET /process-kinds`
+on orchestrator's own Fastify app (previously only `/health` existed).
+`apps/api` proxies this at `GET /processes/registered-kinds`
+(`config.orchestratorUrl`, defaults to the compose-network hostname:port,
+`http://orchestrator:${ORCHESTRATOR_PORT}`) - tolerant of orchestrator
+being briefly unreachable (mid-restart is exactly when this gets
+called), returns `{kinds: [], unreachable: true}` rather than failing.
+`ProcessesList.jsx` polls it every 10s (`REGISTERED_KINDS_POLL_MS`,
+independent of orchestrator's own 1s tick) and passes `registeredKinds`
+down to `ProcessesTable.jsx`'s `ProcessRow` - a row whose `kind` isn't
+in that list gets the same `warning` row tint the Devices/Nodes pages
+already use for simulated mode, plus a "Pending restart" badge next to
+its status. Clears itself within one poll interval of the actual
+restart, no manual page reload needed.
+
+**Real bug found live, not obvious in advance**: the very first attempt
+at `GET /processes/registered-kinds` consistently timed out (2s, then
+5s) with `TimeoutError`, even though a bare `node -e` fetch to the
+exact same URL from inside the same running container resolved in
+~50ms every time. Root cause: Node's default libuv threadpool (4
+threads) - `getaddrinfo` (what a hostname-based `fetch()` needs)
+queues on it same as filesystem I/O, and `apps/orchestrator`'s own
+steady per-second tick traffic hitting this same `apps/api` process
+(dozens of concurrent requests/sec, `critical`/`warning`/`metrics`/
+`messages`/heartbeat calls from 4+ CORE processes alone) was enough to
+starve that queue under real load - a standalone script with no other
+threadpool contention never saw it. Fixed with `UV_THREADPOOL_SIZE: 64`
+on the `api` service (nexus-edge's own `docker-compose.yml`, the
+`templates/target-project/` template, and nexus-edge-aquarium's already
+existing compose file - all three, confirmed live only in the first).
+Not unique to this one route - any future outbound `fetch()`-by-hostname
+added to `apps/api` would have hit the identical queueing under the
+same load; this fix covers all of them, not just this one call.
+
+**Tooling**: `scripts/add-process-kind.sh` (+ `make add-process-kind
+KIND=... TARGET=... [NEW_KIND=...]`) copies a catalog entry's
+`process.ts` into a target project's own `plugins/<kind>/`, best-effort
+renaming the `register("...")` call's own kind string when a
+`NEW_KIND` is given. Filesystem-only - the `processes` row itself is
+created separately (the Library page's own "Add process" modal, or
+`POST /processes` directly), and an orchestrator restart is still
+needed afterward, same as always.
+
+**UI**: `LibraryBrowser.jsx` gained a third `Processes` tab (`KINDS`
+array, otherwise generic/unchanged) plus an `AddProcessModal` shown for
+process-kind items only - name/group/type/deviceId/config(JSON) form,
+`POST /processes` on submit. Config is a raw JSON textarea, not a
+per-kind dynamic form - each kind's own `docs/README.md` documents its
+own shape (see the example entry's), and building a generic
+jsonb-schema-driven form editor would be real extra work for something
+used this rarely. `ProcessesTable.jsx`'s `ProcessRow` gained a delete
+(trash icon) button, unconditional, no confirmation dialog - matches
+`NamedListManager.jsx`'s own existing delete-without-confirm
+convention, not a new pattern.
+
+## 53. Devices list redesign - Speaker category, icon/value columns, active-color, overdue highlight
+
+2026-08-14 - a batch of Devices page changes, all confirmed live
+against nexus-edge-aquarium's real control-node instance.
+
+**Library: Speaker category.** `devices/standalone/speaker/`
+(new `category.json`) now holds `active-buzzer` (moved, `git mv`) and a
+new `passive-buzzer` type - identical single-`Bool` EdgeX contract to
+active-buzzer on purpose (see `passive-buzzer/contract.schema.ts`'s own
+header), the split is a firmware/hardware distinction only: a passive
+buzzer has no built-in oscillator, so producing any sound at all needs
+the driving MCU to generate the waveform itself (PWM/`tone()`).
+control-node's own real buzzer (`control-node-buzzer`,
+nexus-edge-aquarium) was reassigned from `active-buzzer` to
+`passive-buzzer` (migration + a live `UPDATE devices SET type = ...`
+for the already-seeded row, same two-step gotcha as section 50/51) once
+this was noticed - `firmware/src/buzzer.cpp` genuinely drives it via
+`tone()`/`noTone()`, confirmed when section 51's crackle bug was fixed.
+The underlying EdgeX profile/canId (`NexusEdge-ActiveBuzzer`, `0x304`)
+was deliberately left unchanged - this is a NexusEdge-side taxonomy
+correction, not a CAN contract change. `apps/ui/src/builtinDeviceTypes.js`
+registers its own `ui/control`/`ui/simulator` pair (visually identical
+lamp to active-buzzer's own, on purpose).
+
+**Devices list: icon + value columns, Name is plain text now.**
+`GET /devices` (`routes/devices.ts`'s `SELECT_DEVICE_LIST_BASE`) gained
+a `LEFT JOIN library_items li ON li.type_name = d.type AND li.kind =
+'device'`, exposing `icon_path` per row - the same `type_name` key
+`usedInProject` already matched against, so the list's own icon column
+tracks whatever the Library currently has for that type, no separate
+fetch. Value cell: number as-is, a green/red circle+check/x for `Bool`,
+a `JSON` badge for anything compound (Device is meant to be atomic -
+section 30 - this is a display-safety fallback, not an expected case).
+The old `/devices/:id` route/page (`DeviceDetail.jsx`) was removed
+outright - "У нас є розгортка" (the expand row already covers it); Name
+is plain text in the collapsed row now, not a link to anywhere.
+
+**Icon-on-colored-circle when active.** `device.capabilities.color`
+(LED's own pre-existing per-instance hint, `AGENTS.md` sections
+7/9 - "which color to show when active") is now read generically for
+*any* boolean device's icon, not just `led` - `DeviceIcon` in
+`DevicesList.jsx` puts the Library icon on a filled circle of that
+color exactly when `value === true`, otherwise plain/transparent. Newly
+editable through `DeviceSettingsModal.jsx` (a color-input field) via a
+new generic `PATCH /devices/:id/capabilities` (partial jsonb merge,
+`requireAuth`, same pattern as `processes/:id/config`) - previously
+`color` could only be set at seed time. Same modal also gained a
+`physicalId` field, rendered disabled/placeholder-only - reserved for a
+future real hardware-address concept, nothing reads or writes it yet.
+
+**Overdue/staleness row highlight (danger).** Confirmed with the user:
+reuse the *existing* `data_logger_control` config
+(`periodSeconds`/`error.numberSkippedPeriods`) the Data Logger process
+already tracks per device (section 21-adjacent), rather than inventing
+a separate threshold - a device is flagged `danger` when
+`now - lastReadingAt > periodSeconds * error.numberSkippedPeriods *
+1000` and that config is actually set. `lastReadingAt` prefers a live
+WebSocket event's own timestamp (if one has arrived this session) over
+`GET /devices/:id`'s new `readingOrigin` field (EdgeX's own reading
+timestamp - **nanoseconds** since epoch, confirmed live against a real
+reading, converted to ms server-side before it reaches the client) -
+the fetch-once value covers a page that just loaded and hasn't seen a
+live event yet, which a live-only signal can't. `danger` (overdue) wins
+over the pre-existing `warning` (simulated) row tint - same "highest
+severity, never both at once" precedence `ProcessesTable.jsx` already
+uses. New `apps/ui/src/hooks/useNow.js` - a periodically-refreshed
+current-time hook, since calling `Date.now()` directly during render is
+lint-flagged (`react-hooks/purity`); starts at `0` rather than
+`Date.now()` even in its lazy initializer, since that still runs during
+render too.
+
+**Not done, explicitly deferred**: point 5 of the original request
+("В розгортці показуємо") turned out to be an unfinished sentence,
+confirmed with the user - nothing changed in the expanded detail row's
+own content beyond wiring it to the same single fetch+live `value` the
+collapsed row now also uses (previously it fetched independently).
+
+## 54. Speaker category promoted to root, Devices expand row redesigned as two key/value tables
+
+2026-08-15, two quick follow-ups on section 53.
+
+**Speaker is a top-level standalone category now**, not nested under
+Indicator - `devices/standalone/speaker/` (sibling to `actuator/`,
+`indicator/`, `input/`, `sensor/`), `git mv`'d from
+`devices/standalone/indicator/speaker/`. Every reference to the old
+path (imports in `apps/ui/src/builtinDeviceTypes.js`, comments in
+`AGENTS.md`, the active-buzzer seed migration, device-service's own
+profile/device-list YAML) was updated to match - no functional change
+beyond the one real import path, everything else was descriptive.
+
+**Devices list expand row - two borderless key/value tables**,
+replacing the old LED/buzzer-specific big indicator entirely (the
+collapsed row's own icon+value cell already covers that at-a-glance
+role since section 53, making the indicator redundant). Left table
+("Value") is the live reading side - `value`/`valueType`/`units`/
+`dualState.mode`/`valueAuto`/`valueManual`/`readingOrigin` (formatted
+via `toLocaleString()`), all from the same single `GET /devices/:id`
+fetch `DeviceRow` already owns. Right table ("Device") is the
+permanent/registry side - id/type/node/backend/EdgeX name+status/
+simulated(+twin)/capabilities/data_logger_control/heartbeat_control/
+created/updated. A field whose own value is compound (`capabilities`,
+`data_logger_control`, `heartbeat_control`) renders as inline
+monospace JSON rather than being recursively flattened - the simplest
+option that stays readable, matching the user's own "якщо глибше -
+можливо json" suggestion; rows whose value is `undefined` are dropped
+entirely rather than showing an empty dash (a read-only sensor simply
+has no `dualState`, for instance).
+
+Real layout bug found live: a plain flex row (`d-flex flex-wrap`)
+around two `<div>`s each wrapping a Bootstrap `CTable` stacked them
+vertically instead of side by side, regardless of `flex-wrap` - a
+`CTable` defaults to `width: 100%`, which stretches its wrapping flex
+item to fill the entire flex container on its own (no room left for a
+second item on the same line). Fixed by giving each `KeyValueTable`
+wrapper an explicit `flex: '0 1 420px'` and adding `w-auto` to the
+table itself, overriding the 100% default.
+
+Also: the user removed the `hover` prop from `DevicesList.jsx`'s and
+`NodesList.jsx`'s own main `CTable`s locally before this session
+picked back up - kept as-is, not reverted (their own explicit
+"add to the next commit").
+
+## 55. "Last reading"/"Expires" as relative time, not absolute timestamps
+
+2026-08-15 - two small follow-ups on section 54's Value/Device tables.
+
+**`KeyValueTable` no longer renders its own `title`** - the user
+removed that line locally ("Я прибрав title, саму проперю давай поки
+залишимо") - the `title` prop itself is still passed in from
+`DeviceDetailRow`'s two call sites, just unused for now, in case a
+later change wants it back without re-threading the prop.
+
+**"Last reading" is relative time now** ("5 minutes ago"/"just now"),
+not `toLocaleString()` - reusing `formatRelativeTime`
+(`apps/ui/src/utils/format.js`, already used by `NodesList.jsx`'s own
+last-heartbeat column) rather than inventing a second helper. It's
+typed for an ISO string but really just does `new Date(x)` internally,
+so `readingOrigin`'s epoch-ms number works identically without
+conversion.
+
+**New "Expires" row** - the user noticed the overdue/staleness
+threshold (section 53's `maxAgeMs`/`isOverdue`, `data_logger_control`-
+based) was only ever visible indirectly, as the row turning
+danger-red, never as an actual value. `DeviceRow` now also computes
+`expiresAt = lastReadingAt + maxAgeMs` and passes it down to
+`DeviceDetailRow`, rendered via the same `formatRelativeTime`.
+
+This needed `formatRelativeTime` itself to grow future-timestamp
+support - the old version computed `diffMs = Date.now() - target`,
+which is negative for anything in the future, and its own "count >= 1"
+loop never fires on a negative count, so every future timestamp
+regardless of distance silently fell through to "just now". Fixed by
+taking `Math.abs(diffMs)` and tracking the sign separately, rendering
+`"in X <unit>(s)"` for a future target - past-timestamp callers
+(`NodesList.jsx`'s own usage included) are unaffected, since the
+`future` branch only ever fires when `diffMs < 0`.
+
+## 56. Background-color rule + unified status label across Devices/Nodes/Processes, cross-tab simulation fix
+
+2026-08-15.
+
+**The rule, applied consistently**: error -> `danger`, warning ->
+`warning`, simulation -> `info`. Previously each table had its own ad
+hoc row-tint logic (Devices/Nodes both used `warning` for simulated,
+colliding with the concept "warning" ought to actually mean).
+
+**New shared `RowStatusBadge`**
+(`apps/ui/src/components/table/RowStatusBadge.jsx`) - takes the exact
+same `rowColor` value each table already computes for its own
+`<CTableRow color=...>`, not a second parallel condition, so the label
+text and the row's own background can never drift out of sync by
+construction. `danger` -> "Error", `warning` -> "Warning", `info` ->
+"Simulation", anything else -> "OK"/success. One deliberate
+divergence, confirmed with the user: the "Simulation" label itself
+reads `primary`, not `info` - the row background and the badge accent
+are allowed to differ even though they share the same underlying
+`rowColor` value.
+
+**All three tables gained a new leading "Status" column** (this
+badge), with their next-most-important existing column moved to
+position 2 right after it - Devices: **Backend**, then the
+icon/value/name/type/node columns following in their previous order.
+Nodes: **Health**. Processes: the ON/OFF/Running badge, renamed
+**Power** in its own header to avoid colliding with the new "Status"
+column's own name (matches this file's own pre-existing `power`
+terminology, see the Switch's `ariaLabel`).
+
+**Devices' old standalone EdgeX-operatingState "Status" column is
+gone** - its only content (UP/DOWN/not provisioned) is still reachable
+in the expand row's own "Device" table (`EdgeX status`, section 54),
+just no longer duplicated as its own top-level column now that the new
+label already gives an at-a-glance read. `isError` for a device is
+exactly the pre-existing `isOverdue` (section 53) - no new condition
+invented.
+
+**`isError` for a node** is `health` present and neither `'ok'` nor
+`'unknown'` - `'unknown'` deliberately does NOT count as an error
+(means "not determined yet", not "confirmed bad") so a freshly-
+registered node doesn't render red before anything has actually gone
+wrong.
+
+**Real bug found and fixed, reported live by the user**: the Devices
+page never reflected a node's `simulated` flag being toggled from a
+*different* browser tab - no code path re-fetched anything unless the
+toggle happened on that same page. Investigated whether a live
+WebSocket event already existed for this (it does not - the live
+protocol only has `device`/`tick`/`process` domains, confirmed by
+reading every publisher; adding a proper `node`-domain event would
+need a new RabbitMQ-routed publish in `nodes.ts`'s own PATCH route,
+following `dualDevicesModel.ts`'s `publishDeviceEvent` precedent).
+Given the fix needed *some* form of cross-tab convergence and a full
+live-event addition is real, separate scope, went with the same
+polling precedent `ProcessesList.jsx` already established for its own
+registered-kinds check (`DEVICES_POLL_MS = 10000`, plain
+`setInterval(reloadDevices, ...)` in `DevicesList.jsx`) - confirmed
+live: toggled simulation in one tab, watched the other tab's row
+colors/labels update on their own within the poll interval, no manual
+reload. A real live event remains the more correct long-term fix if
+this class of gap shows up again for something latency-sensitive -
+not built now, this specific case tolerates a ~10s convergence window
+fine.
+
+## 57. Nodes Health column removed (dead, stuck at "unknown"); follow-up: `heartbeatStopped` itself turned out wrong too
+
+2026-08-15. The user reported their physically-connected,
+actively-heartbeating control-node still showing `Health: unknown` in
+the Nodes table. Root cause - `nodes.health` (migration
+`1690000000000_create-nodes-table.ts`, `default: "unknown"`) is a
+column that is READ everywhere but **never written anywhere** - no
+route, process, or orchestrator logic updates it, ever, for any node,
+confirmed by grepping the whole backend for any assignment to it. It's
+permanently stuck at its schema default regardless of real
+connectivity. This also meant section 56's own Nodes `isError` (based
+on `health !== 'ok' && health !== 'unknown'`) was **unreachable dead
+code** from the moment it shipped - `health` can structurally never be
+anything but `'unknown'` today.
+
+Rather than wiring `health` itself up to something real, the user
+asked the sharper question first: given the new unified "Status"
+column already exists, does a separate "Health" column - one that has
+only ever shown `"unknown"` for every node, ever - carry any
+information at all? No. Removed the standalone Health column entirely
+(`healthColor`/its `<CBadge>` cell/header gone), same "fold into
+Status, don't duplicate" reasoning as Devices' own EdgeX-status column
+removal. `isError` now reads `node.heartbeatStopped` directly - the
+real, already-computed Heartbeating Control signal every `GET /nodes`
+row already carries (`heartbeatControl.ts`'s `getNodeHeartbeatStopped`)
+- instead of the inert `health` field. The raw (still-unused)
+`health` value remains visible in `NodeDetailRow`'s own JSON dump for
+anyone who wants to see it - nothing is actually hidden, just not
+promoted to its own top-level column anymore. `colSpan` dropped from 8
+to 7 to match.
+
+## 58. `node.heartbeatStopped` was ALSO the wrong field - real `heartbeatStale` computation added, Nodes now polls
+
+2026-08-15, same day, one more round. The user physically unplugged
+the CAN bus from the control-node to test §57's fix and reported: the
+Heartbeating Control process's own row/log reacted correctly (turned
+red, logged "hasn't sent a heartbeat in N ticks"), but the Nodes table
+- now driven by `node.heartbeatStopped` per §57 - still showed "OK".
+
+Root cause, found by tracing what `heartbeatStopped` actually is
+(`apps/api/src/heartbeatControl.ts`'s own doc comment, re-read
+carefully this time): it's `isMonitoringStopped`, the Redis-backed
+**manual "Stop monitoring" toggle** from the Heartbeating Control
+panel (`PATCH /heartbeat-controls/:type/:id/stopped`) - a human
+on/off switch, never written by anything staleness-related. §57's own
+fix swapped one wrong field (`health`, always `"unknown"`) for another
+wrong field (`heartbeatStopped`, always `false` unless a human paused
+it) - neither was ever the actual "has this node's heartbeat gone
+stale" result. That real computation happens in
+`apps/orchestrator/src/processes/heartbeatControl.ts`'s `evaluate()`
+every tick, comparing `heartbeatLastSeenAt` against the node's own
+`heartbeat_control.warning`/`error` skipped-tick thresholds - but it
+only ever writes the result onto the Heartbeating Control **process's**
+own row (WEM + `critical`/`warning` via `apiClient.setCritical`/
+`setWarning`), never back onto the node itself. Nothing else in the
+codebase ever computed this per-node and exposed it.
+
+**Fix**: added `nodeHeartbeatStaleness(config, simulated, stopped,
+lastSeenAt)` to `apps/api/src/heartbeatControl.ts` - a pure, sync
+request-time replica of the orchestrator's own `evaluate()` logic for
+a single node (same skip rules: `simulated` skips entirely, a
+`stoppable && stopped` node skips, no `warning`/`error` configured
+skips, no `lastSeenAt` yet skips; error takes precedence over
+warning). Takes the same `heartbeatStopped`/`heartbeatLastSeenAt`
+values `withLiveHeartbeat` (`routes/nodes.ts`) already fetches from
+Redis per request - no extra Redis round-trip, no caching layer of its
+own, so it's exactly as fresh as `heartbeatStopped` always was, just
+computing the right thing. `GET /nodes` now returns a third field,
+`heartbeatStale: "ok" | "warning" | "error"`, alongside the
+still-present `heartbeatStopped` (kept - it's real info, "is
+monitoring paused", just not what a row's error state should be keyed
+on).
+
+`NodesList.jsx`'s `isError` is now `node.heartbeatStale === 'error'`.
+Deliberately not also coloring the row `warning` for the `"warning"`
+tier (unlike Processes, which does use its own warning color) - kept
+to the simpler two-state Devices/Nodes precedent (danger/info/ok, no
+warning) already established in section 56, matching what
+`DevicesList.jsx`'s own `isOverdue` does today. The `heartbeatStale`
+field itself does carry the warning tier if a future pass wants to
+surface it.
+
+**Second bug in the same table, found while reading `NodesList.jsx`
+end to end for this fix**: it had no polling interval at all - only a
+mount-time fetch, unlike `DevicesList.jsx` (`DEVICES_POLL_MS`) and
+`ProcessesList.jsx`. Even with the field fixed, the table would only
+ever reflect a live disconnect on next navigation/reload. Added
+`NODES_POLL_MS = 10000` with the same plain `setInterval(reloadNodes,
+...)` idiom as `DevicesList.jsx`.
+
+Verified live in nexus-edge-aquarium with the node still physically
+unplugged: `GET /nodes` returned `heartbeatStale: "error"` for "Main
+node control" (`heartbeatLastSeenAt` ~20 minutes stale), and the Nodes
+page rendered it with a red "Error" badge and `danger` row, "Last
+heartbeat: 20 minutes ago" - no manual reload needed once the poll
+fires. `apps/device-service`'s own CAN transport still has the
+non-expiring last-frame cache described in the diagnosis for this same
+investigation (Devices' `isOverdue` still gets fooled into looking
+"fresh" on every on-demand EdgeX read) - out of scope for this pass,
+deferred as a separate, larger fix (Go changes in
+`apps/device-service/internal/transport/can/bus.go`, needs a
+configurable max-frame-age, would touch every CAN device's read path).
+
+## 59. CAN transport reports a frame's true receipt time, not read time - fixes Devices' staleness check at the root
+
+2026-08-15, picking up §58's deferred item. The actual fix turned out
+smaller than anticipated there: no new config value (no "max frame
+age" threshold) was needed at all.
+
+**Root cause, precisely**: `busConn.Latest()` (`bus.go`) has always
+correctly never expired its per-arbitration-ID cache - a physical node
+may legitimately go long stretches between broadcasting a given
+signal, so that part was never wrong. The actual bug was one layer up,
+in `transport.go`'s `Read()`: it built every `CommandValue` with
+`sdkModels.NewCommandValue(...)`, which the EdgeX SDK stamps with
+`Origin: time.Now()` - i.e. "when this value was read", not "when
+this value was last true". A cached-but-ancient frame therefore always
+produced a brand-new, current-looking `Reading.origin` on every
+on-demand read, which `devices.ts` already faithfully carries through
+as `readingOrigin` (section 53) - and `DevicesList.jsx`'s own
+`isOverdue` (section 53/56) is a correct, honest diff against that
+timestamp. The staleness *check* was never broken; the timestamp *fed*
+into it was a lie.
+
+**Fix**: `bus.go`'s cache now stores `cachedFrame{frame, receivedAt}`
+per arbitration ID (`receivedAt` set once, in `readLoop`, when the
+frame actually arrives). `Latest()`'s signature grew a third return
+value, `time.Time`. `transport.go`'s `Read()` now calls
+`sdkModels.NewCommandValueWithOrigin(name, type, value,
+receivedAt.UnixNano())` - the SDK constructor that lets a driver
+report a reading's *true* origin instead of defaulting to now (found
+by fetching the SDK's own `pkg/models/commandvalue.go` source for
+`v4.0.2`, the version pinned in `go.mod`). `Write()`'s own unrelated
+`Latest()` call (merging existing byte layout before sending a frame)
+just ignores the new time value - staleness is meaningless there.
+
+Net effect: once a physical node goes silent, every read of one of its
+devices now reports the age it actually has - no code changes needed
+in `apps/api` or `apps/ui` at all, since `isOverdue` was already
+correct and just needed an honest input. Verified: `go build` (via
+the actual Dockerfile build stage - no local Go toolchain available on
+this host) and a manual `gofmt -l`/`go vet` pass both clean;
+`nexus-edge-aquarium-device-service` rebuilt and restarted.
+
+**Known gap, found while trying to verify this live against the still-
+unplugged control-node**: restarting `device-service` empties
+`bus.go`'s in-memory cache (it was never meant to survive a restart),
+so the two real physical resources on that node
+(`control-node-heartbeat`, `control-node-pulse`) came back with no
+cached frame at all (`ok=false`, the pre-existing "no data received
+yet" error path - unrelated to and unaffected by this fix) rather than
+demonstrably showing an old, honestly-aged timestamp. Confirming the
+full effect end-to-end needs the node reconnected briefly (to seed one
+cached frame) and then disconnected again, without an intervening
+device-service restart - not done this session.
+
+**Separate, pre-existing gap noticed along the way, not fixed here**:
+neither of those two devices (nor most of this node's other devices,
+which are `backend: "virtual"` anyway, e.g. Temperature/Humidity/LEDs
+- this control-node only has two real physically-wired CAN resources,
+consistent with the "partial physical network" design, AGENTS_TO_DO.md
+2026-08-09/10) has `data_logger_control.periodSeconds` set - it's
+`null` on every one of them. `DevicesList.jsx`'s `maxAgeMs` requires
+`periodSeconds` to be non-null (section 53), so `isOverdue` stays
+structurally `false` for these devices regardless of how honest
+`readingOrigin` now is. This fix makes the *input* correct; actually
+seeing a device row turn red still needs `periodSeconds` configured
+per-device (via the existing Data Logger settings, already wired up -
+no code gap), which nobody has done yet for this node's own devices.
+
+## 60. Devices list: per-row value/timestamp is now polled, not fetched once - a live-verified §59 follow-up
+
+2026-08-15, same day, closing the loop on §59's own live-verification
+gap. `periodSeconds` was set live for `control-node-heartbeat`/
+`control-node-pulse` (AGENTS_TO_DO.md) so the user could actually watch
+§59's fix react to a real disconnect/reconnect. Two more real bugs
+turned up in the process, both found by the user testing live and both
+fixed the same session:
+
+**Bug 1 - a row that went Error never came back to OK.** Each
+`DeviceRow` (`DevicesList.jsx`) fetches its own value/`readingOrigin`
+via `api.getDevice(device.id)` in a `useEffect` keyed only on
+`[device.id]` - mount-once, never on an interval, unlike the list-level
+`DEVICES_POLL_MS` poll (section 56) which only refreshes the *list*
+(name/type/node/etc), not each row's own value. This was harmless
+before section 59 - `readingOrigin` was always "now" anyway regardless
+of true freshness, so a row's own staleness could never meaningfully
+persist either way. Once section 59 made `readingOrigin` honest, the
+gap became real: a row that happened to cross its overdue threshold
+after mount would stay red forever, since nothing ever fetched a newer
+value/timestamp for it again - confirmed live: the user reconnected a
+node after its device row had gone red, and it stayed red. Fixed by
+giving each row's own fetch the same `DEVICES_POLL_MS` interval as the
+list poll, re-fetching (not just fetching once) `api.getDevice`.
+
+**Bug 2 - the same row then flickered Error/OK/Error/OK while
+connected, rather than settling.** Root cause was the periodSeconds
+value chosen when configuring these two devices live, not a code bug:
+`periodSeconds=1, error.numberSkippedPeriods=2` (a 2s staleness
+window) is tighter than `DEVICES_POLL_MS` itself (10s) - between polls,
+`lastReadingAt` sits fixed while the ticking clock (`useNow`) keeps
+advancing, so the row necessarily reads "overdue" for most of each 10s
+window and only briefly recovers right after each poll lands. Not
+something bug-1's fix could address - it's a threshold-vs-poll-cadence
+mismatch, and would reproduce for any device configured with a
+staleness window shorter than roughly 2x the poll interval. Fixed by
+raising `error.numberSkippedPeriods` to 20 (a 20s window, comfortable
+margin over the 10s poll) for both devices, live via the same
+`PATCH /data-logger-controls/:deviceId` used originally - a config
+correction, not a code change. General guidance for configuring any
+device's Data Logger thresholds going forward: keep the effective
+window (`periodSeconds x numberSkippedPeriods`) meaningfully larger
+than `DEVICES_POLL_MS`, or the UI will flicker regardless of real
+hardware health.
+
+Verified live in nexus-edge-aquarium: `control-node-heartbeat` stayed
+stably OK for 10+ seconds after the threshold fix, actively-incrementing
+value visible the whole time.
+
+`control-node-pulse` remains open, separately - it is fundamentally
+write-only (NexusEdge writes it to the node every tick, "proves
+NexusEdge is alive," not the reverse) and is never actually receivable
+back off the bus (no `CAN_RAW_RECV_OWN_MSGS` on our own socket, and the
+node's firmware doesn't echo it) - `bus.Latest()` for its arbitration
+ID (`0x300`) is permanently empty, confirmed via continuous
+`"no data received yet"` in `device-service`'s own logs regardless of
+connection state. Its "OK"/checkmark in the UI reflects the Dual
+Devices Model's own live-published *auto value* (`dualDevicesModel.ts`'s
+`publishState`, whose own doc comment already says "not a
+heartbeat/liveness signal") - i.e. what NexusEdge is commanding, not a
+confirmed physical read - refreshed every tick unconditionally,
+regardless of bus state, so it can never structurally show stale. Not
+a bug in today's fixes; a pre-existing, one-directional design
+property of this specific resource. Proposed fix (a `writeOnly`
+capability flag, mirroring the existing `readOnly` one, so `GET
+/devices/:id` stops attempting - and logging - a read that can never
+succeed, and the UI renders it distinctly rather than implying a
+confirmed reading) - not yet actioned, awaiting the user's choice of
+display treatment.
+
+## 61. New `node` live WS domain - Nodes list is push-driven, not polled
+
+2026-08-16. The user's own question, after living through §58/§60's
+poll-cadence-vs-threshold class of bugs: "we already have an open
+socket to the server - why not push a message when a node's state
+changes, instead of re-polling?" Agreed, with one scoping note given
+back before starting: a discrete write (simulated/group/name) maps
+cleanly onto a push event, but a *passive* staleness transition (a
+node going silent - nothing "happens" at the exact moment a threshold
+is crossed) doesn't, unless something proactively evaluates and diffs
+it. The orchestrator's own heartbeat-control process kind already does
+exactly that every tick (section 28), so it was the natural place to
+diff and notify from. Devices' own `isOverdue` stays poll-based for
+now - it's computed client-side from `data_logger_control`, not
+server-side like `heartbeatStale` (section 58), so doing this properly
+there first needs moving that computation server-side - a separate,
+larger piece of work, deliberately out of scope here.
+
+**Wire protocol** (`apps/api/src/messaging.ts`): a third domain
+alongside `device`/`process` (section 9), same RabbitMQ topic exchange
+(`nexus.events`), routing key `node.<id>.updated`. This retires the
+`node.<id>.heartbeat` shape section 9 reserved - a node was never
+atomic-one-value the way a Device is, so there's no single "heartbeat"
+event worth splitting out; one `updated` type carrying the whole
+live-ish row (not a hand-picked field subset, same philosophy as
+`device`'s own envelope) covers both a discrete write and a staleness-
+tier change. `apps/messaging-gateway` needed **zero** changes - it
+already relays every `nexus.events` message generically by routing-key
+pattern match, domain-agnostic by design (confirmed: no shared domain
+enum exists anywhere in this codebase, `domain` is just a string
+literal duplicated per file, same as `device`/`process` already are).
+No new snapshot cache either (unlike `device`'s `state:*`) - NodesList.
+jsx always does its own initial `GET /nodes` REST fetch on mount, so
+the socket is only ever needed for *subsequent* live updates.
+
+**Publish side** (`apps/api/src/routes/nodes.ts`): a `publishNodeState`
+helper (whole `withLiveHeartbeat` row as `value`) called from all three
+mutating routes (`PATCH /:id/group`, `/:id/simulated`, `/:id/name`) -
+each already had the fresh row in hand for its own HTTP response, so
+this is just one extra call, not a new query. New `POST /nodes/state/
+broadcast` (body: `{nodeIds, reason?}`) mirrors `POST /processes/
+state/broadcast`'s own "forced" shape, scoped to specific ids rather
+than the whole fleet - this is what the orchestrator calls for the
+passive case below.
+
+**The passive-transition half** (`apps/orchestrator/src/processes/
+heartbeatControl.ts`): a new module-level `Map<number, StalenessLevel>`
+(`lastNodeStaleness`, in-memory only, resets cleanly on restart - same
+defensive stance as `controlNode.ts`'s own `lastHeartbeat` map) tracks
+each node's `heartbeatStale` (now also added to `apiClient.ts`'s
+`NodeRecord` type, reusing the value `GET /nodes` already computes -
+not a third re-derivation of the same threshold math) from the
+previous tick. `notifyStalenessChanges()` runs every tick right after
+`evaluate()`, diffs, and calls `apiClient.broadcastNodeState()` only
+for ids that actually changed (an empty list skips the HTTP call
+entirely - most ticks, nothing changed).
+
+**Frontend** (`apps/ui/src/api/useLiveNode.js`, new): `useNodesLiveState()`
+- a fleet-wide `{[id]: value}` overlay map, mirroring `useDeviceLiveState`'s
+internals but shaped for `NodesList.jsx`'s flat-array rendering (no
+per-row component to subscribe individually the way `DevicesList.jsx`'s
+`DeviceRow` does). `NodesList.jsx` spreads `liveNodes[node.id]` over
+each row before filtering/pagination; the old `NODES_POLL_MS` interval
+is gone entirely. One addition beyond pure push: a reconnect-triggered
+one-shot `reloadNodes()` (via `useLiveConnectionStatus()`, skipping the
+initial `false -> true` on mount) - a dropped WebSocket connection by
+definition can't have delivered whatever happened while it was down,
+and nothing else would ever correct that without a manual page reload.
+
+**Verified live**, both directions, in nexus-edge-aquarium with two
+browser tabs open on Nodes:
+- Discrete write: toggled `simulated` in tab A, tab B's row (Status
+  badge + Switch) updated instantly with no reload - tab B never wrote
+  anything itself, so this could only have come from the live push.
+- Passive transition: rather than needing the physical node
+  disconnected again, forced it via `PATCH /heartbeat-controls/node/2`
+  (`error.numberSkippedTicks: 0`, tripping "error" on literally the
+  next tick regardless of real connectivity) - the open tab flipped to
+  red "Error" within ~1s with zero interaction on that tab at all.
+  Restored the threshold afterward and watched it flip back to green
+  "OK" live the same way - confirms the orchestrator's tick-diff
+  correctly detects a transition in *either* direction, not just
+  worsening.
+
+## 62. Devices' `isOverdue` moved server-side, same push mechanism as §61 - with a genuinely harder passive case
+
+2026-08-16, same day. §61's own closing line ("Devices' own `isOverdue`
+stays poll-based - it's computed client-side... doing this properly
+there first needs moving that computation server-side") became today's
+task. The parallel to Nodes held for the *discrete* case but broke
+down for the *passive* one, in a way worth recording precisely, since
+it changed the shape of the fix partway through.
+
+**Server-side computation**: `dataLoggerControl.ts` gained
+`computeOverdue(config, readingOriginMs, nowMs)` - a pure function,
+identical math to what `DevicesList.jsx` used to run client-side
+(`periodSeconds x error.numberSkippedPeriods` vs. `now - readingOrigin`),
+just the one place both `GET /devices/:id` and `POST /devices/:id/log`
+now call it from. `DeviceEventEnvelope` (`messaging.ts`) grew optional
+`isOverdue`/`expiresAt` fields, riding the *existing* `device` domain -
+no new domain needed here, unlike `node`.
+
+**Where it diverges from Nodes - the passive case has no existing
+evaluator to piggyback on.** Nodes already had Heartbeating Control
+running every tick across every node, for free. Devices have nothing
+equivalent for "is this sensor's last reading still fresh" - the only
+things that ever read a device's live value are an on-demand `GET
+/devices/:id` (a UI page view) and Data Logger's own periodic
+write-cadence read (`writeEnabled` devices only). Once
+`DevicesList.jsx`'s per-row poll (section 60) was removed on the
+assumption "isOverdue is server-computed and live-pushed now, no poll
+needed" - true only if *something* keeps re-evaluating it - a real gap
+appeared: `control-node-heartbeat` (this session's own real physical
+test device, `writeEnabled: false` by design - periodSeconds is set
+purely for live staleness detection, not history logging) had nothing
+left to re-read it at all. Found by re-deriving the theory before
+touching code, not live this time - but it would have reproduced the
+exact "frozen forever" class of bug section 60 fixed, just in the
+opposite place.
+
+**Fix: `dataLogger.ts`'s loop no longer skips `!writeEnabled` devices
+entirely.** `listDataLoggerControls()`'s own query was never
+`writeEnabled`-scoped to begin with (only `readOnly`) - the gate was
+purely in the orchestrator's own loop. Split the loop: `writeEnabled`
+devices keep their exact existing behavior (`maybeLog`, then WEM if
+configured); `!writeEnabled` devices instead get a new `maybeTouch` -
+same due/cadence bookkeeping as `maybeLog` (in-memory `Map`, resets on
+restart), but calls `apiClient.getDevice(id)` (already existed) purely
+to trigger `GET /devices/:id`'s own read-and-publish, no history write,
+no WEM (that alert is specifically "logging is overdue," meaningless
+for a device that was deliberately configured not to log). One
+additional wrinkle caught before it shipped: the existing
+`periodSeconds <= TICK_SECONDS && !tickLoggingEnabled` guard (built to
+stop *write* spam at tick resolution) was also silently blocking
+`maybeTouch` - a read, not a write, so that guard doesn't apply to it
+at all; moved it to only gate the `writeEnabled` branch.
+
+**Second thing caught before shipping, not live this time either: the
+publish was originally gated on "did `isOverdue` itself change"** (a
+Redis-cached last-known value, diffed each call) - deliberately mirroring
+section 61's own diff-before-publish precedent to avoid "needless"
+traffic. This quietly broke live *value* updates for the overwhelmingly
+common healthy case: a device whose `isOverdue` never changes at all
+would never publish anything after its own initial mount fetch, even
+though the value was being read fresh every `periodSeconds` via
+`maybeTouch`/`maybeLog` the whole time. Removed the diff/cache
+entirely (`getLastKnownOverdue`/`setLastKnownOverdue`, both now
+deleted) - `publishDeviceReading` (renamed from `publishOverdueIfChanged`
+to reflect this) now publishes unconditionally on every call. Not
+excessive: every caller (a page's own one-time mount fetch, Data
+Logger's `periodSeconds`-paced touch/write) is already naturally
+rate-limited to roughly that cadence - nothing calls this every tick.
+
+**`DevicesList.jsx`**: dropped the client-side `dlc`/`maxAgeMs`
+computation entirely; `isOverdue`/`expiresAt` now come from
+`live.isOverdue ?? fetched?.isOverdue ?? false` (same live-over-fetched
+precedence `value`/`lastReadingAt` already used). `useNow()` is kept,
+now purely to force a re-render each second so the "Last reading"/
+"Expires" relative-time text keeps visually ticking - it no longer
+feeds the overdue computation itself. The per-row poll from section 60
+is gone (superseded, not merely redundant, by this).
+
+**Verified live**, node genuinely disconnected/reconnected (not a
+synthetic threshold trick this time, precisely because the touch
+cadence and the threshold interact - see below):
+- `control-node-heartbeat`'s displayed value kept advancing
+  (18438 -> 18451) purely from live pushes, no poll, no reload -
+  confirms the diff-removal fix.
+- Node physically disconnected: row flipped to red "Error" live,
+  value frozen at its last real reading (18481) - confirms a genuinely
+  silent device is detected, not just a config trick.
+- Node reconnected: row flipped back to green "OK" live, value resumed
+  advancing (18539) - confirms recovery, both directions, matching
+  section 61's own Nodes verification.
+
+**A test-methodology note worth keeping**: an early attempt to force a
+transition via `error.numberSkippedPeriods: 0` silently no-opped -
+`0` is falsy in JS, and `computeOverdue`'s own truthy-chain (faithfully
+copied from the original client code) treats a falsy
+`numberSkippedPeriods` as "not configured," same as `null`. Pre-existing,
+not introduced today, and not worth a special case for a threshold that
+never makes practical sense at exactly zero - just something to
+remember when hand-testing this specific config shape again. A second
+attempt (`numberSkippedPeriods: 1`, `periodSeconds: 1`) revealed a
+different, more interesting effect: when the threshold window and the
+touch cadence are the *same* size, the touch keeps arriving just
+before the deadline, so it never trips at all under real operation -
+which is actually correct/desirable, not a bug (a device being read
+right on schedule shouldn't ever appear overdue) - but means forcing a
+clean demonstration needs either a threshold with real margin over the
+touch cadence (as section 59's own "keep the window notably larger
+than the polling/touch interval" lesson already established) or, as
+done here, genuine silence.
+
+**Deliberately not done**: `control-node-pulse` (write-only, never
+receivable off the bus - section 59/60's own writeup) still has no
+`isOverdue` producer and never will via this mechanism - `readingOrigin`
+stays permanently `null` for it regardless of how often anything reads
+it, so `computeOverdue` correctly and permanently returns `false`. This
+was flagged to the user separately as its own open question (server-
+side display treatment for a write-only resource), not addressed here.
+
+## 63. Header Simulation badge, Nodes/Devices status filters, Heartbeating Control panel polish
+
+2026-08-16, same day, three independent, smaller requests batched into
+one pass.
+
+**Header blinking "Simulation" badge** (`AppHeader.jsx`, left of
+`SystemTickIndicator`) - visible whenever `useAnyNodeSimulated()`
+(`useLiveNode.js`, new) is true. That hook does its own one-time `GET
+/nodes` fetch layered with the existing `useNodesLiveState()` overlay -
+since the header mounts app-wide and the underlying WebSocket
+connection is shared regardless of which page is open, a `simulated`
+toggle on the Nodes page updates this badge immediately even though
+the header component has nothing to do with that page. Reuses the
+existing `.wem-blink-ring` CSS animation (`NotificationCenter.jsx`'s
+own warning/error icons) rather than inventing a second blink
+mechanism.
+
+**Nodes/Devices status filter** - a new leftmost filter dropdown (OK/
+Error/Simulation), filtering by the exact same `rowColor` value each
+table already computes for its own row - factored into a shared
+`nodeRowColor(node)`/`deviceRowColor(device)` function in each file so
+the filter and the row's own background can never drift apart (same
+"derive from one source" principle `RowStatusBadge` itself already
+established, section 56).
+
+Devices needed more than Nodes here too, in a smaller echo of section
+62's own finding: `NodesList.jsx` already computes every row's status
+in one flat array up front, so filtering by it was trivial. `isOverdue`
+in `DevicesList.jsx`, by contrast, is only known *inside* each
+`DeviceRow` after its own async mount fetch - the parent has no
+visibility into it, and pagination/filtering happen at the parent
+level, before any row for an unfiltered page has even mounted (a
+circular dependency: what's filtered determines what renders, but what
+renders is what determines the filter's own input). Fixed by having
+`GET /devices` (list route) include a per-device `isOverdue`, sourced
+from a new write-only Redis snapshot (`dataLoggerControl.ts`'s
+`setOverdueSnapshot`/`getOverdueSnapshots`) that `publishDeviceReading`
+(section 62) now also writes on every read, batch-read via one Redis
+`MGET` for the whole list rather than N round-trips. This is
+necessarily a *snapshot* (refreshes only as often as something reads
+that specific device - a mount fetch, Data Logger's own touch), not
+live - the filter itself only re-runs when the list-level poll
+(`DEVICES_POLL_MS`) refreshes `GET /devices`, same cadence the
+cross-tab `simulated`-convergence poll already used. Each `DeviceRow`'s
+own rendered color still uses its own live-updated `isOverdue`
+(unchanged from section 62) - marginally fresher than the filter's own
+input, the two agree within one read/poll interval of each other.
+
+**Heartbeating Control panel** (`HeartbeatControlPanel.jsx`) - three
+asks: a status filter (OK vs "Warning or Error", one combined option
+per the user's own framing - "quick search for problem entities", not
+separate Warning/Error options), a leading icon column, and row
+background coloring for a problem entity. All three needed a
+*computed* per-row staleness the panel's own `GET /heartbeat-controls`
+never returned before today - `heartbeatControl.ts`'s `listEntities`
+only ever returned the *config* (thresholds), never whether an entity
+is *currently* stale by them.
+
+Generalized `nodeHeartbeatStaleness` (section 58) into a shared
+`computeStaleness(config, stopped, lastSeenAt)` - node's own
+`simulated` skip is now a thin wrapper around it
+(`nodeHeartbeatStaleness` itself unchanged from nodes.ts's point of
+view). `listEntities` now also joins `library_items` (by `(kind,
+type_name)`, the same key `routes/devices.ts`/`routes/library.ts`'s
+own `usedTypeNames()` already join on per entity type -
+`processes.kind`, `devices.type`, `nodes.type`) for the icon, and
+computes `staleness` per row using whatever `lastSeenAt`/`stopped`/
+`simulated` (node only, `false` literal for process/device in the
+query) it already had to fetch anyway - no new Redis reads, this was
+already request-time/live, same as `GET /nodes`'s own `heartbeatStale`
+(section 58). Devices always resolve to `"ok"` here (no real heartbeat
+producer, `lastSeenAt` always `null` for that type - unchanged,
+long-standing limitation, not addressed today) - correct, not a gap
+introduced by this pass.
+
+Frontend: `entityRowColor(entry)` (error -> danger, warning -> warning,
+no simulation tier - this panel spans three entity types and only
+staleness is a concept shared by all of them) drives both the new
+leading icon-column `<CTableRow color=...>` and the status filter,
+same "one source" principle as the Nodes/Devices filters above.
+
+**Verified live** in nexus-edge-aquarium: toggled a node's `simulated`
+switch in one tab, watched the header badge appear/blink and
+disappear live in the same tab with no reload; the Nodes/Devices
+status filters correctly isolated the simulated node / correctly
+returned "no devices" for a Devices Error filter when nothing was
+actually overdue; the Heartbeating Control panel's own "Warning or
+Error" filter, after a page reload to force a fresh `GET /heartbeat-
+controls`, correctly surfaced "Main node control" - the physical node
+had genuinely gone silent for about a minute during this same testing
+session (not a synthetic condition) - with its row highlighted red and
+its own entity icon showing, consistent with what the Nodes page
+itself showed for the same node at the same moment.
+
+**Follow-up, same day**: the user hit exactly the "needs a page reload"
+symptom this section's own verification note above had already run
+into and shrugged off as coincidental timing - it wasn't. Root cause:
+`HeartbeatControlPanel.jsx` fetches `GET /heartbeat-controls` exactly
+once, on mount, and never again - no poll, no live subscription, not
+even the list-level polls `NodesList.jsx`/`DevicesList.jsx` already
+have. An entity going stale *after* that one fetch doesn't just render
+unhighlighted - it's genuinely absent from `entries`, so the new status
+filter (which runs against that same stale array) correctly reports
+"no entities match" even while a real problem exists, and looks broken
+until a manual reload forces a fresh fetch. This panel was never given
+any refresh mechanism at all when it was first built (section 28) -
+today's filter/icon/highlight work just made the pre-existing gap
+externally visible for the first time.
+
+Fixed with the same `HEARTBEAT_CONTROLS_POLL_MS = 10000` precedent as
+`DevicesList.jsx`/the old `NodesList.jsx` poll - not migrated to a live
+push mechanism (this panel spans three entity types across three
+different domains, a bigger unification than this fix warranted).
+Also added a manual reload button (`cilReload`, the same
+`IconButton`/`ariaLabel="Reload"` idiom already used identically in
+`CommandLogsTab.jsx`/`ProcessMessageLogsTab.jsx`/`DeviceLogsTab.jsx`),
+placed left of Reset Filters per the user's own request - useful
+regardless of the poll, for forcing a fresh read on demand.
+
+Verified live: forced node 2's thresholds to an effectively-infinite
+value via `PATCH /heartbeat-controls/node/2` (making it resolve to
+"ok"), watched the same already-open, already-filtered ("Warning or
+Error") tab for 10s with **no reload** - the row disappeared and the
+entity count dropped on its own once the poll fired, confirming this
+wasn't just "worked because the page happened to be freshly mounted."
+Restored the original thresholds afterward; the reload button was
+also exercised directly.
+
+## 64. Devices expand row - CSS Grid replaces the fixed-flex-basis layout, compacted
+
+2026-08-16. The user asked to make the expand row's two key/value
+tables (`DevicesList.jsx`'s `KeyValueTable`/`DeviceDetailRow`, section
+53) more compact and fix a "large right-side margin" on the right
+table.
+
+Root cause of the margin: section 53's own layout used
+`flex: '0 1 420px'` on each table's wrapper - a fixed flex-basis,
+chosen at the time specifically to stop a 100%-wide Bootstrap table
+from forcing its sibling onto its own line. That fix worked but
+over-corrected two ways at once: it capped BOTH tables at 420px even
+when the page had far more room, and it reserved the full 420px even
+when a table's own content was much narrower - so the right table's
+own wide values (`Capabilities`/`Data Logger`/`Heartbeat Control`
+JSON) wrapped awkwardly into a ~270px column while a large blank
+margin sat unused past both tables entirely.
+
+Replaced the flexbox layout with CSS Grid:
+`gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))'` on the
+row's own wrapper, `w-auto` removed from each `CTable` (default
+Bootstrap `width: 100%` now applies *within* its own grid column,
+which can't force a sibling column to shrink the way a flex sibling
+could). Two columns share the row when there's room for two
+>=320px tracks, otherwise it falls back to one column per row - same
+graceful degradation the old flex-wrap aimed for, without the fixed-
+width guess.
+
+Compactness: row padding tightened from `py-1` (0.25rem top/bottom via
+Bootstrap's own spacing scale) to an explicit `0.125rem` via inline
+style (finer-grained than the closest Bootstrap utility step allows),
+`small` className added to the table itself for smaller text (CoreUI's
+`<CTable small>` *prop* only reduces padding via Bootstrap 5's own
+`.table-sm`, which does not touch font size at all - the separate
+`small` *CSS* class, already used identically for `NodeDetailRow`'s
+own JSON dump in `NodesList.jsx`, is what actually shrinks the font).
+
+Title style: `title` was a real prop since section 53 but never
+actually rendered - an earlier direct edit had removed just the
+render while leaving the prop itself in place. Given the two tables
+now sit in independent grid columns with no visible separator between
+them, added a compact treatment - small, uppercase,
+`text-body-secondary`, letter-spaced - specifically to answer "can
+change title style" by giving the titles an actual style for the
+first time, not simply restoring the old (removed) plain-text one.
+
+Verified live in nexus-edge-aquarium: expanded a device row with rich
+JSON fields (Buzzer 1/active-buzzer) - `Capabilities`/`Data Logger`/
+`Heartbeat Control` now wrap at their own column's real width instead
+of a narrow fixed one, the "VALUE"/"DEVICE" titles render, rows are
+visibly tighter, and no blank margin remains past the right table's
+own content.
+
+## 65. DevicesList's last poll retired - metadata changes now push over the `device` domain too
+
+2026-08-23. Closes the one deferred item sections 62/63 both explicitly
+flagged and left alone: `DevicesList.jsx`'s own `DEVICES_POLL_MS` list-
+level `GET /devices` poll (10s), kept specifically because no live event
+existed yet for a node's `simulated`/rename reaching Devices, or for a
+device's own rename/Device Group/Node reassignment/capabilities edit
+made in a different tab. The user noticed the poll was still firing (a
+DevTools Network tab observation, not a guess) and asked directly
+whether it was still needed, in the same conversation where a physical
+CAN reconnect turned out to have exposed just how sluggish Devices'
+reaction actually was compared to Nodes.
+
+**Two distinct things were making Devices "slower than Nodes" that day,
+worth keeping separate**: (1) `control-node-heartbeat`'s own
+`data_logger_control` error window (20s, section 62's own deliberate
+choice to stay clear of the touch-cadence race) is genuinely wider than
+Nodes' 10-tick/10s threshold - a config difference, not fixed here; (2)
+the list-level poll itself, which this section retires.
+
+**`messaging.ts`**: `DeviceEventEnvelope.value` became optional, and a
+new optional `metadata` field added - carries the whole `GET /devices`
+list-row shape (not a hand-picked subset, same philosophy as
+`NodeEventEnvelope.value`), present only for a registry/metadata change,
+never together with a real reading. Keeping the two on separate fields
+(rather than overloading `value` for both purposes) was deliberate:
+`useDeviceLiveState`'s reducer previously overwrote `value`/`mode`/etc.
+unconditionally on *every* event for a device, so a metadata-only event
+publishing under `value` would have silently clobbered the last known
+live reading with `undefined`. Fixed the reducer itself to only touch
+the reading fields when `'value' in event`, metadata fields only when
+`event.metadata !== undefined` - a metadata event and a reading event
+now can't step on each other regardless of which arrives first.
+
+**`routes/devices.ts`**: new `publishDeviceMetadata(deviceId, source)`,
+called after each of the five metadata-mutating routes (Device Group
+membership, Node assignment, simulated toggle, rename, capabilities) -
+mirrors `publishDeviceReading`'s own shape, reusing `findDeviceListRow`
+each route already computes for its own HTTP response rather than a
+second query.
+
+**Frontend**: new `useDevicesMetadataLiveState()` (`useLiveDevice.js`,
+fleet-wide `{[id]: row}`, mirrors `useNodesLiveState`'s own shape - a
+per-id selector like `useDeviceLiveState` isn't the right shape for
+`DevicesList.jsx`, which renders from one flat array, not a per-row
+subscribing component). `DevicesList.jsx` now merges two live sources
+into its own `devices` array before filtering/rendering: this metadata
+overlay (patches a device's own row on any registry change, anywhere),
+and the *existing* `node` domain (`useNodesLiveState`, section 61) for
+`node_name`/`node_simulated` - a node's own rename/simulated toggle
+reaching every device attached to it, without Devices needing its own
+copy of that logic. `DEVICES_POLL_MS`/its `setInterval` are gone
+entirely, replaced by the same reconnect-triggered one-shot refetch
+pattern `NodesList.jsx` already established (a dropped-then-restored
+WebSocket connection can't have delivered anything while down; nothing
+else still needs a recurring timer).
+
+**A red herring during verification, not a code bug**: after deploying,
+`GET /devices` was still observed firing every ~10s in the API's own
+request log. Confirmed via elimination (closed every automation-
+controlled tab entirely - the poll kept firing) that this was the
+user's *own*, separate browser tab still running the pre-rebuild
+cached bundle (confirmed by grepping the freshly-built container's
+served JS for `DEVICES_POLL_MS` - genuinely absent). A hard reload
+(Ctrl+Shift+R) on that tab was the actual fix, not a code change.
+
+**Verified live** in nexus-edge-aquarium with two fresh tabs (guaranteed
+non-cached bundle): renamed a device via a direct authenticated
+`fetch()` call (bypassing a UI click that silently failed to submit)
+and watched the second tab's row update instantly, no reload; toggled
+`Main node control`'s own `simulated` flag the same way and watched
+every device attached to it - and the header's own Simulation badge -
+flip live across the whole list simultaneously, also with zero polling
+in either direction.
+
+## 66. New "weather-node" node type - CORE Library + firmware scaffold, first Device with no EdgeX backend at all
+
+2026-08-23. `Node Weather Control.txt` (AGENTS_TO_DO.md) - components
+ordered, not yet in hand; this section is the CORE-side software prep
+done ahead of hardware arrival, same "build simulated first, wire to
+real CAN later" order `control-node` itself followed.
+
+**Hardware -> Devices mapping, settled up front**: three physical
+sensors, four raw logical readings, plus one computed one - AHT20
+(temperature + humidity, two atomic Devices, same "one I2C chip, two
+Device rows" precedent `control-node`'s own `../humidity` contract
+already established), BMP280 (pressure only - its own temperature output
+read and discarded, AHT20 already covers that), a photoresistor (raw,
+uncalibrated ADC count). A `weather-control` process derives a 6-level
+categorical light-level (`very-sunny`/`sunny`/`medium`/`overcast`/
+`dusk`/`dark`) from the raw value every tick - **5 Devices total** on a
+real instance, not 4: temperature, humidity, pressure, light (raw),
+light-level (computed).
+
+**New Library device types** (`devices/standalone/sensor/`):
+`pressure` and `light` are ordinary readOnly sensor types, same shape as
+`temperature`/`humidity` - nothing new architecturally. `light-level` is
+the first Device type in this library with **no
+`edgex-device-profile.yaml` at all** - no physical or virtual EdgeX
+backend, deliberately. Two existing write paths were checked and both
+rejected it: `PUT /devices/:id/auto` requires a resolvable EdgeX device
+via `requireEdgeXDevice` and rejects `readOnly` devices outright; `PUT
+/devices/:id/simulate` *also* requires a resolvable EdgeX device (it
+writes the value out through EdgeX too, not just the `state:*` cache -
+see its own `writeOrReject` call). Neither fits a value that was never
+meant to have hardware behind it.
+
+**New route, `PUT /devices/:id/reading`** (`routes/devices.ts`) -
+skips EdgeX entirely, calls `dualDevicesModel.publishReading()` directly
+(the same cache-refresh-and-publish primitive `.../simulate` already
+used for its own side effects) after confirming the device exists and is
+`readOnly`. Not logged via `logCommand` - a process re-asserting its own
+computed reading every tick isn't a "command" worth auditing, any more
+than an ordinary EdgeX-sourced sensor reading is. New orchestrator
+`apiClient.setDeviceReading(deviceId, value)` calls it - the
+`weather-control` process's own future runner (a target project's
+`plugins/weather-control/process.ts`, not built yet - see below) will
+use this the same way `control-node/process.ts` uses `setDeviceAuto` for
+Pulse.
+
+**New node type**, `devices/nodes/weather-node/` - `node.yaml`
+(`supports:` temperature/humidity/pressure/light/light-level/heartbeat),
+full firmware scaffold (`firmware/src/{config,env_sensor,
+pressure_sensor,light_sensor,can_bus,main}.{h,cpp}`, PlatformIO project),
+`docs/wiring.md`. Simpler than `control-node`'s own firmware - this
+board has no watchdog/LED/buzzer/reset function at all, transmit-only
+(no `canBusReceive()`), just three sensors read on their own intervals
+plus a heartbeat, once/sec. New CAN ID block `0x310`-`0x31F` (deliberately
+leaving `0x306`-`0x30F` free for `control-node`'s own future growth, in
+case the two ever do share one physical bus - an open wiring question,
+not a firmware one, see `wiring.md`'s own note on dedicated-segment vs.
+shared-bus). AHT20 and BMP280 share one I2C1 bus at different fixed
+addresses (`0x38`/`0x76`) - no second bus needed. Firmware is untested
+(components not yet in hand), written by direct analogy with
+`control-node`'s own AHT20 protocol code and STM32_CAN wrapper, same
+`HAL_CAN_MODULE_ENABLED` build flag applied proactively (a known,
+documented STM32_CAN + STM32duino requirement, not something to
+rediscover).
+
+**New UI** (`apps/ui/src/views/processes/`): `WeatherControlPanel.jsx`
+(expandable-row detail, `KIND_PANELS['weather-control']`) - read-only
+display of all five readings, no thresholds here (this process has none
+of its own to edit). `WeatherZonesSection.jsx` - the zone-boundary
+editor, registered in `ProcessSettingsModal.jsx`'s
+`EXTRA_SETTINGS_SECTIONS['weather-control']` (the user's own "Config
+процесу" placement, not the expandable panel) - horizontal diagram of
+the 6 zones proportional to a 0-4095 raw range, a dashed marker at the
+raw light Device's current live value, one boundary `NumericStepper` per
+border between adjacent zones (min/max clamped against neighbor zones),
+an "accept current value" button per boundary, and a color picker per
+zone. Staged locally via a ref (`extraConfigRef`, generalized from what
+used to be `AnnunciatorSlotsSection`'s own hardcoded `slotsRef` - a new
+`EXTRA_CONFIG_FIELD` kind->field map lets `ProcessSettingsModal.jsx`'s
+`handleSave` stay generic across both of these now, not just one),
+committed to `process.config.zones` only when the modal's own Save runs
+- Cancel/close discards it, matching the spec's explicit Save/Cancel
+ask. Icons: `@coreui/icons` has no dedicated weather set -
+`cilSun`/`cilBrightness`/`cilCloudy`/`cilCloud`/`cilContrast`/`cilMoon`
+stand in (`lightLevels.js`); `cilBrightness`/`cilContrast` are generic
+UI icons, not literal sun/dusk glyphs, worth a visual check once seen
+live.
+
+**Not done yet, deliberately** - same split `control-node`/
+`ControlNodePanel.jsx` already established: the process *runner*
+(`plugins/weather-control/process.ts`) and the real node instance seed
+migration both belong in a target project, not core, and need a real
+deployment decision (which project, own CAN segment or shared with
+`control-node`) this session didn't settle.
+
+**Follow-up, same day** - wired the real instance into
+nexus-edge-aquarium (`migrations/002_seed_weather_node.sql`, `plugins/
+weather-control/process.ts` mirroring `plugins/control-node/process.ts`'s
+shape minus the Pulse/watchdog half this node type has none of,
+`extra-res/devices/weather-node-devices.yaml`, `backend: virtual`
+throughout - see that project's own AGENTS.md for the instance-level
+writeup). 6 devices on the real instance, not 5 - heartbeat is a Device
+too, same as `control-node`. Rebuilt and live-verified end to end
+(`docker compose build` + `up -d` on api/orchestrator/device-service/ui,
+then Dev Simulator -> Processes -> Weather Node's own panel and Settings
+popup) - and two real bugs surfaced only by that live pass, both fixed
+here in core, not worked around in the target project:
+
+- `apps/device-service/internal/driver/codec.go`'s `coerceToValueType`
+  had no `Uint16` case (only Bool/Int32/Uint32/Float32/Float64/String) -
+  `light`'s Uint16 valueType fell through to the passthrough default,
+  and EdgeX's own `NewCommandValue` rejected the raw YAML-decoded `int`
+  it got instead. Added the missing case (`toInt64` too, for the
+  write-then-read-back round trip - same reasoning already documented on
+  its `int32` case for Int32/Uint32).
+- `routes/devices.ts`'s `GET /devices/:id` turned out to have NO code
+  path at all for a Device with no resolvable EdgeX name - `value` stayed
+  hardcoded `null` forever, regardless of what `PUT /devices/:id/reading`
+  had written into the `state:*` cache. This one was invisible from the
+  write side alone (the route returned `200 {"status":"ok"}` correctly)
+  and only surfaced reading the value back - a reminder that
+  `publishReading()`'s own doc comment ("reach the state:* cache and
+  nexus.events") was written with the *live push* consumer in mind, not
+  the plain REST GET, which turned out to have its own entirely separate
+  value-sourcing logic. Added `dualDevicesModel.getReading()` (reads back
+  what `publishReading()` last wrote) and a new `else if
+  (device.capabilities.readOnly)` branch in the route, parallel to the
+  EdgeX branch above it.
+
+Both fixed and live-verified before this follow-up was written: raw
+light simulated to 3800 via the Dev Simulator, `weather-control`
+classified it to `very-sunny` within one tick with zero manual
+intervention, and both the WeatherControlPanel and WeatherZonesSection
+(marker position, current-zone label, "Accept current value") rendered
+correctly against that live value in the browser.
+
+**Second follow-up, same day** - with no real firmware for 3-5 weeks
+(components still in transit), `weather-node-01` had no way to ever send
+a real heartbeat, so Heartbeating Control would eventually flag it stale
+regardless of everything above working correctly. The platform's
+existing fix for exactly this ("simulated" toggle on a Node,
+`nodeHeartbeatStaleness`: `if (simulated) return "ok"`) turned out to be
+unreachable for it: `PATCH /nodes/:id/simulated`'s own guard (`routes/
+nodes.ts`, originally added for `control-node`'s partial-physical-network
+feature) unconditionally required at least one device on the node to
+have a simulated twin (`edgex_device_name_simulated`) before allowing
+`simulated: true` - correct for a node with real hardware to redirect
+away from, but weather-node has zero `backend: physical` devices at all
+right now, so no twin could ever exist and the toggle was permanently
+blocked with a 409.
+
+Fixed by scoping the check to nodes that actually have a physical
+device: `SELECT count(*) FILTER (WHERE backend = 'physical'), count(*)
+FILTER (WHERE edgex_device_name_simulated IS NOT NULL) FROM devices
+WHERE node_id = $1` - reject only when `physical_count > 0 AND
+twin_count = 0`. `control-node`'s own toggle re-verified unchanged
+afterward (it has 2 physical devices with no twin of their own, `pulse`/
+`heartbeat`, but passes via its other 2 twinned devices, `led-green`/
+`temperature` - same "some redirect happens somewhere on this node"
+condition as before, not "every physical device needs its own twin").
+`weather-node-01` toggled to `simulated: true` live afterward, confirmed
+via the Nodes page (`Simulation` status pill, red toggle) and the
+header's own blinking Simulation badge lighting up.
+
+**Third follow-up, same day** - the user reported the Nodes page's own
+switch could turn `weather-node-01`'s simulated mode OFF but not back
+ON. Root cause: `NodesList.jsx`'s `Switch` disabled itself on
+`!node.simulated && !node.has_simulated_twin` - `has_simulated_twin` was
+the OLD, unfixed field (`EXISTS(... edgex_device_name_simulated IS NOT
+NULL)`, still just "does any twin exist anywhere"), never updated when
+the second follow-up above fixed the actual write-path guard. For a node
+with zero physical devices this can never be true, so the switch stayed
+permanently disabled for turning simulated ON, regardless of the PATCH
+route itself now allowing it - the backend fix alone wasn't enough; the
+frontend had its own, now-stale copy of the pre-fix rule guarding the
+same decision.
+
+Renamed the field to `can_enable_simulated` and gave it the exact same
+`NOT EXISTS (physical device with no twin)` condition the PATCH guard
+now uses - then simplified the PATCH handler itself to read
+`node.can_enable_simulated` off the row `findNode` already returns
+(`SELECT_NODE` computes it once) instead of running its own separate
+count query, so there is now exactly one place this condition is
+computed, not two that can drift apart again. `NodesList.jsx` updated to
+match (`disabled`, `ariaLabel`). Live-verified via an actual UI click
+this time (not the browser-console `fetch()` workaround the earlier
+follow-ups used) - `weather-node-01`'s switch turned simulated ON
+successfully, `Simulation` pill and header badge both lit up.
+
+## 67. Devices expand row - a readOnly device's own simulated value is now editable in place, not just via Dev Simulator
+
+2026-08-23. The user asked directly: with the simulated-value machinery
+now working end to end for `weather-node-01`, could the expand row's
+left "Value" table also let you edit a simulated device's value right
+there, instead of needing the separate Dev Simulator page for the same
+`PUT /devices/:id/simulate` write - "якщо це число - використовуємо
+компоненту з кнопочками -input+" (their own name for `NumericStepper`),
+with a per-device step, and - explicitly, since every other caller of
+that component has a disabled display-only input - "Інпут в даному
+випадку дозволений (not disabled)".
+
+**`NumericStepper.jsx`**: new `editable` prop (default `false`, every
+existing caller unaffected). When true, the input becomes a real typable
+`CFormInput` - local `text` state, committed on blur or Enter (parses,
+clamps to `[min, max]`, calls `onCommit` if the value actually changed).
+Kept the render-time "sync `text` from a changed `value` prop" logic
+*out* of a `useEffect` (`if (current !== syncedCurrent) { setSyncedCurrent(...); setText(...) }`
+during render instead) - this codebase's stricter React Compiler-era
+lint rules (`react-hooks/set-state-in-effect`) reject a plain setState
+call inside an effect body, same class of rule `ProcessSettingsModal.jsx`
+already has its own comments about. A second, unrelated lint error
+(`react-hooks/immutability`) surfaced on the *pre-existing* `doStep`
+function's own `runningValueRef.current = clamped` write purely from
+`commitText` being declared nearby and also touching that ref - fixed by
+not having `commitText` touch `runningValueRef` at all (it never needed
+to: that ref only matters for a held-repeat's own running baseline, and
+the existing `current`-tracking effect already re-syncs it once the
+parent re-renders with the value `commitText`'s own `onCommit` produced).
+
+**`DevicesList.jsx`**: new `SimulatedValueEditor` (own small component,
+under the left "Value" `KeyValueTable`, only rendered when
+`effectivelySimulated && device.capabilities?.readOnly && typeof value
+=== 'number'` - the exact same class of device Dev Simulator's own
+readOnly branch already targets, just reachable from this page too now).
+Step is `device.capabilities?.step ?? 1` - `capabilities.step` was
+already an existing per-device field (`DeviceCapabilities` interface,
+`routes/devices.ts`; already read by DevSimulator's own `CustomSimulator`
+branch for e.g. `light-regulator`'s slider) that the plain generic
+`NumericStepper` path in DevSimulator never actually consulted (hardcoded
+`step={0.5}` there regardless of device type) - this is the "personal
+step" the user asked for, reusing that field rather than inventing a new
+one. Write goes through the existing `api.simulateDevice()` (same route
+DevSimulator uses) - no `reloadDevices()` afterward needed, since the
+write already lands via the live `device` event `useDeviceLiveState`
+subscribes to (every open tab, including this row's own, converges on
+its own). Also fixed the left table's own "Value" row to read the same
+live-overlaid `value` `DeviceRow` already computes for its collapsed-row
+cell, instead of the one-time-fetch-only `fetched?.value` it used before
+- those two could previously disagree indefinitely once any live event
+arrived, which would have looked especially broken sitting directly
+above a live-editable input showing the correct number.
+
+**Weather-node's own devices** (`nexus-edge-aquarium`) got real
+`step`/`min`/`max` values for the first time as part of this
+(`temperature`: 0.5/-40/60, `humidity`: 1/0/100, `pressure`: 1, `light`:
+50/0/4095) - both the migration file and a live `UPDATE` against the
+already-seeded rows (migrate-extra's own idempotency means editing the
+file alone doesn't retroactively touch a row that already exists).
+
+Live-verified: typed `1200` directly into `weather-node-light`'s new
+input and pressed Enter (no `+`/`-` click) - committed immediately,
+visible in the collapsed row, the Value table, and the header's own
+Simulation badge context all at once; clicked `+` once afterward and
+confirmed it stepped by exactly 50 (`1200` -> `1250`), the configured
+per-device step, not a hardcoded default.
+
+## 68. DevSimulator.jsx - two generic crashes in the per-type generic fallback, found live wiring a private String-valued Device type
+
+2026-08-23, live-verifying a private target project's own new Device
+types (a writable String-valued actuator type and a readOnly Uint32
+counter type, both target-project-private per section 31's own
+extension points - no such type exists in this library itself).
+`apps/ui/src/views/devices/DevSimulator.jsx` lists every virtual Device
+across the whole fleet and, absent a per-type `CustomSimulator`
+registration, falls back to a generic renderer keyed on `valueType` -
+that fallback had never been exercised against a String-valued or
+integer-valued Device before, and broke in two independent ways:
+
+- The generic fallback only branched on `Bool` vs. "else `NumericStepper`"
+  - `NumericStepper`'s own `Number(value)` on a real string is `NaN`,
+    and `NaN !== NaN` is always `true` in JS, so its own render-time
+    state-sync (`if (current !== syncedCurrent) { setSyncedCurrent(...);
+    setText(...) }` - the documented React pattern for "adjust state
+    when a prop changes") never stabilizes and calls `setState` on every
+    single render forever - "Too many re-renders" (React error #301),
+    crashing the entire page, not just one row. Fixed with a dedicated
+    branch keyed on the Device's *runtime* value type (`typeof
+    currentValue === 'string'`), not its `valueType` field alone -
+    `light-level` (section 66, a computed Device with no EdgeX backend
+    at all) turned out to have `valueType: null` despite its value
+    genuinely being a string (`"medium"`), which `detail.valueType ===
+    'String'` alone missed. A readOnly string (computed Devices like
+    `light-level`) renders as plain text, since there is nothing to
+    write back to for a derived value; a writable one renders an
+    editable text input.
+  - The generic `NumericStepper` fallback also hardcoded `step={0.5}`
+    for every remaining (non-Bool, non-string) Device - fine while
+    `Float32` was the only numeric `valueType` in the library, but any
+    `Uint32` Device (e.g. `heartbeat`) rejects a fractional write
+    (`strconv.ParseUint: parsing "0.5": invalid syntax`, EdgeX's own
+    error). Fixed by deriving the step from the Device's own
+    `capabilities.step` first, falling back to `1` for any integer
+    `valueType` (`/^u?int/i` - `Uint16`/`Uint32`/`Int32`/etc.) and `0.5`
+    only for genuinely fractional types.
+
+Both confirmed fixed live: Dev Simulator renders a String-valued Device
+(editable text input) and an integer-valued Device (now-integer stepper,
+no more EdgeX rejection) without crashing, alongside `light-level`'s own
+plain-text cell (readOnly, string, no EdgeX backend).
+
+## 69. `devices.name` uniqueness narrowed from global to per-node
+
+2026-08-23. Reported inconvenient directly: `name` had a plain global
+UNIQUE constraint (`devices_name_key`, the original column-level
+`unique: true` from `1690000000001_create-devices-table.ts`, never
+touched since) - meaning a second instance of any node type could never
+reuse that type's own device names (e.g. a second `control-node`
+re-seeding its own `...-led-green`-style names), confirmed as a real,
+already-present limitation via every existing seed file (all name every
+device `<node-type>-<slot>`, never `<node-instance>-<slot>`).
+
+`name` is a separate column from `edgex_device_name` (each with its own
+independent UNIQUE constraint) - `name` is the user-editable display
+label (`PATCH /devices/:id/name`), `edgex_device_name` is what actually
+goes to EdgeX and has to stay globally unique since that's EdgeX's own
+requirement, untouched here. The Model State Validator
+(`apps/api/src/validator.ts`) already resolved forbidden-state device
+names via a node-scoped lookup (`findDeviceByNodeAndName`) - the app's
+own business logic already only ever needed per-node uniqueness; the DB
+constraint had simply been stricter than necessary.
+
+New migration (`1690000000052_devices-name-unique-per-node.ts`) drops
+`devices_name_key` and replaces it with TWO partial unique indexes, not
+one plain composite `UNIQUE(node_id, name)`: Postgres treats every NULL
+`node_id` as distinct from every other in a composite UNIQUE, so a plain
+composite constraint would leave standalone devices (`node_id IS NULL`)
+completely unconstrained by name instead of merely node-scoped - there's
+no node for them to be scoped to. Confirmed with the user: standalone
+devices keep their previous global-uniqueness behavior
+(`devices_name_unique_standalone`, `UNIQUE (name) WHERE node_id IS
+NULL`); node-attached devices get the new per-node scoping
+(`devices_name_unique_per_node`, `UNIQUE (node_id, name) WHERE node_id
+IS NOT NULL`).
+
+`routes/devices.ts`'s rename route (`PATCH /devices/:id/name`) already
+handled the unique-violation case generically (catch `23505`, return
+409) - left its error message scope-neutral ("a device with this name
+already exists") rather than claiming either "on this node" or
+"globally", since which one actually fired now depends on whether the
+device is node-attached, and the route has no cheap way to tell without
+an extra query.
+
+Live-verified directly against Postgres (not through the API - no
+runtime "create device" route exists, devices are only ever created via
+migrations): two devices on two different nodes now successfully share a
+name; two devices on the SAME node with the same name still correctly
+reject (`devices_name_unique_per_node` violation); two standalone
+devices (`node_id IS NULL`) with the same name still correctly reject
+(`devices_name_unique_standalone` violation) - all three cases confirmed
+in a rolled-back transaction, no lasting test data left behind.
+
+## 70. `nodes.seed_key` - target-project seed migrations no longer duplicate a Node on every `migrate-extra` re-run
+
+2026-08-23, same day as §69, surfaced investigating a user report of
+stale duplicate nodes in `nexus-edge-aquarium`'s own DB
+(`control-node-01`/`weather-node-01`, both empty or nearly-empty
+shells alongside the real, in-use `Main node control`/`Weather
+Station`). Root cause: `nodes.name` has its own real UNIQUE constraint
+(`nodes_name_key`), and every target-project seed `*.sql` file
+(`001_seed_control_node.sql`, `002_seed_weather_node.sql`,
+`003_seed_aquarium_light.sql`, all in `nexus-edge-aquarium`) matched its
+Node INSERT via `ON CONFLICT (name)` - exactly the same idempotency
+strategy already used for `devices.edgex_device_name`. The difference:
+`devices.edgex_device_name` is deliberately never touched by the UI
+(only `devices.name` is user-renameable), but Nodes have no such second,
+UI-invisible identity column - `nodes.name` IS the only identity a Node
+has, and it's just as user-renameable (`PATCH /nodes/:id/name`) as a
+Device's own `name`. Once a seeded node got renamed via the UI (as both
+of these had been, independently, at some earlier point), the literal
+string in the seed file's `ON CONFLICT (name)` no longer matched any
+existing row, and `migrate-extra`'s own re-run-every-container-start
+design (`docker-compose.yml`'s own comment: "re-runs every *.sql file on
+every container start") silently inserted a fresh, empty duplicate node
+instead of recognizing the real one. `weather-node-01` additionally
+picked up one duplicate DEVICE too (`weather-node-light-level`) - the
+computed `light-level` device (§66, no `edgex_device_name` at all) has
+no idempotency key of its own either, keyed only by `node_id` matching a
+node it could no longer find (the very same rename problem, one level
+down).
+
+Fixed with a new nullable, unique `nodes.seed_key` column
+(`1690000000053_add-nodes-seed-key.ts`) - the Node-level equivalent of
+`devices.edgex_device_name`: a UI-invisible anchor only a seed
+migration's own `ON CONFLICT` ever reads or writes, `name` stays exactly
+as freely renameable as it always was. Each of the three target-project
+seed files now leads with a one-time `UPDATE nodes SET seed_key = '<the
+same literal string the file has always used for name>' WHERE type =
+'<node type>' AND seed_key IS NULL` - this is what makes the fix
+self-healing for every already-renamed deployment, not just future
+ones: it backfills `seed_key` onto whatever the real, live node of that
+type happens to be right now, however it's currently named, the very
+first time the updated file runs. Every subsequent `(SELECT id FROM
+nodes WHERE name = '...')` subquery in these files (device `node_id`
+resolution, the computed device's own `NOT EXISTS` guard, the process
+config's `nodeId`/`lightNodeId`/`panelNodeId`) switched to `WHERE
+seed_key = '...'` too, since `name` can no longer be trusted to match
+after a rename.
+
+Cleaned up live in `nexus-edge-aquarium`'s own DB before writing the
+fix: deleted the two empty node duplicates (`control-node-01`,
+`weather-node-01`) plus a third, unrelated pre-existing empty
+`control-node` duplicate found in the same pass (`System control`, same
+root cause, from even earlier) and the one orphaned `weather-node-
+light-level` device (`nodes.id → devices.node_id` is `ON DELETE SET
+NULL`, not CASCADE - deleting the node alone left the device behind as
+a newly-standalone row, needing its own explicit cleanup). Verified the
+backfill+fix together afterward by running `migrate-extra` twice in a
+row against the now-clean DB: first run reported `UPDATE 1` for each of
+the four backfills (linking the real, already-renamed nodes to their
+seed_key) and `INSERT 0 0` for every node/device insert that would
+previously have duplicated; second run reported `UPDATE 0` for every
+backfill (already linked) and `INSERT 0 0` throughout - full end-to-end
+idempotency confirmed, not just reasoned about. `processes` GET
+afterward confirmed every affected process still resolves its
+`nodeId`/device references correctly and remains non-critical.
+
+## 71. Extension points (section 31) extended: private node-type Library packages, private process-kind UI panels
+
+2026-08-24. A target project's own node-type/business-domain content had
+been leaking into this repo's own `devices/nodes/` and `apps/ui/src/
+views/processes/` because two of section 31's five extension points
+didn't actually exist yet when that content was first built - discovered
+relocating a private target project's own node types + process-kind UI
+out of core, confirming they belonged there in the first place. Both
+gaps are now closed, generically, not specific to whichever project
+first needed them:
+
+**Private node-type Library packages** - `libraryCatalog.ts`'s own
+`syncLibrary()` previously walked `config.apiPlugins.extraDir` flat, kind
+`"device"` only (a target project's own `plugins/<name>/library.json`
+files, sourced from the SAME `plugins/` directory `EXTRA_API_PLUGINS_DIR`
+already mounts for `process.ts`/`api.ts`/`ui/register.js`). A private
+NODE type (`node.yaml` + `library.json` + `icon.svg` + `firmware/`) had
+no equivalent - core's own `devices/nodes/` was the only tree
+`syncLibrary()` ever scanned for kind `"node"`. Fixed by restructuring
+the private walk to mirror core's own `standalone/`/`nodes/` split:
+`extraDir/devices/` (kind `"device"`) and `extraDir/nodes/` (kind
+`"node"`), both using the exact same `walk()`/`findIcon()`/`upsertItem()`
+machinery core's own trees already use - `library_items.id` (the
+library.json's own `id` field, not `folder_path`) is the `ON CONFLICT`
+key, so an already-seeded Node's live DB row (its `nodes.type` join
+target) updates in place when its Library package moves from core's
+`devices/nodes/<type>/` to a private `plugins/nodes/<type>/`, rather than
+duplicating. Zero prior consumers of the old flat device-only private
+walk existed anywhere (checked both target projects), so this
+restructuring needed no migration/back-compat shim.
+
+**Private process-kind UI panels** - `ProcessesTable.jsx`'s expandable-
+detail dispatch (`KIND_PANELS`) and `ProcessSettingsModal.jsx`'s
+kind-specific Settings-popup section (`EXTRA_SETTINGS_SECTIONS`/
+`EXTRA_CONFIG_FIELD`) were both hardcoded object literals living in this
+repo's own UI source, directly importing every kind's panel/section
+component by name - including a target project's own process kinds,
+which had no path to register a panel without editing these two core
+files. New `processTypeRegistry.js` (`processPanels`/
+`processSettingsSections`/`processSettingsConfigFields`, plain objects
+read via bracket access - same "avoid react-hooks/static-components"
+reasoning `deviceTypeRegistry.js` already documents) plus
+`builtinProcessTypes.js` (core's own kinds, mirroring
+`builtinDeviceTypes.js`) and `pluginProcessTypes.js` (`import.meta.glob(
+'plugins/*/ui/register.js', { eager: true })` - deliberately the SAME
+glob pattern `pluginDeviceTypes.js` already uses, not a second file
+convention; a target project's one `register.js` can call
+`deviceTypeRegistry.*` and/or `processTypeRegistry.*` as needed, ES
+module caching means importing the same file from two glob call sites
+still only runs its side effects once). `ProcessesTable.jsx`/
+`ProcessSettingsModal.jsx` now read `processPanels`/
+`processSettingsSections`/`processSettingsConfigFields` instead of
+owning the maps themselves - `control-node`/`weather-control` (this
+repo's own node types, runner lives in a target project) still register
+their panel here via `builtinProcessTypes.js`, same as before, just
+through the registry instead of a literal map entry.
+
+**A private plugin reaching core's own shared modules, and even core's
+own third-party packages, turned out to need real fixes on every side -
+none of this had ever been exercised by a real file before**:
+
+- UI-side (`apps/ui`), reaching core's own JS module tree: a target
+  project's own `plugins/*/ui/*.jsx` is compiled into the SAME Vite
+  bundle as core's own source (via `additional_contexts` in that
+  project's own Dockerfile) - the pre-existing `find: 'src/',
+  replacement: apps/ui/src/` alias (`vite.config.mjs`, previously unused
+  by anything) lets a plugin file `import { processTypeRegistry } from
+  'src/processTypeRegistry'` and reach core's own module tree despite
+  living outside it.
+- UI-side, reaching a third-party package (`@coreui/*`): a **second,
+  independent** resolution gap, found live the moment a real
+  `plugins/*/ui/register.js` file finally existed to exercise it -
+  `pluginDeviceTypes.js`'s own `import.meta.glob('plugins/*/ui/
+  register.js', ...)` had zero real consumers in any target project
+  before this, so this exact failure mode (a glob-discovered file
+  outside `apps/ui`'s own package importing a bare `@coreui/react`)
+  had simply never been built before. Confirmed live:
+  `@coreui/react`/`@coreui/icons`/`@coreui/icons-react` only exist as
+  symlinks under `apps/ui`'s own `node_modules` (`ls
+  /workspace/node_modules/@coreui` - not found; `/workspace/apps/ui/
+  node_modules/@coreui` - three symlinks into `.pnpm`), never hoisted to
+  the workspace root a glob-discovered file's own upward Node resolution
+  would reach - same root cause `react` itself was already pinned for,
+  just never extended to `@coreui/*` since nothing had needed it. Fixed
+  with three more `vite.config.mjs` aliases, same shape as the existing
+  `react`/`react/` pair.
+- API-side (`apps/api`), reaching core's own `pool` (`db.ts`) AND a
+  third-party package (`pg`) at once: a private `plugins/*/api.ts` is
+  loaded via a plain runtime `import()` from an arbitrary on-disk path
+  (`apiPlugins.ts`) - Node's own relative-import resolution would never
+  reach back into `db.ts` from a file living outside that package, and
+  (confirmed live, same class of bug as `@coreui/*` above)
+  `import { Pool } from "pg"` throws `ERR_MODULE_NOT_FOUND` at runtime
+  for the same reason - `pg` is only hoisted under `apps/api`'s own
+  `node_modules`. Vite's alias mechanism has no runtime-`import()`
+  equivalent, so the fix here is different in kind, not just in name:
+  `loadApiPlugins()` now passes its own already-open shared `pool` as
+  the plugin's own Fastify `opts`
+  (`app.register(mod.default, { pool })`) - a plugin's default export
+  signature is now `(app, { pool }) => Promise<void>`, receiving the
+  dependency as an argument rather than importing it at all, the exact
+  same "receive dependencies as arguments" reasoning `process.ts`'s own
+  `apiClient`/`logger` injection (`processPlugins.ts`) already
+  established - one shared pool, not a second connection pool per
+  plugin.
+- Orchestrator-side (`apps/orchestrator`), reaching a private route: a
+  private process kind reaches its own private API routes via
+  `apiClient`'s own new generic `request<T>(path, options)` escape
+  hatch, added alongside every already-typed method rather than adding
+  a one-off typed method for each private route as it comes up - no
+  resolution problem here, since `process.ts` already received
+  `apiClient` as a function argument rather than importing it (the
+  precedent the two fixes above both cite).

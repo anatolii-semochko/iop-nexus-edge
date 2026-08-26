@@ -14,11 +14,12 @@ import {
   CTableHeaderCell,
   CTableRow,
 } from '@coreui/react'
-import { cilSettings } from '@coreui/icons'
+import { cilSettings, cilTrash } from '@coreui/icons'
 import { api } from '../../api/client'
 import { useProcessLiveState } from '../../api/useLiveProcess'
 import IconButton from '../../components/IconButton'
 import ResetFiltersButton from '../../components/ResetFiltersButton'
+import RowStatusBadge from '../../components/table/RowStatusBadge'
 import Switch from '../../components/Switch'
 import ExpandAllToggleButton from '../../components/table/ExpandAllToggleButton'
 import ExpandToggleButton from '../../components/table/ExpandToggleButton'
@@ -26,29 +27,9 @@ import TablePagination from '../../components/table/TablePagination'
 import TableSearchInput from '../../components/table/TableSearchInput'
 import { useExpandableRows } from '../../hooks/useExpandableRows'
 import { usePagination } from '../../hooks/usePagination'
-import ActiveBuzzerPanel from './ActiveBuzzerPanel'
-import DataLoggerPanel from './DataLoggerPanel'
-import HeartbeatControlPanel from './HeartbeatControlPanel'
-import HeartbeatControlTestPanel from './HeartbeatControlTestPanel'
+import { processPanels } from '../../processTypeRegistry'
 import ProcessSettingsModal from './ProcessSettingsModal'
-import ResourceMonitorPanel from './ResourceMonitorPanel'
-import TemperatureProcessPanel from './TemperatureProcessPanel'
 import WemRow from './WemRow'
-
-// process.kind -> its expandable detail component (AGENTS.md section 10).
-// Same plain-map approach as DEVICE_TYPE_SIMULATORS/DEVICE_TYPE_CONTROLS in
-// the Devices pages - temperature-control/-monitor share one panel,
-// resource-monitor (section 21) has its own, active-buzzer (Active Zummer
-// section) has its own.
-export const KIND_PANELS = {
-  'temperature-control': TemperatureProcessPanel,
-  'temperature-monitor': TemperatureProcessPanel,
-  'heartbeat-control': HeartbeatControlPanel,
-  'heartbeat-control-test': HeartbeatControlTestPanel,
-  'resource-monitor': ResourceMonitorPanel,
-  'active-buzzer': ActiveBuzzerPanel,
-  'data-logger': DataLoggerPanel,
-}
 
 const statusColor = (status) => (status === 'on' ? 'success' : 'secondary')
 
@@ -76,6 +57,7 @@ const ProcessRow = ({
   messageGroups,
   onGroupsChange,
   extraAction,
+  registeredKinds,
 }) => {
   const live = useProcessLiveState(process.id)
   // `status` is a deliberately non-urgent, timer-only broadcast field
@@ -100,9 +82,33 @@ const ProcessRow = ({
   const status = pendingOptimisticStatus ?? live.status ?? process.status
   const critical = live.critical ?? process.critical
   const warning = live.warning ?? process.warning
-  // Error always wins over warning (AGENTS.md section 21) - a row is never
-  // both, so this is a simple precedence pick, not two independent styles.
-  const rowColor = critical ? 'danger' : warning ? 'warning' : undefined
+  // Process management (AGENTS_TO_DO.md, 2026-08-14) - a row whose kind
+  // isn't in the running orchestrator's own registered-kinds list yet
+  // (registeredKinds === null while that fetch is still in flight, in
+  // which case this deliberately reads as "not pending" rather than
+  // flashing every row warning for a moment on every page load).
+  const pendingRestart = registeredKinds !== null && !registeredKinds.includes(process.kind)
+  // Error always wins over warning (AGENTS.md section 21), which wins over
+  // pending-restart - a row is never more than one of these styles at
+  // once, same "highest severity wins" precedence used everywhere else.
+  const rowColor = critical
+    ? 'danger'
+    : warning
+      ? 'warning'
+      : pendingRestart
+        ? 'warning'
+        : undefined
+  const [deleteBusy, setDeleteBusy] = useState(false)
+  const handleDelete = async () => {
+    setDeleteBusy(true)
+    try {
+      await api.deleteProcess(process.id)
+      onReload()
+    } catch (err) {
+      onError(err.message)
+      setDeleteBusy(false)
+    }
+  }
   // Only actually rendered once the row is expanded (AGENTS.md section
   // 22) - see WemRow below, nested at the end of the detail panel.
   const messages = live.messages ?? process.messages ?? []
@@ -128,7 +134,7 @@ const ProcessRow = ({
     }
   }
 
-  const Panel = KIND_PANELS[process.kind]
+  const Panel = processPanels[process.kind]
   // Messages now render *inside* the expanded detail panel itself (its
   // last piece, after Panel's own content - see WemRow.jsx), not as their
   // own always-visible row - so they can no longer make the collapsed
@@ -139,15 +145,27 @@ const ProcessRow = ({
   return (
     <>
       <CTableRow color={rowColor}>
-        <CTableDataCell className={noBorderWhenExpanded}>{process.name}</CTableDataCell>
-        <CTableDataCell className={noBorderWhenExpanded}>{process.group_name}</CTableDataCell>
+        <CTableDataCell className={noBorderWhenExpanded}>
+          <RowStatusBadge rowColor={rowColor} />
+        </CTableDataCell>
         <CTableDataCell className={noBorderWhenExpanded}>
           {status ? (
             <CBadge color={statusColor(status)}>{status.toUpperCase()}</CBadge>
           ) : (
             <CBadge color="info">Running</CBadge>
           )}
+          {pendingRestart && (
+            <CBadge
+              color="warning"
+              className="ms-1"
+              title="This kind isn't loaded in the running orchestrator yet - restart it to activate."
+            >
+              Pending restart
+            </CBadge>
+          )}
         </CTableDataCell>
+        <CTableDataCell className={noBorderWhenExpanded}>{process.name}</CTableDataCell>
+        <CTableDataCell className={noBorderWhenExpanded}>{process.group_name}</CTableDataCell>
         <CTableDataCell className={`text-end ${noBorderWhenExpanded ?? ''}`}>
           {/* Single row, right-aligned, left-to-right: on/off, settings,
               remove-from-dashboard, expand toggle - i.e. right-to-left
@@ -188,6 +206,14 @@ const ProcessRow = ({
               onClick={() => setSettingsVisible(true)}
               ariaLabel="Process settings"
             />
+            <IconButton
+              icon={cilTrash}
+              size="sm"
+              center
+              disabled={deleteBusy}
+              onClick={handleDelete}
+              ariaLabel={`Delete ${process.name}`}
+            />
             {extraAction?.(process)}
             {Panel && <ExpandToggleButton expanded={expanded} onClick={onToggleExpand} />}
           </div>
@@ -195,7 +221,7 @@ const ProcessRow = ({
       </CTableRow>
       {expanded && Panel && (
         <CTableRow color={rowColor}>
-          <CTableDataCell colSpan={4} className="p-0">
+          <CTableDataCell colSpan={5} className="p-0">
             <Panel process={process} onConfigChange={onReload} />
             <WemRow messages={messages} />
           </CTableDataCell>
@@ -207,7 +233,21 @@ const ProcessRow = ({
         process={process}
         tabGroups={tabGroups}
         messageGroups={messageGroups}
-        onSaved={onGroupsChange}
+        onSaved={() => {
+          // The popup can write both group membership (Tab/Message
+          // Groups) AND this process's own `config` (any kind's
+          // ExtraSection) in one Save - onGroupsChange alone only
+          // refreshed the former, leaving `processes` (this table's own
+          // data, sourced from a one-shot GET, not the live WS domain -
+          // config was deliberately left out of that push, AGENTS.md
+          // section 24) stale until an unrelated full reload happened to
+          // fire. Confirmed live: a Settings-popup config save survived
+          // even a hard page reload without this, since GET /processes
+          // itself was always fresh - only this component's own cached
+          // copy of it wasn't being asked to refetch.
+          onReload()
+          onGroupsChange()
+        }}
       />
     </>
   )
@@ -271,6 +311,7 @@ const ProcessesTable = ({
   onResetFilters,
   renderExtraRowAction,
   emptyMessage = 'No processes match this filter.',
+  registeredKinds = null,
 }) => {
   const { isExpanded, toggleOne } = useExpandableRows(expandedIds, setExpandedIds)
 
@@ -301,9 +342,9 @@ const ProcessesTable = ({
 
   // "Expand/collapse all" (ExpandAllToggleButton, in the header) only ever
   // considers the current page's rows that actually have a panel
-  // (KIND_PANELS) - toggling doesn't touch rows on other pages, matching
+  // (processPanels) - toggling doesn't touch rows on other pages, matching
   // what's actually visible.
-  const expandableIds = pageItems.filter((p) => KIND_PANELS[p.kind]).map((p) => p.id)
+  const expandableIds = pageItems.filter((p) => processPanels[p.kind]).map((p) => p.id)
 
   const hasActiveFilters =
     (filters.search && Boolean(search)) ||
@@ -313,7 +354,7 @@ const ProcessesTable = ({
 
   return (
     <>
-      <CRow className="mb-3 g-2 align-items-center">
+      <CRow className="mb-2 mx-1 g-2 align-items-center">
         {filters.group && (
           <CCol xs="auto">
             <CFormSelect
@@ -377,12 +418,18 @@ const ProcessesTable = ({
         <CAlert color="info">{emptyMessage}</CAlert>
       ) : (
         <>
-          <CTable responsive>
+          <CTable>
             <CTableHead>
               <CTableRow>
+                {/* "Status" (col 1, OK/Warning/Error) vs "Power" (col 2,
+                    ON/OFF/Running) - named "Power" rather than a second
+                    "Status" to avoid the obvious collision, matching this
+                    file's own existing `power` terminology (see the
+                    ON/OFF Switch's own `ariaLabel` below). */}
+                <CTableHeaderCell scope="col">Status</CTableHeaderCell>
+                <CTableHeaderCell scope="col">Power</CTableHeaderCell>
                 <CTableHeaderCell scope="col">Name</CTableHeaderCell>
                 <CTableHeaderCell scope="col">Group</CTableHeaderCell>
-                <CTableHeaderCell scope="col">Status</CTableHeaderCell>
                 <CTableHeaderCell scope="col" className="text-end">
                   <div className="d-flex justify-content-end align-items-center gap-2">
                     <span>Actions</span>
@@ -408,6 +455,7 @@ const ProcessesTable = ({
                   messageGroups={messageGroups}
                   onGroupsChange={onGroupsChange}
                   extraAction={renderExtraRowAction}
+                  registeredKinds={registeredKinds}
                 />
               ))}
             </CTableBody>

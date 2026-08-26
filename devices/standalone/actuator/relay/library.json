@@ -1,0 +1,5 @@
+{
+  "id": "device-relay",
+  "name": "Relay",
+  "description": "Generic controllable relay - single Bool actuator, I2C relay boards a priority target."
+}

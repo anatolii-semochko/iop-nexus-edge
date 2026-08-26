@@ -1,0 +1,5 @@
+{
+  "id": "device-pressure",
+  "name": "Pressure",
+  "description": "Atmospheric pressure sensor - single Float32 reading (hPa), read-only."
+}

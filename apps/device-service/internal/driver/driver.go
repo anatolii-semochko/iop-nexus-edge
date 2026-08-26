@@ -22,9 +22,9 @@ import (
 	"github.com/edgexfoundry/device-sdk-go/v4/pkg/interfaces"
 	sdkModels "github.com/edgexfoundry/device-sdk-go/v4/pkg/models"
 
-	"github.com/anatolii-semochko/iop-nexus-edge/apps/device-service/internal/transport"
-	"github.com/anatolii-semochko/iop-nexus-edge/apps/device-service/internal/transport/can"
-	"github.com/anatolii-semochko/iop-nexus-edge/apps/device-service/internal/virtual"
+	"github.com/anatolii-semochko/iot-nexus-edge/apps/device-service/internal/transport"
+	"github.com/anatolii-semochko/iot-nexus-edge/apps/device-service/internal/transport/can"
+	"github.com/anatolii-semochko/iot-nexus-edge/apps/device-service/internal/virtual"
 )
 
 // NexusDriver is the NexusEdge ProtocolDriver implementation.

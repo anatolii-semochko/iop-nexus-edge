@@ -1,0 +1,22 @@
+# Loaded copy of devices/standalone/sensor/heartbeat/edgex-device-profile.yaml
+# (source of truth) - kept in sync by hand (AGENTS.md section 7).
+name: "NexusEdge-Heartbeat"
+manufacturer: "NexusEdge"
+model: "heartbeat"
+labels:
+  - "sensor"
+description: >
+  Free-running Uint32 counter, incremented once/sec by the node's own
+  firmware - atomic device, one Uint32 value
+
+deviceResources:
+  - name: "Heartbeat"
+    isHidden: false
+    description: "Firmware-side counter, increments once/sec while the node is alive"
+    properties:
+      valueType: "Uint32"
+      readWrite: "RW"
+    attributes:
+      canId: "0x301"
+
+deviceCommands: []

@@ -81,7 +81,7 @@ const ProcessMessageLogsTab = ({
 
   return (
     <>
-      <CRow className="mb-3 g-2 align-items-center">
+      <CRow className="mb-2 mx-1 g-2 align-items-center">
         <CCol xs="auto">
           <CFormSelect size="sm" value={type} onChange={(e) => onTypeChange(e.target.value)}>
             {TYPE_OPTIONS.map((option) => (

@@ -64,15 +64,43 @@ const SettingsTab = ({
         </CCardBody>
       </CCard>
 
+      {/* WEM notification routing - which recipient gets which processes'
+          warnings/errors/messages. Not tied to Process Groups (an
+          operator doesn't necessarily watch one whole system) or Tab
+          Groups (a workspace curation concern, not a routing one). No
+          ordering - nothing here drives a tab. */}
+      <CCard>
+        <CCardHeader>Message Groups</CCardHeader>
+        <CCardBody>
+          <NamedListManager
+            addLabel="Add Group"
+            namePlaceholder="Message name"
+            items={messageGroups}
+            onAdd={wrap(async (name) => {
+              await api.createMessageGroup(name)
+              reloadMessageGroups()
+            })}
+            onRename={wrap(async (id, name) => {
+              await api.renameMessageGroup(id, name)
+              reloadMessageGroups()
+            })}
+            onDelete={wrap(async (id) => {
+              await api.deleteMessageGroup(id)
+              reloadMessageGroups()
+            })}
+          />
+        </CCardBody>
+      </CCard>
+
       {/* An operator's own curated workspace - whichever processes they
           personally want to watch, regardless of Process Group. Ordered:
           each one is also a dynamic page tab, in this order. */}
       <CCard>
-        <CCardHeader>Tab Groups</CCardHeader>
+        <CCardHeader>Tabs</CCardHeader>
         <CCardBody>
           <NamedListManager
             addLabel="Add Group"
-            namePlaceholder="Tab group name"
+            namePlaceholder="Tab name"
             items={tabGroups}
             orderable
             onAdd={wrap(async (name) => {
@@ -90,34 +118,6 @@ const SettingsTab = ({
             onReorder={wrap(async (orderedIds) => {
               await api.reorderTabGroups(orderedIds)
               reloadTabGroups()
-            })}
-          />
-        </CCardBody>
-      </CCard>
-
-      {/* WEM notification routing - which recipient gets which processes'
-          warnings/errors/messages. Not tied to Process Groups (an
-          operator doesn't necessarily watch one whole system) or Tab
-          Groups (a workspace curation concern, not a routing one). No
-          ordering - nothing here drives a tab. */}
-      <CCard>
-        <CCardHeader>Message Groups</CCardHeader>
-        <CCardBody>
-          <NamedListManager
-            addLabel="Add Group"
-            namePlaceholder="Message group name"
-            items={messageGroups}
-            onAdd={wrap(async (name) => {
-              await api.createMessageGroup(name)
-              reloadMessageGroups()
-            })}
-            onRename={wrap(async (id, name) => {
-              await api.renameMessageGroup(id, name)
-              reloadMessageGroups()
-            })}
-            onDelete={wrap(async (id) => {
-              await api.deleteMessageGroup(id)
-              reloadMessageGroups()
             })}
           />
         </CCardBody>

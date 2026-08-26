@@ -86,6 +86,12 @@ services:
       # 2026-07-28) - apiPlugins.ts scans this in addition to the
       # Library (devices/, baked into the nexus-edge image).
       EXTRA_API_PLUGINS_DIR: /workspace/plugins
+      # Live-debugged 2026-08-14 in nexus-edge's own docker-compose.yml
+      # (same comment there, in full) - Node's default libuv threadpool (4
+      # threads) queues DNS lookups behind other I/O; under this service's
+      # own orchestrator-tick traffic that starved GET /processes/
+      # registered-kinds's cross-container fetch to multi-second timeouts.
+      UV_THREADPOOL_SIZE: "64"
     depends_on:
       - postgres
       - redis

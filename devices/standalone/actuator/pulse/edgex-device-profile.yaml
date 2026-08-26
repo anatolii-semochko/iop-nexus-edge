@@ -1,0 +1,35 @@
+# Source of truth for this device type's EdgeX-facing shape. The copy
+# actually loaded by apps/device-service lives at
+# apps/device-service/res/profiles/NexusEdge-Pulse.yaml - there is no
+# provisioning flow yet that reads this file directly (AGENTS.md section
+# 7), so the two must be kept in sync by hand. Identical content.
+name: "NexusEdge-Pulse"
+manufacturer: "NexusEdge"
+model: "pulse"
+labels:
+  - "actuator"
+description: >
+  Written once/sec by the orchestrator - atomic device, one Bool value
+
+deviceResources:
+  - name: "Pulse"
+    isHidden: false
+    description: "Written true every tick - proves NexusEdge is alive"
+    properties:
+      valueType: "Bool"
+      readWrite: "RW"
+    attributes:
+      # CAN transport mapping (internal/transport/can/mapping.go) - only
+      # meaningful for device instances using protocols.transport.type:
+      # "can" (see docs/README.md "CAN transport" note below); ignored
+      # entirely for backend: virtual instances. NOTE: this profile is
+      # currently only ever used by a single device instance
+      # (control-node-pulse) - canId/byteOffset live on the shared
+      # PROFILE, not per-device, so this only works correctly as long as
+      # that stays true. A second physical instance of this profile (or
+      # any profile) on a different CAN ID would collide; see
+      # AGENTS.md's control-node section for the same caveat re: the
+      # NexusEdge-Led profile's three shared instances.
+      canId: "0x300"
+
+deviceCommands: []

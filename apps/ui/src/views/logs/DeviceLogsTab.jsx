@@ -74,7 +74,7 @@ const DeviceLogsTab = ({
 
   return (
     <>
-      <CRow className="mb-3 g-2 align-items-center">
+      <CRow className="mb-2 mx-1 g-2 align-items-center">
         <CCol xs="auto">
           <CFormSelect
             size="sm"
@@ -111,7 +111,7 @@ const DeviceLogsTab = ({
           <CSpinner color="primary" />
         </div>
       ) : items.length === 0 ? (
-        <CAlert color="info">No device logs match this filter.</CAlert>
+        <CAlert color="info" className={'mt-3'}>No device logs match this filter.</CAlert>
       ) : (
         <>
           <CTable responsive>

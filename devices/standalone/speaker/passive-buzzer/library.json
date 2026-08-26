@@ -1,0 +1,5 @@
+{
+  "id": "device-passive-buzzer",
+  "name": "Passive Buzzer",
+  "description": "Sound-output actuator - single Bool device (sounding/silent), driven via PWM/tone() rather than a built-in oscillator."
+}

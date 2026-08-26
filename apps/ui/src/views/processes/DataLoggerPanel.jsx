@@ -86,7 +86,7 @@ const DataLoggerPanel = () => {
   if (!settings || !entries) return <CSpinner size="sm" />
 
   return (
-    <div className="p-3 pt-0">
+    <div className="pt-1 pb-3 px-2">
       <CRow className="mb-3 g-3 align-items-center">
         <CCol xs="auto" className="d-flex align-items-center gap-2">
           <Switch

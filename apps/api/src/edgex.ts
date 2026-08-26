@@ -31,9 +31,17 @@ interface CoreMetadataDeviceListResponse {
 }
 
 /** One core-metadata call, listing every device's status - used for the
- * devices list view, where per-resource live values would be overkill. */
+ * devices list view, where per-resource live values would be overkill.
+ * `limit=-1` disables core-metadata's own default page size (EdgeX
+ * Foundry's own convention for "no limit" on list endpoints) - without
+ * it this silently truncates to whatever that default is (empirically
+ * 20 here) once the fleet grows past it, found live while seeding the
+ * Alarm Annunciator's 17 devices (AGENTS_TO_DO.md, 2026-08-02): the
+ * last few devices in core-metadata's own ordering (the buzzer plus two
+ * LEDs) came back with `edgex: null` - not actually unprovisioned, just
+ * cut off the page. */
 export async function listEdgeXDevices(): Promise<EdgeXDeviceStatus[]> {
-  const res = await fetch(`${config.edgex.coreMetadataUrl}/api/v3/device/all`);
+  const res = await fetch(`${config.edgex.coreMetadataUrl}/api/v3/device/all?limit=-1`);
   if (!res.ok) {
     throw new EdgeXError(`core-metadata GET /device/all failed: ${res.status}`, res.status);
   }

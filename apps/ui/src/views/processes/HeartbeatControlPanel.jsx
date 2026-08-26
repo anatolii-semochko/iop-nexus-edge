@@ -12,7 +12,8 @@ import {
   CTableHeaderCell,
   CTableRow,
 } from '@coreui/react'
-import { cilSettings } from '@coreui/icons'
+import CIcon from '@coreui/icons-react'
+import { cilLibrary, cilReload, cilSettings } from '@coreui/icons'
 import { api } from '../../api/client'
 import IconButton from '../../components/IconButton'
 import ResetFiltersButton from '../../components/ResetFiltersButton'
@@ -26,6 +27,41 @@ const TYPE_LABEL = { process: 'Process', device: 'Device', node: 'Node' }
 
 const formatThreshold = (threshold) =>
   threshold ? `${threshold.numberSkippedTicks} ticks → level ${threshold.level}` : 'off'
+
+// Same background-color rule as Devices/Nodes/Processes (section 56):
+// error -> danger, warning -> warning - no "simulation" tier here, this
+// panel spans three entity types and only staleness is a shared concept
+// across all of them. Factored so the row's own highlight and the new
+// status filter (below) can never drift.
+const entityRowColor = (entry) =>
+  entry.staleness === 'error' ? 'danger' : entry.staleness === 'warning' ? 'warning' : undefined
+
+const STATUS_FILTER_OPTIONS = [
+  { value: '', label: 'All statuses' },
+  { value: 'ok', label: 'OK' },
+  { value: 'problem', label: 'Warning or Error' },
+]
+
+// AGENTS_TO_DO.md, 2026-08-16 - found live: `entries` was fetched once on
+// mount and never again, so an entity going stale *after* that fetch
+// never appeared in the list at all - not just an unhighlighted row, the
+// entity was genuinely absent, and the new status filter (which runs
+// against this same stale `entries`) then looked "broken" (a real
+// problem entity, invisible until a manual page reload). Same "UI
+// convenience poll, not a control loop" precedent as DevicesList.jsx's
+// own DEVICES_POLL_MS/NodesList.jsx's old NODES_POLL_MS.
+const HEARTBEAT_CONTROLS_POLL_MS = 10000
+
+const iconUrl = (iconPath) => (iconPath ? `/api${iconPath}` : null)
+
+const EntityIcon = ({ iconPath }) => {
+  const url = iconUrl(iconPath)
+  return url ? (
+    <img src={url} alt="" style={{ width: 20, height: 20, objectFit: 'contain' }} />
+  ) : (
+    <CIcon icon={cilLibrary} className="text-body-secondary" />
+  )
+}
 
 /**
  * Expandable-row detail for the "heartbeat-control" process kind
@@ -41,6 +77,7 @@ const HeartbeatControlPanel = () => {
   const [entries, setEntries] = useState(null)
   const [error, setError] = useState(null)
   const [typeFilter, setTypeFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
   const [search, setSearch] = useState('')
   const [editing, setEditing] = useState(null)
 
@@ -54,6 +91,11 @@ const HeartbeatControlPanel = () => {
     reload()
   }, [])
 
+  useEffect(() => {
+    const interval = setInterval(reload, HEARTBEAT_CONTROLS_POLL_MS)
+    return () => clearInterval(interval)
+  }, [])
+
   const handleToggleStopped = async (entry, stopped) => {
     try {
       await api.setHeartbeatStopped(entry.type, entry.id, stopped)
@@ -65,6 +107,7 @@ const HeartbeatControlPanel = () => {
 
   const resetFilters = () => {
     setTypeFilter('')
+    setStatusFilter('')
     setSearch('')
   }
 
@@ -74,9 +117,11 @@ const HeartbeatControlPanel = () => {
   const filtered = (entries ?? []).filter(
     (entry) =>
       (!typeFilter || entry.type === typeFilter) &&
+      (!statusFilter ||
+        (statusFilter === 'ok' ? entry.staleness === 'ok' : entry.staleness !== 'ok')) &&
       (!search || entry.name.toLowerCase().includes(search.toLowerCase())),
   )
-  const hasActiveFilters = Boolean(typeFilter) || Boolean(search)
+  const hasActiveFilters = Boolean(typeFilter) || Boolean(statusFilter) || Boolean(search)
   const { page, pageSize, pageItems, totalItems, setPage, setPageSize } = usePagination(filtered, {
     pageSize: 10,
   })
@@ -85,7 +130,7 @@ const HeartbeatControlPanel = () => {
   if (!entries) return <CSpinner size="sm" />
 
   return (
-    <div className="p-3 pt-0">
+    <div className="pt-0 pb-3 px-2">
       <CRow className="mb-3 g-2 align-items-center">
         <CCol xs="auto">
           <CFormSelect
@@ -103,9 +148,27 @@ const HeartbeatControlPanel = () => {
           </CFormSelect>
         </CCol>
         <CCol xs="auto">
+          <CFormSelect
+            size="sm"
+            value={statusFilter}
+            onChange={(e) => {
+              setStatusFilter(e.target.value)
+              setPage(1)
+            }}
+            aria-label="Filter by status"
+          >
+            {STATUS_FILTER_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </CFormSelect>
+        </CCol>
+        <CCol xs="auto">
           <TableSearchInput value={search} onSearch={setSearch} placeholder="Search by name..." />
         </CCol>
-        <CCol className="d-flex justify-content-end">
+        <CCol className="d-flex justify-content-end gap-2">
+          <IconButton icon={cilReload} size="sm" center onClick={reload} ariaLabel="Reload" />
           <ResetFiltersButton active={hasActiveFilters} onClick={resetFilters} />
         </CCol>
       </CRow>
@@ -121,6 +184,7 @@ const HeartbeatControlPanel = () => {
           <CTable hover responsive small>
             <CTableHead>
               <CTableRow>
+                <CTableHeaderCell style={{ width: 40 }}></CTableHeaderCell>
                 <CTableHeaderCell>Name</CTableHeaderCell>
                 <CTableHeaderCell>Type</CTableHeaderCell>
                 <CTableHeaderCell>Warning</CTableHeaderCell>
@@ -130,7 +194,10 @@ const HeartbeatControlPanel = () => {
             </CTableHead>
             <CTableBody>
               {pageItems.map((entry) => (
-                <CTableRow key={`${entry.type}:${entry.id}`}>
+                <CTableRow key={`${entry.type}:${entry.id}`} color={entityRowColor(entry)}>
+                  <CTableDataCell>
+                    <EntityIcon iconPath={entry.iconPath} />
+                  </CTableDataCell>
                   <CTableDataCell>{entry.name}</CTableDataCell>
                   <CTableDataCell>{TYPE_LABEL[entry.type]}</CTableDataCell>
                   <CTableDataCell>{formatThreshold(entry.heartbeatControl.warning)}</CTableDataCell>

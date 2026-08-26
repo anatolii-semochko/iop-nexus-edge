@@ -1,0 +1,19 @@
+# Loaded copy of devices/standalone/sensor/humidity/edgex-device-profile.yaml
+# (source of truth) - kept in sync by hand (AGENTS.md section 7).
+name: "NexusEdge-Humidity"
+manufacturer: "NexusEdge"
+model: "humidity"
+labels:
+  - "sensor"
+description: "Relative humidity sensor - atomic device, one Float32 value"
+
+deviceResources:
+  - name: "Humidity"
+    isHidden: false
+    description: "Relative humidity reading"
+    properties:
+      valueType: "Float32"
+      readWrite: "RW"
+      units: "%RH"
+
+deviceCommands: []

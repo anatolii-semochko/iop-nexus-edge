@@ -1,0 +1,4 @@
+{
+  "name": "Sensor",
+  "description": "Read-only measurement devices - temperature, humidity, light, flow, generic analog inputs."
+}

@@ -38,7 +38,15 @@ const levelOptionLabel = (type, level, messageLevels) => {
 // device's own periodSeconds* (AGENTS.md's Data Logger section),
 // not raw system ticks.
 const ThresholdRow = ({ type, label, value, onChange, messageLevels }) => {
-  const enabled = value !== null
+  // `!= null` (not `!== null`) - belt and braces against a sparse
+  // `dataLoggerControl` object (a device whose column was never written
+  // comes back missing this key entirely, `undefined`, not explicit
+  // `null` - apps/api/src/dataLoggerControl.ts's own normalizer is the
+  // real fix, this is defense-in-depth so a future gap in that
+  // normalization degrades to "off" instead of crashing on
+  // `value.numberSkippedPeriods`, confirmed live, AGENTS_TO_DO.md
+  // 2026-08-26).
+  const enabled = value != null
   return (
     <CRow className="align-items-center g-2 mb-2">
       <CCol xs="3">

@@ -1,6 +1,6 @@
 import type { MigrationBuilder } from "node-pg-migrate";
 
-// Registers the Light Regulator (devices/standalone/light-regulator/,
+// Registers the Light Regulator (devices/standalone/actuator/light-regulator/,
 // AGENTS.md section 7) - the platform's first real device type - as a
 // standalone (no node) Device Registry row. Provisioned into EdgeX by
 // apps/device-service (see its res/devices/light-regulator-devices.yaml).

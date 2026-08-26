@@ -19,14 +19,23 @@ const RELATIVE_UNITS = [
 
 // Just the units above; anything shorter is reported as "just now" rather
 // than "12 seconds ago" - second-level precision isn't meaningful for a
-// heartbeat/last-updated column.
+// heartbeat/last-updated column. Bidirectional (AGENTS_TO_DO.md,
+// 2026-08-15) - a future `iso` (e.g. DevicesList.jsx's own "when does
+// this reading expire") reads as "in X minutes" rather than "just now"
+// for every future timestamp regardless of distance, which a naive
+// diffMs < 0 check would otherwise produce.
 export function formatRelativeTime(iso) {
   if (!iso) return 'never'
   const diffMs = Date.now() - new Date(iso).getTime()
-  if (diffMs < RELATIVE_UNITS[RELATIVE_UNITS.length - 1][1]) return 'just now'
+  const future = diffMs < 0
+  const absMs = Math.abs(diffMs)
+  if (absMs < RELATIVE_UNITS[RELATIVE_UNITS.length - 1][1]) return 'just now'
   for (const [unit, unitMs] of RELATIVE_UNITS) {
-    const count = Math.floor(diffMs / unitMs)
-    if (count >= 1) return `${count} ${unit}${count > 1 ? 's' : ''} ago`
+    const count = Math.floor(absMs / unitMs)
+    if (count >= 1)
+      return future
+        ? `in ${count} ${unit}${count > 1 ? 's' : ''}`
+        : `${count} ${unit}${count > 1 ? 's' : ''} ago`
   }
   return 'just now'
 }

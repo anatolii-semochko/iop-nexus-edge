@@ -74,6 +74,22 @@ services:
     container_name: nexus-edge-api
     restart: unless-stopped
     env_file: .env
+    # Live-debugged 2026-08-14 (process management's registered-kinds
+    # proxy, routes/processes.ts): Node's default libuv threadpool (4
+    # threads) handles far more than just fs - DNS lookups (getaddrinfo,
+    # what `fetch('http://orchestrator:...')` needs) queue on it too. Under
+    # apps/orchestrator's own steady per-second tick traffic hitting this
+    # service, that queue was deep enough to make an otherwise-instant
+    # cross-container hostname lookup take 5+ seconds (reproduced live: a
+    # bare `node -e` fetch to the same URL from the same container
+    # resolved in ~50ms every time, but the identical fetch from inside a
+    # real request handler here consistently timed out - the difference
+    # was purely how busy this process's threadpool already was). Not
+    # unique to the registered-kinds route - any outbound fetch-by-
+    # hostname from this service under load would have hit the same
+    # queueing, this just happened to be the first one added.
+    environment:
+      UV_THREADPOOL_SIZE: "64"
     depends_on:
       - postgres
       - redis

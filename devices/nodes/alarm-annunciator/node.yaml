@@ -1,0 +1,14 @@
+nodeType: alarm-annunciator
+description: >
+  Operator alarm annunciator panel (AGENTS_TO_DO.md, 2026-08-02) - 16
+  status LEDs (8 red/error, 8 yellow/warning, one pair per Message
+  Group slot) plus one buzzer, driven by the `alarm-annunciator`
+  process kind. Lets an operator see which Message Groups have active
+  warnings/errors at a glance, without the UI - the buzzer sounds the
+  fleet-wide highest active level (same policy the Active Zummer
+  process already uses), the LEDs light up per group independently.
+bus:
+  type: null
+supports:
+  - led
+  - active-buzzer

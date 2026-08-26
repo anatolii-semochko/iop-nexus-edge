@@ -1,0 +1,3 @@
+# Initial value for a `backend: virtual` instance of this device type.
+# Not meaningful for a real physical (CAN) instance.
+Pulse: false

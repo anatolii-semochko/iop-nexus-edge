@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 
 import { requireAuth } from "../auth.js";
 import { logCommand } from "../commandLog.js";
+import { config } from "../config.js";
 import { pool } from "../db.js";
 import * as heartbeatControl from "../heartbeatControl.js";
 import type { HeartbeatControlConfig } from "../heartbeatControl.js";
@@ -22,6 +23,23 @@ interface ProcessConfig {
   cpuWarnMax?: number;
   ramWarnMax?: number;
   diskWarnMax?: number;
+  // alarm-annunciator (AGENTS_TO_DO.md, 2026-08-02) - 8 fixed slots (one
+  // per LED pair, device ids never change post-seed), each bound to a
+  // Message Group by an admin via this same generic config PATCH.
+  // `testLevel`/`testSlotIndex` are the process panel's own momentary
+  // test-button state (which slot is currently held, at which level) -
+  // written through this same route on mousedown/mouseup rather than a
+  // dedicated endpoint, since the traffic is a human clicking, not a hot
+  // loop.
+  slots?: AnnunciatorSlot[];
+  testLevel?: { type: "warning" | "error"; level: number } | null;
+  testSlotIndex?: number | null;
+}
+
+interface AnnunciatorSlot {
+  redDeviceId: number;
+  yellowDeviceId: number;
+  messageGroupId: number | null;
 }
 
 interface ProcessRow {
@@ -64,6 +82,95 @@ export async function processRoutes(app: FastifyInstance): Promise<void> {
     return Promise.all(result.rows.map(withLiveState));
   });
 
+  // AGENTS_TO_DO.md, 2026-08-14 process management - live create/delete
+  // for `processes` rows, which previously only existed via hand-written
+  // seed migrations. This alone is fully live (no restart): apps/
+  // orchestrator's tick() re-queries GET /processes fresh every tick
+  // (TICK_INTERVAL_MS, no caching), so a newly-inserted row starts
+  // getting ticked, or a deleted one stops, within about a second either
+  // way - see AGENTS.md section 10/51's own writeup of this. What is NOT
+  // live: a `kind` whose plugin code isn't loaded in the running
+  // orchestrator yet (processRegistry.get(kind) returns undefined, the
+  // row is just silently skipped each tick, per server.ts's own tick()) -
+  // that still needs an orchestrator restart, which is exactly why GET
+  // /processes/registered-kinds exists below, for the UI to tell the two
+  // cases apart.
+  app.post<{
+    Body: {
+      name: string;
+      groupId: number;
+      type: "controllable" | "permanent";
+      kind: string;
+      actions?: string[];
+      deviceId?: number | null;
+      config?: ProcessConfig;
+    };
+  }>("/processes", { preHandler: requireAuth }, async (request, reply) => {
+    const { name, groupId, type, kind, actions, deviceId, config } = request.body;
+    if (!name || !groupId || !kind) {
+      return reply.code(400).send({ error: "name, groupId, and kind are required" });
+    }
+    if (type !== "controllable" && type !== "permanent") {
+      return reply.code(400).send({ error: "type must be 'controllable' or 'permanent'" });
+    }
+
+    let row;
+    try {
+      const result = await pool.query<{ id: number }>(
+        `INSERT INTO processes (name, group_id, type, kind, actions, device_id, config)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+        [name, groupId, type, kind, actions ?? [], deviceId ?? null, config ?? {}],
+      );
+      row = result.rows[0];
+    } catch (err) {
+      return reply.code(400).send({ error: (err as Error).message });
+    }
+
+    await logCommand({ processId: row.id, action: "create", value: request.body, source: "api", actorUserId: request.user.sub });
+    return withLiveState((await findProcess(String(row.id)))!);
+  });
+
+  // Deliberately unrestricted - this will happily delete a `permanent`
+  // system process row (resource-monitor, heartbeat-control, ...) same as
+  // a `controllable` one; no special-casing "official" kinds, matching
+  // the same "no special-casing" principle processRegistry.register()
+  // itself already follows (AGENTS.md section 10). The operator is
+  // trusted to know what a permanent process' absence means.
+  app.delete<{ Params: { id: string } }>("/processes/:id", { preHandler: requireAuth }, async (request, reply) => {
+    const process = await findProcess(request.params.id);
+    if (!process) {
+      return reply.code(404).send({ error: "process not found" });
+    }
+    await logCommand({ processId: process.id, action: "delete", source: "api", actorUserId: request.user.sub });
+    await pool.query("DELETE FROM processes WHERE id = $1", [process.id]);
+    return { status: "ok" };
+  });
+
+  // Which `kind`s the running orchestrator actually has plugin code
+  // loaded for right now (proxies apps/orchestrator's own GET
+  // /process-kinds, config.orchestratorUrl) - the UI's "pending restart"
+  // signal for a `processes` row whose kind was just added. Tolerant of
+  // orchestrator being briefly unreachable (mid-restart is exactly when
+  // this gets called) - returns an empty list rather than failing the
+  // whole request, same "warn don't block" spirit as this project's own
+  // check-ports.sh/check-version.
+  app.get("/processes/registered-kinds", async (_request, reply) => {
+    try {
+      // 5s margin, not that it should ever need it - see docker-compose.yml's
+      // own UV_THREADPOOL_SIZE comment on the `api` service for the real
+      // fix to what looked, at first, like an unreachable-orchestrator
+      // problem (live-debugged 2026-08-14).
+      const res = await fetch(`${config.orchestratorUrl}/process-kinds`, { signal: AbortSignal.timeout(5000) });
+      if (!res.ok) throw new Error(`orchestrator responded ${res.status}`);
+      const body = (await res.json()) as { kinds: string[] };
+      return { kinds: body.kinds };
+    } catch (err) {
+      app.log.warn({ err }, "failed to reach orchestrator for registered process kinds");
+      reply.code(200);
+      return { kinds: [], unreachable: true };
+    }
+  });
+
   app.get<{ Params: { id: string } }>("/processes/:id", async (request, reply) => {
     const process = await findProcess(request.params.id);
     if (!process) {
@@ -88,6 +195,9 @@ export async function processRoutes(app: FastifyInstance): Promise<void> {
       cpuWarnMax?: number;
       ramWarnMax?: number;
       diskWarnMax?: number;
+      slots?: AnnunciatorSlot[];
+      testLevel?: { type: "warning" | "error"; level: number } | null;
+      testSlotIndex?: number | null;
     };
   }>(
     "/processes/:id/config",
@@ -206,10 +316,13 @@ export async function processRoutes(app: FastifyInstance): Promise<void> {
 
   // Orchestrator-driven only, same as /critical above - a resource-monitor
   // process pushes its latest CPU/RAM/disk readings here every tick
-  // (AGENTS.md section 21). Published on the message bus unconditionally
+  // (AGENTS.md section 21); the control-node process (2026-08-09,
+  // AGENTS_TO_DO.md "НОДА КОНТРОЛЮ") pushes {temperature, humidity}
+  // instead - hence the generic body type, not a fixed cpu/ram/disk
+  // shape. Published on the message bus unconditionally
   // (processRegistry.setMetrics) - the UI subscribes to the live feed for
   // these now, the same as status/critical/warning, not a separate poll.
-  app.post<{ Params: { id: string }; Body: { cpu: number; ram: number; disk: number } }>(
+  app.post<{ Params: { id: string }; Body: Record<string, number> }>(
     "/processes/:id/metrics",
     async (request, reply) => {
       const process = await findProcess(request.params.id);

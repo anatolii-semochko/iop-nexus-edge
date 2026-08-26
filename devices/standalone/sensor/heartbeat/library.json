@@ -1,0 +1,5 @@
+{
+  "id": "device-heartbeat",
+  "name": "Heartbeat",
+  "description": "Free-running Uint32 counter, incremented once/sec by the node's own firmware - proves the node is alive independent of any value it happens to report, read-only."
+}

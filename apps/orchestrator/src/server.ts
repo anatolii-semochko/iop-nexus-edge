@@ -4,7 +4,6 @@ import { apiClient, type ProcessRecord } from "./apiClient.js";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
 import { loadProcessPlugins } from "./processPlugins.js";
-import { runActiveBuzzer } from "./processes/activeBuzzer.js";
 import { runDataLogger } from "./processes/dataLogger.js";
 import { runHeartbeatControl } from "./processes/heartbeatControl.js";
 import { runHeartbeatControlTest } from "./processes/heartbeatControlTest.js";
@@ -14,14 +13,16 @@ import { TICK_INTERVAL_MS } from "./tickInterval.js";
 
 // Built-in process kinds (AGENTS.md section 10) - registered through the
 // same processRegistry a target-project plugin would use (extension
-// points design, AGENTS_TO_DO.md 2026-07-28/29). temperature-control/
-// temperature-monitor moved out (AGENTS_TO_DO.md 2026-07-29 "chistiy proekt"
-// decision) - they were always a demo assembly on top of the example
-// Library devices, not a base system capability; nexus-edge-smart-house
-// now owns that recipe as its own process plugin (see processPlugins.ts).
+// points design, AGENTS_TO_DO.md 2026-07-28/29). CORE is deliberately
+// kept to a handful of genuinely base-platform system processes
+// (AGENTS_TO_DO.md, 2026-08-02 "CORE чистим і порожнім" decision) -
+// temperature-control/temperature-monitor moved out first (2026-07-29),
+// active-buzzer/alarm-annunciator followed (2026-08-02) - all four were
+// always a demo/recipe assembly on top of Library devices, not a base
+// system capability; nexus-edge-smart-house now owns those recipes as
+// its own process plugins (see processPlugins.ts).
 function registerBuiltinProcessKinds(): void {
   processRegistry.register("resource-monitor", runResourceMonitor);
-  processRegistry.register("active-buzzer", runActiveBuzzer);
   processRegistry.register("heartbeat-control", runHeartbeatControl);
   processRegistry.register("heartbeat-control-test", runHeartbeatControlTest);
   processRegistry.register("data-logger", runDataLogger);
@@ -86,6 +87,13 @@ export async function startOrchestrator(): Promise<FastifyInstance> {
 
   const app = Fastify({ logger: true });
   app.get("/health", async () => ({ status: "ok", service: "orchestrator" }));
+  // AGENTS_TO_DO.md, 2026-08-14 process management - lets apps/api (and,
+  // through it, the UI) tell a `processes` row whose kind was just added
+  // to Postgres apart from one whose plugin code this specific running
+  // orchestrator actually has loaded (registerBuiltinProcessKinds()/
+  // loadProcessPlugins() above run once at startup, not on a timer - a
+  // kind copied in after that needs a restart before it shows up here).
+  app.get("/process-kinds", async () => ({ kinds: processRegistry.list() }));
   await app.listen({ port: config.port, host: config.host });
   return app;
 }

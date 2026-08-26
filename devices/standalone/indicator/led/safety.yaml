@@ -1,0 +1,5 @@
+# Always empty for a node-attached device (AGENTS.md section 30). No LED
+# instance on the Alarm Annunciator node has a forbidden-state
+# relationship with any other device - they're independently driven
+# outputs, any combination of red/yellow states is valid at once.
+forbidden: []

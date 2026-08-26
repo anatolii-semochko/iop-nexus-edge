@@ -1,0 +1,5 @@
+{
+  "id": "node-weather-node",
+  "name": "Weather Node",
+  "description": "Outdoor weather station - STM32 board on its own CAN segment, AHT20 temperature/humidity, BMP280 pressure, photoresistor light level."
+}
