@@ -1,10 +1,7 @@
 // Implementation notes for whoever builds this: uses the STM32_CAN
 // library (pazi88/STM32_CAN on PlatformIO/Arduino Library Manager - see
 // ../platformio.ini) for the F103's CAN1 peripheral (fixed hardware pins
-// PA11 RX / PA12 TX, `DEF` pin mapping). UNTESTED against real hardware
-// (see config.h's own header note) - this library's exact method names
-// are written from its documented/typical usage, not verified against
-// this specific board yet.
+// PA11 RX / PA12 TX, `DEF` pin mapping).
 
 #include "can_bus.h"
 #include "config.h"
@@ -16,6 +13,20 @@
 static STM32_CAN can1(CAN1, DEF);
 
 void canBusInit() {
+  // Automatic Bus-Off recovery (bxCAN's own ABOM feature) - the
+  // library's own STM32_CAN::init() (constructor path) explicitly
+  // defaults this to DISABLE (setAutoBusOffRecovery(false),
+  // STM32_CAN.cpp), so without this call a transient bus error burst
+  // (25+ TX/RX errors - possible even on a short, well-terminated bus
+  // from a single noise event) permanently stops this node from
+  // sending OR receiving anything, including CAN_ID_PULSE, until the
+  // board is power-cycled (found live 2026-08-27 - intermittent
+  // "pulse lost" LED state with no corresponding gap on the
+  // NexusEdge/Raspberry Pi side, only recoverable by cutting power to
+  // the STM32 - the textbook bxCAN bus-off symptom). Must be called
+  // before begin() - HAL_CAN_Init() (called from inside begin()) reads
+  // this flag once, at init time, not checked again after.
+  can1.setAutoBusOffRecovery(true);
   can1.begin();
   can1.setBaudRate(CAN_BITRATE);
 }
