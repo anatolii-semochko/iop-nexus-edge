@@ -61,8 +61,8 @@ const _nav = [
   },
   {
     component: CNavItem,
-    name: 'Dev Simulator',
-    to: '/dev-simulator',
+    name: 'Simulator',
+    to: '/simulator',
     icon: <CIcon icon={cilBug} customClassName="nav-icon" />,
   },
   {

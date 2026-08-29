@@ -2,13 +2,19 @@ import React, { useEffect, useRef, useState } from 'react'
 import {
   CAlert,
   CBadge,
+  CButton,
   CCard,
   CCardBody,
   CCardHeader,
   CCol,
+  CFormCheck,
+  CFormInput,
   CFormSelect,
   CRow,
   CSpinner,
+  CTab,
+  CTabList,
+  CTabs,
   CTable,
   CTableBody,
   CTableDataCell,
@@ -19,6 +25,7 @@ import {
 import CIcon from '@coreui/icons-react'
 import { cilCheck, cilLibrary, cilSettings, cilX } from '@coreui/icons'
 import { api } from '../../api/client'
+import { deviceSimulators } from '../../deviceTypeRegistry'
 import GroupsConfigModal from '../../components/GroupsConfigModal'
 import IconButton from '../../components/IconButton'
 import ResetFiltersButton from '../../components/ResetFiltersButton'
@@ -41,6 +48,25 @@ import TableSearchInput from '../../components/table/TableSearchInput'
 import { formatRelativeTime } from '../../utils/format'
 import DeviceSettingsModal from './DeviceSettingsModal'
 import NumericStepper from './NumericStepper'
+
+// How long to wait after the last slider/stepper move before actually
+// sending it (DeviceValueEditor's own handleSimulate below) - dragging a
+// range input fires onChange on every pixel step; without this, every one
+// of those would hit the API and the message bus. Same value the old Dev
+// Simulator page used before this control moved here (AGENTS_TO_DO.md,
+// 2026-08-29 "СИМУЛЯЦІЯ").
+const SLIDER_DEBOUNCE_MS = 150
+
+const modeColor = (mode) => {
+  switch (mode) {
+    case 'MANUAL':
+      return 'warning'
+    case 'SERVICE':
+      return 'info'
+    default:
+      return 'success'
+  }
+}
 
 // Registration for usePersistedState (AGENTS_TO_DO.md, 2026-08-01, joined
 // 2026-08-02 by `expandedIds`) - flat variant, same as NodesList.jsx.
@@ -200,108 +226,254 @@ const KeyValueTable = ({ title, rows }) => (
 // when there's room for two >=320px columns, wraps to one column
 // per row otherwise, and each column claims its own fair share of
 // whatever width is actually available instead of a fixed guess.
-// Under the left "Value" table (AGENTS_TO_DO.md, 2026-08-23) - lets a
-// readOnly device's current value be edited directly from this row when
-// it's effectively simulated (own `simulated` flag, or its node's),
-// instead of needing the separate Dev Simulator page for the same
-// `PUT /devices/:id/simulate` write DevSimulator.jsx already uses.
-// Numeric only, per the user's own spec ("Якщо це число") - Bool/String/
-// JSON values have no editor here yet, not asked for. `editable` (new
-// NumericStepper prop) is what makes the input itself typable here,
-// unlike every other NumericStepper caller's disabled display-only
-// input. `step` is this device's own "personal" step
-// (`capabilities.step`, already an existing per-device field - see
-// devices/standalone/*/edgex-device-profile.yaml's own `properties`) so
-// e.g. a 0-4095 raw light reading steps by a meaningful chunk instead of
-// DevSimulator's own generic step={0.5} fallback; falls back to 1 when a
-// device type hasn't set one.
-const SimulatedValueEditor = ({ device, value, onSimulate }) => (
-  <div className="mt-2">
-    <div
-      className="text-body-secondary text-uppercase fw-semibold mb-1"
-      style={{ fontSize: '0.6875rem', letterSpacing: '0.04em' }}
-    >
-      Simulated value
+
+// Interactive override control (AGENTS_TO_DO.md, 2026-08-29 "СИМУЛЯЦІЯ",
+// Devices page Value tab) - moved in from the old Dev Simulator page
+// (DeviceSimulatorRow there, now Simulator.jsx's own process-scoped
+// page instead - see that file's header comment for the split), same
+// write paths: `onWrite` (PUT /devices/:id, always MANUAL) for a
+// writable device, `onSimulate` (PUT /devices/:id/simulate, debounced)
+// for a readOnly one, `onRelease` (POST /devices/:id/release) to return
+// a MANUAL device to AUTO. Only rendered for `backend: 'virtual'`
+// devices (DeviceDetailRow below) - same scope the old page's own
+// `listDevices().filter(d => d.backend === 'virtual')` already had, a
+// physical device isn't meant to be poked from the UI this way.
+const DeviceValueEditor = ({ device, value, mode, onWrite, onSimulate, onRelease }) => {
+  const [busy, setBusy] = useState(false)
+  const debounceTimer = useRef(null)
+  useEffect(() => () => clearTimeout(debounceTimer.current), [])
+
+  const handleWrite = async (next) => {
+    setBusy(true)
+    try {
+      await onWrite(next)
+    } finally {
+      setBusy(false)
+    }
+  }
+  const handleSimulate = (next) => {
+    clearTimeout(debounceTimer.current)
+    debounceTimer.current = setTimeout(() => onSimulate(next), SLIDER_DEBOUNCE_MS)
+  }
+  const handleRelease = async () => {
+    setBusy(true)
+    try {
+      await onRelease()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const readOnly = device.capabilities?.readOnly
+  const CustomSimulator = deviceSimulators[device.type]
+
+  return (
+    <div className="mt-2">
+      <div
+        className="text-body-secondary text-uppercase fw-semibold mb-1"
+        style={{ fontSize: '0.6875rem', letterSpacing: '0.04em' }}
+      >
+        Override
+      </div>
+      <div className="d-flex align-items-center gap-2 flex-wrap">
+        {CustomSimulator ? (
+          // Same readOnly branch the generic paths below use - a writable
+          // device's own `.../simulate` call is rejected server-side (400
+          // "not read-only", routes/devices.ts).
+          <CustomSimulator
+            value={value}
+            min={device.capabilities?.min}
+            max={device.capabilities?.max}
+            step={device.capabilities?.step}
+            color={device.capabilities?.color}
+            onChange={readOnly ? handleSimulate : handleWrite}
+          />
+        ) : device.valueType === 'Bool' ? (
+          <CFormCheck
+            checked={value === true}
+            disabled={busy}
+            onChange={(e) => handleWrite(e.target.checked)}
+          />
+        ) : typeof value === 'string' ? (
+          readOnly ? (
+            <span className="text-body-secondary">{value}</span>
+          ) : (
+            <CFormInput
+              size="sm"
+              defaultValue={value ?? ''}
+              disabled={busy}
+              onBlur={(e) => handleWrite(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.currentTarget.blur()
+              }}
+            />
+          )
+        ) : (
+          <NumericStepper
+            value={value}
+            step={device.capabilities?.step ?? (/^u?int/i.test(device.valueType ?? '') ? 1 : 0.5)}
+            editable
+            busy={busy}
+            onCommit={(next) => (readOnly ? handleSimulate(next) : handleWrite(next))}
+          />
+        )}
+        {!readOnly && (
+          <CButton
+            size="sm"
+            color={mode === 'MANUAL' ? 'warning' : 'secondary'}
+            variant={mode === 'MANUAL' ? undefined : 'outline'}
+            disabled={busy || mode !== 'MANUAL'}
+            onClick={handleRelease}
+          >
+            {busy ? <CSpinner size="sm" /> : 'Auto'}
+          </CButton>
+        )}
+      </div>
     </div>
-    <NumericStepper
-      value={value}
-      step={device.capabilities?.step ?? 1}
-      min={device.capabilities?.min}
-      max={device.capabilities?.max}
-      editable
-      onCommit={onSimulate}
+  )
+}
+
+const ValueTab = ({
+  device,
+  fetched,
+  value,
+  mode,
+  valueAuto,
+  valueManual,
+  expiresAt,
+  onWrite,
+  onSimulate,
+  onRelease,
+}) => (
+  <div>
+    <KeyValueTable
+      title="Value"
+      rows={[
+        { label: 'Value', value },
+        { label: 'Value type', value: fetched?.valueType },
+        { label: 'Units', value: fetched?.units },
+        { label: 'Mode', value: mode },
+        { label: 'Auto value', value: valueAuto },
+        { label: 'Manual value', value: valueManual },
+        // formatRelativeTime (utils/format.js, already used by
+        // NodesList.jsx's own last-heartbeat column) is typed for an
+        // ISO string but really just does `new Date(x)` - an epoch-ms
+        // number (readingOrigin/expiresAt) works identically.
+        {
+          label: 'Last reading',
+          value: fetched?.readingOrigin ? formatRelativeTime(fetched.readingOrigin) : undefined,
+        },
+        // Same overdue threshold DeviceRow's own row-color check uses
+        // (data_logger_control's periodSeconds * error.
+        // numberSkippedPeriods) - previously only visible indirectly as
+        // the row turning danger-red, not as an actual value (AGENTS_TO_DO.md,
+        // 2026-08-15: "не бачу значення expiration").
+        { label: 'Expires', value: expiresAt ? formatRelativeTime(expiresAt) : undefined },
+      ]}
+    />
+    {device.backend === 'virtual' && (
+      <DeviceValueEditor
+        device={device}
+        value={value}
+        mode={mode}
+        onWrite={onWrite}
+        onSimulate={onSimulate}
+        onRelease={onRelease}
+      />
+    )}
+  </div>
+)
+
+// Info tab (AGENTS_TO_DO.md, 2026-08-29 "СИМУЛЯЦІЯ") - the old single
+// "Device" table split into two side-by-side tables by category: registry
+// identity (what this row IS) on the left, EdgeX/simulation wiring +
+// per-feature config blobs on the right. Same CSS Grid two-column layout
+// the old table pair already used (KeyValueTable's own comment explains
+// why grid, not flexbox).
+const InfoTab = ({ device }) => (
+  <div
+    style={{
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+      gap: '0.5rem 2rem',
+    }}
+  >
+    <KeyValueTable
+      title="Identity"
+      rows={[
+        { label: 'ID', value: device.id },
+        { label: 'Type', value: device.type },
+        { label: 'Node', value: device.node_name },
+        { label: 'Backend', value: device.backend },
+        { label: 'Created', value: formatDate(device.created_at) },
+        { label: 'Updated', value: formatDate(device.updated_at) },
+      ]}
+    />
+    <KeyValueTable
+      title="EdgeX & Config"
+      rows={[
+        { label: 'EdgeX name', value: device.edgex_device_name },
+        { label: 'EdgeX status', value: device.edgex?.operatingState },
+        { label: 'Simulated', value: device.simulated },
+        { label: 'Simulated twin', value: device.edgex_device_name_simulated },
+        { label: 'Capabilities', value: device.capabilities },
+        { label: 'Data Logger', value: device.data_logger_control },
+        { label: 'Heartbeat Control', value: device.heartbeat_control },
+      ]}
     />
   </div>
 )
 
+const DETAIL_TABS = [
+  { key: 'value', label: 'Value' },
+  { key: 'info', label: 'Info' },
+]
+
+// Detail row (AGENTS_TO_DO.md, 2026-08-02, redesigned 2026-08-15,
+// re-laid-out 2026-08-16, retabbed 2026-08-29 "СИМУЛЯЦІЯ") - Value/Info
+// tabs, same "CTabs/CTabList + conditionally-rendered content, not
+// CTabContent/CTabPanel" idiom LibraryItemDetailRow.jsx already
+// established, so switching tabs never re-fetches or remounts the live
+// value editor mid-edit.
 const DeviceDetailRow = ({
   device,
   fetched,
   value,
+  mode,
+  valueAuto,
+  valueManual,
   expiresAt,
-  effectivelySimulated,
+  onWrite,
   onSimulate,
+  onRelease,
 }) => {
-  const dualState = fetched?.dualState
-  const canEditSimulatedValue =
-    effectivelySimulated && device.capabilities?.readOnly && typeof value === 'number'
+  const [activeTab, setActiveTab] = useState('value')
   return (
-    <div
-      className="pt-0 pb-3 px-2"
-      style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-        gap: '0.5rem 2rem',
-      }}
-    >
-      <div>
-        <KeyValueTable
-          title="Value"
-          rows={[
-            { label: 'Value', value },
-            { label: 'Value type', value: fetched?.valueType },
-            { label: 'Units', value: fetched?.units },
-            { label: 'Mode', value: dualState?.mode },
-            { label: 'Auto value', value: dualState?.valueAuto },
-            { label: 'Manual value', value: dualState?.valueManual },
-            // formatRelativeTime (utils/format.js, already used by
-            // NodesList.jsx's own last-heartbeat column) is typed for an
-            // ISO string but really just does `new Date(x)` - an epoch-ms
-            // number (readingOrigin/expiresAt) works identically.
-            {
-              label: 'Last reading',
-              value: fetched?.readingOrigin ? formatRelativeTime(fetched.readingOrigin) : undefined,
-            },
-            // Same overdue threshold DeviceRow's own row-color check uses
-            // (data_logger_control's periodSeconds * error.
-            // numberSkippedPeriods) - previously only visible indirectly as
-            // the row turning danger-red, not as an actual value (AGENTS_TO_DO.md,
-            // 2026-08-15: "не бачу значення expiration").
-            { label: 'Expires', value: expiresAt ? formatRelativeTime(expiresAt) : undefined },
-          ]}
+    <div className="pt-0 pb-3 px-2">
+      <CTabs activeItemKey={activeTab} onChange={setActiveTab}>
+        <CTabList variant="tabs" className="mb-3">
+          {DETAIL_TABS.map((tab) => (
+            <CTab key={tab.key} itemKey={tab.key}>
+              {tab.label}
+            </CTab>
+          ))}
+        </CTabList>
+      </CTabs>
+      {activeTab === 'value' && (
+        <ValueTab
+          device={device}
+          fetched={fetched}
+          value={value}
+          mode={mode}
+          valueAuto={valueAuto}
+          valueManual={valueManual}
+          expiresAt={expiresAt}
+          onWrite={onWrite}
+          onSimulate={onSimulate}
+          onRelease={onRelease}
         />
-        {canEditSimulatedValue && (
-          <SimulatedValueEditor device={device} value={value} onSimulate={onSimulate} />
-        )}
-      </div>
-      <KeyValueTable
-        title="Device"
-        rows={[
-          { label: 'ID', value: device.id },
-          { label: 'Type', value: device.type },
-          { label: 'Node', value: device.node_name },
-          { label: 'Backend', value: device.backend },
-          { label: 'EdgeX name', value: device.edgex_device_name },
-          { label: 'EdgeX status', value: device.edgex?.operatingState },
-          { label: 'Simulated', value: device.simulated },
-          { label: 'Simulated twin', value: device.edgex_device_name_simulated },
-          { label: 'Capabilities', value: device.capabilities },
-          { label: 'Data Logger', value: device.data_logger_control },
-          { label: 'Heartbeat Control', value: device.heartbeat_control },
-          { label: 'Created', value: formatDate(device.created_at) },
-          { label: 'Updated', value: formatDate(device.updated_at) },
-        ]}
-      />
+      )}
+      {activeTab === 'info' && <InfoTab device={device} />}
     </div>
   )
 }
@@ -317,6 +489,8 @@ const DeviceRow = ({
   onToggleSimulated,
   onOpenSettings,
   onSimulateValue,
+  onWriteValue,
+  onReleaseValue,
   effectivelySimulated,
 }) => {
   const [fetched, setFetched] = useState(null)
@@ -349,6 +523,16 @@ const DeviceRow = ({
   }, [device.id])
 
   const value = live.value !== undefined ? live.value : fetched?.value
+  // Mode/Auto/Manual (AGENTS_TO_DO.md, 2026-08-29 "СИМУЛЯЦІЯ", moved in
+  // from the old Dev Simulator page's own DeviceSimulatorRow) - `live`
+  // wins the same way `value` above does, falling back to the one-time
+  // fetch's own `dualState`. A readOnly (sensor) device has no Dual
+  // Devices Model mode at all (AGENTS.md section 6/7) - no fallback to a
+  // misleading "AUTO" here either.
+  const dualState = fetched?.dualState
+  const mode = live.mode ?? dualState?.mode
+  const valueAuto = live.valueAuto ?? dualState?.valueAuto
+  const valueManual = live.valueManual ?? dualState?.valueManual
   // Reading timestamp: prefer a live WebSocket event (freshest, if one
   // has arrived this session) over the one-time fetch's own
   // `readingOrigin` (EdgeX's own reading timestamp - correct even on a
@@ -440,9 +624,13 @@ const DeviceRow = ({
               device={device}
               fetched={fetched}
               value={value}
+              mode={mode}
+              valueAuto={valueAuto}
+              valueManual={valueManual}
               expiresAt={expiresAt}
-              effectivelySimulated={effectivelySimulated}
+              onWrite={onWriteValue}
               onSimulate={onSimulateValue}
+              onRelease={onReleaseValue}
             />
           </CTableDataCell>
         </CTableRow>
@@ -535,16 +723,20 @@ const DevicesList = () => {
       .then(reloadDevices)
       .catch((err) => setError(err.message))
 
-  // Simulated-value editor (AGENTS_TO_DO.md, 2026-08-23, DeviceDetailRow's
-  // own SimulatedValueEditor) - same PUT /devices/:id/simulate write
-  // DevSimulator.jsx's own handleSimulate uses. No reloadDevices() after -
-  // unlike handleToggleSimulated above (a registry/metadata change with no
-  // live push of its own until section 65 built one), a value write
-  // already lands via the live `device` event useDeviceLiveState
-  // subscribes to, so every open tab (including this row's own) converges
-  // without a refetch.
+  // Value tab's own DeviceValueEditor (AGENTS_TO_DO.md, 2026-08-29
+  // "СИМУЛЯЦІЯ", moved in from the old Dev Simulator page) - three write
+  // paths, same ones that page's own DeviceSimulatorRow used. No
+  // reloadDevices() after any of them - unlike handleToggleSimulated
+  // above (a registry/metadata change with no live push of its own until
+  // section 65 built one), a value/mode write already lands via the live
+  // `device` event useDeviceLiveState subscribes to, so every open tab
+  // (including this row's own) converges without a refetch.
   const handleSimulateValue = (device, value) =>
     api.simulateDevice(device.id, value).catch((err) => setError(err.message))
+  const handleWriteValue = (device, value) =>
+    api.writeDevice(device.id, value).catch((err) => setError(err.message))
+  const handleReleaseValue = (device) =>
+    api.releaseDevice(device.id).catch((err) => setError(err.message))
 
   useEffect(() => {
     reloadDevices()
@@ -723,6 +915,8 @@ const DevicesList = () => {
                           onToggleSimulated={() => handleToggleSimulated(device)}
                           onOpenSettings={() => setSettingsDevice(device)}
                           onSimulateValue={(value) => handleSimulateValue(device, value)}
+                          onWriteValue={(value) => handleWriteValue(device, value)}
+                          onReleaseValue={() => handleReleaseValue(device)}
                           effectivelySimulated={effectivelySimulated}
                         />
                       )
