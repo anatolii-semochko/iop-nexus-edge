@@ -28,7 +28,33 @@ function registerBuiltinProcessKinds(): void {
   processRegistry.register("data-logger", runDataLogger);
 }
 
+// Re-entrancy guard (AGENTS_TO_DO.md, 2026-08-29) - setInterval below
+// fires every TICK_INTERVAL_MS regardless of whether the previous
+// tick()'s own async work has finished; without this flag, any tick
+// slower than 1s (plausible under real load, e.g. a busy Raspberry Pi)
+// lets the NEXT interval firing start a second, fully overlapping tick
+// on top of the first - found live as a genuine, self-compounding
+// snowball: ~500 req/s sustained against apps/api (measured directly
+// off its own request logs) where the design intends ~1/s, container
+// CPU pinned, growing worse over the container's own uptime. Every
+// process runner below fires concurrently (Promise.all), so N
+// overlapping ticks means N times the API traffic, not N+1.
+let tickInProgress = false;
+
 async function tick(): Promise<void> {
+  if (tickInProgress) {
+    logger.warn("tick: previous tick still running - skipping this interval firing");
+    return;
+  }
+  tickInProgress = true;
+  try {
+    await tickBody();
+  } finally {
+    tickInProgress = false;
+  }
+}
+
+async function tickBody(): Promise<void> {
   // Fire-and-forget, not awaited - a slow/failed publish must never delay
   // this tick's actual process runners below (AGENTS_TO_DO.md, 2026-08-01:
   // purely a cosmetic "system is alive" signal, see apiClient.tick()).
