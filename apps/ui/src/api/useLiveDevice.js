@@ -37,17 +37,29 @@ export function useDeviceLiveState(deviceId) {
           const next = { ...previous }
           if ('value' in event) {
             next.value = event.value
-            next.mode = event.mode
-            next.valueAuto = event.valueAuto
-            next.valueManual = event.valueManual
-            // AGENTS.md section 62 - only present when this event was
-            // published because the overdue status itself changed (an
-            // ordinary Dual Devices Model write doesn't carry these) -
-            // left undefined otherwise so DevicesList.jsx's own `??`
-            // fallback to the last REST fetch's value keeps working.
-            next.isOverdue = event.isOverdue
-            next.expiresAt = event.expiresAt
             next.timestamp = event.timestamp
+            // Every one of these is itself sparse - present only on the
+            // specific write path that actually has it (mode/valueAuto/
+            // valueManual: dualDevicesModel's own publishState, Dual
+            // Devices Model writes only; isOverdue/expiresAt: AGENTS.md
+            // section 62, only when that status itself changed). A plain
+            // EdgeX reading republish (routes/devices.ts's own "device-read"
+            // origin, fired on every GET /devices/:id, including EdgeX's
+            // own AutoEvents-driven readback) carries none of them -
+            // confirmed live 2026-08-29: it interleaves with a writable
+            // device's own AUTO-mode publishState roughly every tick,
+            // and unconditionally overwriting these with `event.field`
+            // (almost always `undefined` on THIS event type) made `mode`
+            // flicker between the live AUTO value and DevicesList.jsx's
+            // own stale one-time-fetched dualState.mode every second -
+            // once per "device-read" event, once per real write. Guarding
+            // each field on its own presence keeps the last known good
+            // value instead of clobbering it with a sibling event's gap.
+            if ('mode' in event) next.mode = event.mode
+            if ('valueAuto' in event) next.valueAuto = event.valueAuto
+            if ('valueManual' in event) next.valueManual = event.valueManual
+            if ('isOverdue' in event) next.isOverdue = event.isOverdue
+            if ('expiresAt' in event) next.expiresAt = event.expiresAt
           }
           return { ...prev, [event.entityId]: next }
         })

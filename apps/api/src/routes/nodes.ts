@@ -239,7 +239,19 @@ export async function nodeRoutes(app: FastifyInstance): Promise<void> {
         [request.body.simulated, request.params.id],
       );
       if (!result.rows[0]) return reply.code(404).send({ error: "node not found" });
-      await syncNodeSimulationProcesses(node.id, request.body.simulated);
+      // Only on an actual transition (2026-08-29 fix) - `node.simulated`
+      // above is the pre-UPDATE value, so a re-PATCH to the SAME value
+      // (e.g. the UI re-sending the current switch state) is a no-op here
+      // rather than unconditionally re-arming every attached simulation
+      // process. Confirmed live: without this guard, a human's own
+      // manual OFF on the Simulator page's ON/OFF switch got silently
+      // reverted back to "on" the next time anything touched this route
+      // for the same node, even with `simulated` unchanged - the
+      // Simulator page's own switch is supposed to be an independent
+      // manual override, not something a no-op node PATCH can undo.
+      if (node.simulated !== request.body.simulated) {
+        await syncNodeSimulationProcesses(node.id, request.body.simulated);
+      }
       const updated = await withLiveHeartbeat(await findNode(request.params.id));
       await publishNodeState(updated, request.body.simulated ? "node-simulated-on" : "node-simulated-off");
       return updated;

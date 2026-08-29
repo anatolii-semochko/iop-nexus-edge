@@ -667,7 +667,14 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
         [request.body.simulated, request.params.id],
       );
       if (!result.rows[0]) return reply.code(404).send({ error: "device not found" });
-      await syncDeviceSimulationProcesses(device.id, request.body.simulated);
+      // Only on an actual transition - same fix and reasoning as
+      // routes/nodes.ts's own PATCH /:id/simulated (2026-08-29): `device`
+      // above is the pre-UPDATE row, so a re-PATCH to the same value must
+      // not re-arm a simulation process a human just manually turned off
+      // via the Simulator page.
+      if (device.simulated !== request.body.simulated) {
+        await syncDeviceSimulationProcesses(device.id, request.body.simulated);
+      }
       await publishDeviceMetadata(result.rows[0].id, "device-simulated-changed");
       return findDeviceListRow(request.params.id);
     },
