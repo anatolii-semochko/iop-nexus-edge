@@ -24,6 +24,7 @@ import * as processRegistry from "./processRegistry.js";
 import type { ProcessPublicState } from "./processRegistry.js";
 import { processStateEvents } from "./processStateEvents.js";
 import { redis } from "./redis.js";
+import { isSimulationTargetSimulated } from "./simulationTarget.js";
 
 export const SNAPSHOT_CACHE_KEY = "process:state:latest";
 export const SNAPSHOT_UPDATED_CHANNEL = "process:state:updated";
@@ -53,6 +54,10 @@ export interface ProcessFleetEntry extends Omit<ProcessPublicState, "status"> {
   // handler - reported live as "the button doesn't react to clicks at
   // all"). Live now for the same reason.
   hasActiveWem: boolean;
+  // Second gate a simulation process needs (AGENTS_TO_DO.md, 2026-08-29) -
+  // see simulationTarget.ts's own doc comment. Only meaningful for
+  // type: "simulation" processes, undefined otherwise.
+  simulationTargetSimulated?: boolean;
 }
 
 export interface ProcessFleetSnapshot {
@@ -85,14 +90,23 @@ async function assembleSnapshot(source: string): Promise<ProcessFleetSnapshot> {
     id: number;
     type: "controllable" | "permanent" | "simulation";
     dashboard_flagged_at: string | null;
-  }>("SELECT id, type, dashboard_flagged_at FROM processes");
+    node_id: number | null;
+    device_id: number | null;
+  }>("SELECT id, type, dashboard_flagged_at, node_id, device_id FROM processes");
 
   const processes: ProcessFleetEntry[] = [];
-  for (const { id, type, dashboard_flagged_at } of rows) {
+  for (const { id, type, dashboard_flagged_at, node_id, device_id } of rows) {
     try {
-      const [state, hasActiveWem] = await Promise.all([
+      const [state, hasActiveWem, simulationTargetSimulated] = await Promise.all([
         processRegistry.getPublicState(id),
         processMessages.hasActiveEntries(id),
+        // Second gate a simulation process needs (AGENTS_TO_DO.md,
+        // 2026-08-29, simulationTarget.ts's own doc comment) - live here
+        // too, not just GET /processes' own withLiveState, so the
+        // Simulator page's Active/Sleep label updates the instant the
+        // target Node/Device's own simulated toggle flips elsewhere,
+        // without a page reload.
+        type === "simulation" ? isSimulationTargetSimulated({ node_id, device_id }) : Promise.resolve(undefined),
       ]);
       processes.push({
         id,
@@ -107,6 +121,7 @@ async function assembleSnapshot(source: string): Promise<ProcessFleetSnapshot> {
         updatedAt: state.updatedAt,
         dashboardFlaggedAt: dashboard_flagged_at,
         hasActiveWem,
+        simulationTargetSimulated,
       });
     } catch (err) {
       // One process's malformed/unreachable cache entry must not take the

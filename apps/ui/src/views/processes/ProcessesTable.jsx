@@ -58,6 +58,7 @@ const ProcessRow = ({
   onGroupsChange,
   extraAction,
   registeredKinds,
+  statusLabel,
 }) => {
   const live = useProcessLiveState(process.id)
   // `status` is a deliberately non-urgent, timer-only broadcast field
@@ -82,6 +83,11 @@ const ProcessRow = ({
   const status = pendingOptimisticStatus ?? live.status ?? process.status
   const critical = live.critical ?? process.critical
   const warning = live.warning ?? process.warning
+  // Simulation processes only (AGENTS_TO_DO.md, 2026-08-29) - whether this
+  // process's own target Node/Device is currently in simulated mode, the
+  // second gate alongside `status` above. Same live-over-REST fallback.
+  const simulationTargetSimulated =
+    live.simulationTargetSimulated ?? process.simulationTargetSimulated
   // Process management (AGENTS_TO_DO.md, 2026-08-14) - a row whose kind
   // isn't in the running orchestrator's own registered-kinds list yet
   // (registeredKinds === null while that fetch is still in flight, in
@@ -146,7 +152,10 @@ const ProcessRow = ({
     <>
       <CTableRow color={rowColor}>
         <CTableDataCell className={noBorderWhenExpanded}>
-          <RowStatusBadge rowColor={rowColor} />
+          <RowStatusBadge
+            rowColor={rowColor}
+            defaultLabel={statusLabel?.(process, { status, simulationTargetSimulated })}
+          />
         </CTableDataCell>
         <CTableDataCell className={noBorderWhenExpanded}>
           {status ? (
@@ -316,6 +325,7 @@ const ProcessesTable = ({
   renderExtraRowAction,
   emptyMessage = 'No processes match this filter.',
   registeredKinds = null,
+  statusLabel,
 }) => {
   const { isExpanded, toggleOne } = useExpandableRows(expandedIds, setExpandedIds)
 
@@ -460,6 +470,7 @@ const ProcessesTable = ({
                   onGroupsChange={onGroupsChange}
                   extraAction={renderExtraRowAction}
                   registeredKinds={registeredKinds}
+                  statusLabel={statusLabel}
                 />
               ))}
             </CTableBody>

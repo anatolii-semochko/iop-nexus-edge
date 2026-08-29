@@ -9,6 +9,7 @@ import type { HeartbeatControlConfig } from "../heartbeatControl.js";
 import { broadcastForced } from "../processBroadcast.js";
 import * as processMessages from "../processMessages.js";
 import * as processRegistry from "../processRegistry.js";
+import { isSimulationTargetSimulated } from "../simulationTarget.js";
 
 interface ProcessConfig {
   min?: number;
@@ -60,6 +61,12 @@ interface ProcessRow {
   kind: string;
   actions: string[];
   device_id: number | null;
+  // Simulation processes only (AGENTS_TO_DO.md, 2026-08-29) - the "spans
+  // an entire Node" link nexus-edge core's 1690000000029 migration
+  // established. Needed here (not just on the orchestrator-facing
+  // apiClient.ts type) for withLiveState's own isSimulationTargetSimulated
+  // check below.
+  node_id: number | null;
   config: ProcessConfig;
   // Dashboard tab (AGENTS.md section 22) - set once, the instant this
   // process first gets an active WEM entry (processMessages.
@@ -586,6 +593,7 @@ async function withLiveState(process: ProcessRow) {
     heartbeatStopped,
     heartbeatLastSeenAt,
     heartbeatTestSimulateFailure,
+    simulationTargetSimulated,
   ] = await Promise.all([
     // "simulation" (AGENTS_TO_DO.md, 2026-08-29) reuses the exact same
     // on/off `status` a controllable process already has - "sleeps
@@ -618,6 +626,11 @@ async function withLiveState(process: ProcessRow) {
     // every process anyway (same as hasActiveWem above), simpler than
     // branching on kind here.
     heartbeatControl.isTestSimulateFailure(process.id),
+    // Second of the two independent gates a simulation process needs
+    // (AGENTS_TO_DO.md, 2026-08-29) - see simulationTarget.ts's own doc
+    // comment. Only meaningful for type: "simulation", same conditional
+    // pattern `status` above already uses.
+    process.type === "simulation" ? isSimulationTargetSimulated(process) : Promise.resolve(undefined),
   ]);
   return {
     ...process,
@@ -630,5 +643,6 @@ async function withLiveState(process: ProcessRow) {
     heartbeatStopped,
     heartbeatTestSimulateFailure,
     heartbeatLastSeenAt,
+    simulationTargetSimulated,
   };
 }

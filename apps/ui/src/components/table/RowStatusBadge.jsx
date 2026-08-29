@@ -13,6 +13,13 @@ import { CBadge } from '@coreui/react'
  * `info`, but this label reads `primary` instead - confirmed with the
  * user (2026-08-15) as an intentional accent/background split, not an
  * oversight.
+ *
+ * `defaultLabel` (AGENTS_TO_DO.md, 2026-08-29, Simulator page) - lets a
+ * caller override just the "everything's fine" fallback (normally "OK")
+ * without touching the danger/warning/info severity labels above, which
+ * stay identical everywhere. Simulator.jsx uses this for its own
+ * Sleep/Active distinction - two different "not erroring" states a plain
+ * "OK" can't tell apart.
  */
 const LABELS = {
   danger: { text: 'Error', color: 'danger' },
@@ -20,9 +27,13 @@ const LABELS = {
   info: { text: 'Simulation', color: 'primary' },
 }
 
-const RowStatusBadge = ({ rowColor }) => {
-  const { text, color } = LABELS[rowColor] ?? { text: 'OK', color: 'success' }
-  return <CBadge color={color} className='mb-1'>{text}</CBadge>
+const RowStatusBadge = ({ rowColor, defaultLabel }) => {
+  const { text, color } = LABELS[rowColor] ?? defaultLabel ?? { text: 'OK', color: 'success' }
+  return (
+    <CBadge color={color} className="mb-1">
+      {text}
+    </CBadge>
+  )
 }
 
 export default RowStatusBadge

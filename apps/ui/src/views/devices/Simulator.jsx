@@ -134,6 +134,20 @@ const Simulator = () => {
           messageGroups={messageGroups}
           onGroupsChange={reloadGroupMemberships}
           onResetFilters={handleResetFilters}
+          // Sleep/Active instead of the generic "OK" (AGENTS_TO_DO.md,
+          // 2026-08-29) - true "running" for a simulation process needs
+          // BOTH its own ON/OFF switch (status) AND its target Node/
+          // Device's own simulated toggle (simulationTargetSimulated,
+          // apps/api's simulationTarget.ts) - matches exactly what the
+          // orchestrator's own runner gates on, so this label never claims
+          // "Active" when nothing is actually being generated. Error/
+          // Warning (critical/warning) still win over this - RowStatusBadge
+          // only falls back to this for the "nothing wrong" case.
+          statusLabel={(process, { status, simulationTargetSimulated }) =>
+            status === 'on' && simulationTargetSimulated
+              ? { text: 'Active', color: 'success' }
+              : { text: 'Sleep', color: 'secondary' }
+          }
           emptyMessage={
             processes.length === 0
               ? 'No simulation processes registered yet.'

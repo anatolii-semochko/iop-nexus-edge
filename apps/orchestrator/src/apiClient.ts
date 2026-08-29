@@ -118,6 +118,11 @@ export interface ProcessRecord {
     envHumidityWarnMax?: number;
   };
   status?: "on" | "off";
+  // Second of two independent gates a simulation process needs before it
+  // should actually run (AGENTS_TO_DO.md, 2026-08-29): this Redis on/off
+  // status, AND its own target Node/Device currently being in simulated
+  // mode - not either alone. Only meaningful for type: "simulation".
+  simulationTargetSimulated?: boolean;
   // Fleet-wide, unfiltered by any user's "hidden" dismissal (AGENTS.md's
   // Active Zummer section) - the active-buzzer process reads these across
   // every process to decide whether to sound, deliberately not the
