@@ -5,8 +5,15 @@
 import { config } from "./config.js";
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  // AGENTS_TO_DO.md, 2026-08-29 - server.ts's own tick() re-entrancy guard
+  // (added the same day, to stop unbounded overlapping ticks) means a
+  // fetch() that never settles now freezes every future tick permanently
+  // instead of just adding to a pile - previously a real risk, since
+  // nothing here had a timeout at all. AbortSignal.timeout() is the
+  // built-in fetch mechanism for this, no extra dependency.
   const res = await fetch(`${config.apiUrl}${path}`, {
     headers: options.body ? { "Content-Type": "application/json" } : {},
+    signal: AbortSignal.timeout(config.apiRequestTimeoutMs),
     ...options,
   });
   if (!res.ok) {
