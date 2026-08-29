@@ -1,8 +1,8 @@
 // Fleet-wide process public-state broadcast (AGENTS.md section 24). Reads
 // every process's `process:{id}:public` hash (processRegistry.ts) plus its
-// Postgres type (for the controllable-only status suppression withLiveState
-// already applies), assembles one snapshot for the whole fleet, and makes
-// it available two ways:
+// Postgres type (for the controllable/simulation-only status suppression
+// withLiveState already applies), assembles one snapshot for the whole
+// fleet, and makes it available two ways:
 // - cached at a well-known Redis key (`process:state:latest`) that both
 //   this service's own REST layer and apps/messaging-gateway can read
 //   directly, no round trip back through here;
@@ -83,7 +83,7 @@ let urgentTimer: ReturnType<typeof setTimeout> | undefined;
 async function assembleSnapshot(source: string): Promise<ProcessFleetSnapshot> {
   const { rows } = await pool.query<{
     id: number;
-    type: "controllable" | "permanent";
+    type: "controllable" | "permanent" | "simulation";
     dashboard_flagged_at: string | null;
   }>("SELECT id, type, dashboard_flagged_at FROM processes");
 
@@ -99,7 +99,7 @@ async function assembleSnapshot(source: string): Promise<ProcessFleetSnapshot> {
         // Same suppression GET /processes' withLiveState applies - a
         // permanent/system process has no on/off concept, so it reports no
         // status at all here rather than a fabricated "on".
-        status: type === "controllable" ? state.status : undefined,
+        status: type === "controllable" || type === "simulation" ? state.status : undefined,
         critical: state.critical,
         warning: state.warning,
         metrics: state.metrics,

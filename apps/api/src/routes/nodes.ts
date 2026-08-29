@@ -6,6 +6,7 @@ import { pool } from "../db.js";
 import * as heartbeatControl from "../heartbeatControl.js";
 import type { HeartbeatControlConfig } from "../heartbeatControl.js";
 import { publishNodeEvent } from "../messaging.js";
+import * as processRegistry from "../processRegistry.js";
 
 interface NodeRow {
   id: number;
@@ -117,6 +118,25 @@ function isUniqueViolation(err: unknown): boolean {
   return err instanceof Error && "code" in err && (err as { code: string }).code === "23505";
 }
 
+// Auto-activation for Simulation processes (AGENTS_TO_DO.md, 2026-08-29) -
+// a `simulation`-type process attached to this node (`processes.node_id`,
+// the same "spans an entire Node" link 1690000000029's own migration
+// comment already established) should be on exactly when the node itself
+// is in simulated mode, and off otherwise - no separate manual control
+// beyond that. Uses the same Redis-backed on/off `status` a controllable
+// process already has (processRegistry.ts), so the orchestrator's
+// simulation runners see it for free from their next GET /processes call,
+// no polling or event of their own needed.
+async function syncNodeSimulationProcesses(nodeId: number, active: boolean): Promise<void> {
+  const result = await pool.query<{ id: number }>(
+    "SELECT id FROM processes WHERE type = 'simulation' AND node_id = $1",
+    [nodeId],
+  );
+  await Promise.all(
+    result.rows.map((row) => processRegistry.setStatus(row.id, active ? "on" : "off", "node-simulated")),
+  );
+}
+
 export async function nodeRoutes(app: FastifyInstance): Promise<void> {
   app.get("/nodes", async () => {
     const result = await pool.query<NodeRow>(`${SELECT_NODE} ORDER BY n.name`);
@@ -219,6 +239,7 @@ export async function nodeRoutes(app: FastifyInstance): Promise<void> {
         [request.body.simulated, request.params.id],
       );
       if (!result.rows[0]) return reply.code(404).send({ error: "node not found" });
+      await syncNodeSimulationProcesses(node.id, request.body.simulated);
       const updated = await withLiveHeartbeat(await findNode(request.params.id));
       await publishNodeState(updated, request.body.simulated ? "node-simulated-on" : "node-simulated-off");
       return updated;

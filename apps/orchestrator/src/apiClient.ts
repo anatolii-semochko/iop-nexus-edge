@@ -57,7 +57,7 @@ export interface AnnunciatorSlot {
 export interface ProcessRecord {
   id: number;
   name: string;
-  type: "controllable" | "permanent";
+  type: "controllable" | "permanent" | "simulation";
   kind: string;
   device_id: number | null;
   config: {
@@ -275,6 +275,19 @@ export const apiClient = {
   // .../auto nor .../simulate fits).
   setDeviceReading: (deviceId: number, value: unknown) =>
     request(`/devices/${deviceId}/reading`, {
+      method: "PUT",
+      body: JSON.stringify({ value }),
+    }),
+  // For a readOnly device that DOES have a real EdgeX profile (e.g.
+  // aquarium's `light-power-actual`) - a `simulation`-type process
+  // (AGENTS_TO_DO.md, 2026-08-29) computes its value every tick the same
+  // way setDeviceReading above does for a no-EdgeX device, but needs the
+  // write to actually flow through EdgeX so other consumers see it as a
+  // real reading. Hits PUT /devices/:id/simulate-auto, the unauthenticated
+  // orchestrator-only counterpart of the human Dev Simulator's .../simulate
+  // route (same split as setDeviceAuto/.../auto above).
+  simulateDevice: (deviceId: number, value: unknown) =>
+    request(`/devices/${deviceId}/simulate-auto`, {
       method: "PUT",
       body: JSON.stringify({ value }),
     }),

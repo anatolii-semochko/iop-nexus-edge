@@ -8,6 +8,7 @@ import { logReading } from "../deviceLog.js";
 import * as dataLoggerControl from "../dataLoggerControl.js";
 import { EdgeXError, listEdgeXDevices, readValue, writeValue, type EdgeXDeviceStatus } from "../edgex.js";
 import { publishDeviceEvent } from "../messaging.js";
+import * as processRegistry from "../processRegistry.js";
 import { devicesNeededFor, validateWrite, type ForbiddenRule } from "../validator.js";
 
 /**
@@ -382,6 +383,38 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  // Orchestrator-driven equivalent of .../simulate above, same "auto" vs
+  // bare-route split as .../auto below: a `simulation`-type process (a
+  // readOnly Device WITH an EdgeX profile, AGENTS_TO_DO.md 2026-08-29,
+  // e.g. aquarium's light-power-actual) needs to push a computed value
+  // every tick the same way .../simulate does, but has no user session to
+  // authenticate with or attribute a logCommand entry to - unlike a
+  // human's Dev Simulator action, a process re-asserting its own computed
+  // reading isn't a "command" worth auditing (same reasoning .../reading's
+  // own comment gives for not calling logCommand either).
+  app.put<{ Params: { id: string }; Body: { value: unknown } }>(
+    "/devices/:id/simulate-auto",
+    async (request, reply) => {
+      const { value } = request.body;
+      if (value === undefined) {
+        return reply.code(400).send({ error: "request body must include a 'value'" });
+      }
+
+      const device = await requireEdgeXDevice(request.params.id, reply);
+      if (!device) return;
+
+      if (!device.capabilities.readOnly) {
+        return reply
+          .code(400)
+          .send({ error: `device '${device.name}' is not read-only`, hint: "use PUT /devices/:id/auto instead" });
+      }
+
+      if (!(await writeOrReject(reply, device.resolvedEdgexName, device.capabilities.edgexResource, value))) return;
+      await dualDevicesModel.publishReading(device.id, value, "process");
+      return { status: "ok" };
+    },
+  );
+
   // Orchestrator-driven equivalent of the write path above: records
   // valueAuto, but only reaches EdgeX if the device is currently in AUTO
   // mode (a manual override keeps winning until released). Called every
@@ -634,6 +667,7 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
         [request.body.simulated, request.params.id],
       );
       if (!result.rows[0]) return reply.code(404).send({ error: "device not found" });
+      await syncDeviceSimulationProcesses(device.id, request.body.simulated);
       await publishDeviceMetadata(result.rows[0].id, "device-simulated-changed");
       return findDeviceListRow(request.params.id);
     },
@@ -723,6 +757,22 @@ async function findDevice(id: string): Promise<DeviceRowWithNode | undefined> {
 
 function isUniqueViolation(err: unknown): boolean {
   return err instanceof Error && "code" in err && (err as { code: string }).code === "23505";
+}
+
+// Auto-activation for Simulation processes (AGENTS_TO_DO.md, 2026-08-29) -
+// same idea as routes/nodes.ts's own syncNodeSimulationProcesses (hand-kept
+// in sync, no shared types package yet - same known duplication every
+// other cross-service/cross-route DTO in this app already has), just keyed
+// by `processes.device_id` instead of `node_id` for a standalone device's
+// own simulated toggle below.
+async function syncDeviceSimulationProcesses(deviceId: number, active: boolean): Promise<void> {
+  const result = await pool.query<{ id: number }>(
+    "SELECT id FROM processes WHERE type = 'simulation' AND device_id = $1",
+    [deviceId],
+  );
+  await Promise.all(
+    result.rows.map((row) => processRegistry.setStatus(row.id, active ? "on" : "off", "device-simulated")),
+  );
 }
 
 async function findDeviceListRow(id: string): Promise<DeviceListRow | undefined> {

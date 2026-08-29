@@ -50,7 +50,13 @@ interface ProcessRow {
   // itself isn't a column on this table anymore, groups are a real,
   // independently manageable entity now (routes/processGroups.ts).
   group_name: string;
-  type: "controllable" | "permanent";
+  // Includes "simulation" (AGENTS_TO_DO.md, 2026-08-29) even though the
+  // POST /processes route below only ever accepts "controllable"/
+  // "permanent" - a simulation process is seed-migration-created only,
+  // never through this generic create route, but this interface also
+  // types every row read back via SELECT * FROM processes (GET
+  // /processes above), which legitimately includes simulation rows.
+  type: "controllable" | "permanent" | "simulation";
   kind: string;
   actions: string[];
   device_id: number | null;
@@ -581,7 +587,16 @@ async function withLiveState(process: ProcessRow) {
     heartbeatLastSeenAt,
     heartbeatTestSimulateFailure,
   ] = await Promise.all([
-    process.type === "controllable" ? processRegistry.getStatus(process.id) : Promise.resolve(undefined),
+    // "simulation" (AGENTS_TO_DO.md, 2026-08-29) reuses the exact same
+    // on/off `status` a controllable process already has - "sleeps
+    // until turned on" is just status === "off", no new field. Read
+    // here so apps/orchestrator's simulation process kinds get it from
+    // the one `GET /processes` call the tick loop already makes every
+    // tick, same reasoning as heartbeatStopped/heartbeatLastSeenAt
+    // below.
+    process.type === "controllable" || process.type === "simulation"
+      ? processRegistry.getStatus(process.id)
+      : Promise.resolve(undefined),
     processRegistry.getCritical(process.id),
     processRegistry.getWarning(process.id),
     processRegistry.getMetrics(process.id),
