@@ -14,6 +14,16 @@ function required(name: string): string {
 export const config = {
   host: process.env.API_HOST ?? "0.0.0.0",
   port: Number(process.env.API_PORT ?? 3001),
+  // Fastify's own per-request auto-logging (every incoming request +
+  // completed response, at "info") - real, measurable CPU/IO cost under
+  // sustained internal traffic (found live 2026-08-29 on a Raspberry Pi
+  // deployment: ~60 req/s from the orchestrator's own 1Hz tick touching
+  // ~20+ individual devices with no batch endpoint, each producing 2 JSON
+  // log lines). Defaults to "info" (today's existing behavior, unchanged
+  // for local dev) - a resource-constrained deployment sets LOG_LEVEL=warn
+  // in its own .env to drop the per-request noise while keeping real
+  // logger.warn()/error() calls elsewhere in the app visible.
+  logLevel: process.env.LOG_LEVEL ?? "info",
   postgres: {
     host: required("POSTGRES_HOST"),
     port: Number(process.env.POSTGRES_PORT ?? 5432),

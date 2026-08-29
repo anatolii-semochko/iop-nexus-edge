@@ -41,7 +41,7 @@ import { userDirectoryRoutes, userRoutes } from "./routes/users.js";
  * unchanged) is now just a one-line caller of this function.
  */
 export async function startApiServer(): Promise<FastifyInstance> {
-  const app = Fastify({ logger: true });
+  const app = Fastify({ logger: { level: config.logLevel } });
 
   app.get("/health", async () => ({ status: "ok", service: "api" }));
 

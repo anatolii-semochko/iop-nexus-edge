@@ -111,7 +111,7 @@ export async function startOrchestrator(): Promise<FastifyInstance> {
     void tick();
   }, TICK_INTERVAL_MS);
 
-  const app = Fastify({ logger: true });
+  const app = Fastify({ logger: { level: config.logLevel } });
   app.get("/health", async () => ({ status: "ok", service: "orchestrator" }));
   // AGENTS_TO_DO.md, 2026-08-14 process management - lets apps/api (and,
   // through it, the UI) tell a `processes` row whose kind was just added
