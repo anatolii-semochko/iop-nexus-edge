@@ -6,7 +6,6 @@ import { pool } from "../db.js";
 import * as heartbeatControl from "../heartbeatControl.js";
 import type { HeartbeatControlConfig } from "../heartbeatControl.js";
 import { publishNodeEvent } from "../messaging.js";
-import * as processRegistry from "../processRegistry.js";
 
 interface NodeRow {
   id: number;
@@ -118,25 +117,6 @@ function isUniqueViolation(err: unknown): boolean {
   return err instanceof Error && "code" in err && (err as { code: string }).code === "23505";
 }
 
-// Auto-activation for Simulation processes (AGENTS_TO_DO.md, 2026-08-29) -
-// a `simulation`-type process attached to this node (`processes.node_id`,
-// the same "spans an entire Node" link 1690000000029's own migration
-// comment already established) should be on exactly when the node itself
-// is in simulated mode, and off otherwise - no separate manual control
-// beyond that. Uses the same Redis-backed on/off `status` a controllable
-// process already has (processRegistry.ts), so the orchestrator's
-// simulation runners see it for free from their next GET /processes call,
-// no polling or event of their own needed.
-async function syncNodeSimulationProcesses(nodeId: number, active: boolean): Promise<void> {
-  const result = await pool.query<{ id: number }>(
-    "SELECT id FROM processes WHERE type = 'simulation' AND node_id = $1",
-    [nodeId],
-  );
-  await Promise.all(
-    result.rows.map((row) => processRegistry.setStatus(row.id, active ? "on" : "off", "node-simulated")),
-  );
-}
-
 export async function nodeRoutes(app: FastifyInstance): Promise<void> {
   app.get("/nodes", async () => {
     const result = await pool.query<NodeRow>(`${SELECT_NODE} ORDER BY n.name`);
@@ -239,19 +219,16 @@ export async function nodeRoutes(app: FastifyInstance): Promise<void> {
         [request.body.simulated, request.params.id],
       );
       if (!result.rows[0]) return reply.code(404).send({ error: "node not found" });
-      // Only on an actual transition (2026-08-29 fix) - `node.simulated`
-      // above is the pre-UPDATE value, so a re-PATCH to the SAME value
-      // (e.g. the UI re-sending the current switch state) is a no-op here
-      // rather than unconditionally re-arming every attached simulation
-      // process. Confirmed live: without this guard, a human's own
-      // manual OFF on the Simulator page's ON/OFF switch got silently
-      // reverted back to "on" the next time anything touched this route
-      // for the same node, even with `simulated` unchanged - the
-      // Simulator page's own switch is supposed to be an independent
-      // manual override, not something a no-op node PATCH can undo.
-      if (node.simulated !== request.body.simulated) {
-        await syncNodeSimulationProcesses(node.id, request.body.simulated);
-      }
+      // No auto-activation of attached simulation processes here anymore
+      // (2026-08-29, reversed from an earlier design) - a simulation
+      // process's own ON/OFF is exclusively operator-controlled (the
+      // Simulator page's own switch, POST /processes/:id/action), fully
+      // independent of this toggle. Whether it's actually producing data
+      // right now is a live COMBINATION of that switch and this node's own
+      // `simulated` flag (simulationTarget.ts's isSimulationTargetSimulated,
+      // read fresh by both the orchestrator's runner and the Simulator
+      // page's Active/Sleep label) - never a second write to the same
+      // Redis status the switch owns.
       const updated = await withLiveHeartbeat(await findNode(request.params.id));
       await publishNodeState(updated, request.body.simulated ? "node-simulated-on" : "node-simulated-off");
       return updated;

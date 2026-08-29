@@ -134,19 +134,36 @@ const Simulator = () => {
           messageGroups={messageGroups}
           onGroupsChange={reloadGroupMemberships}
           onResetFilters={handleResetFilters}
-          // Sleep/Active instead of the generic "OK" (AGENTS_TO_DO.md,
-          // 2026-08-29) - true "running" for a simulation process needs
-          // BOTH its own ON/OFF switch (status) AND its target Node/
-          // Device's own simulated toggle (simulationTargetSimulated,
-          // apps/api's simulationTarget.ts) - matches exactly what the
-          // orchestrator's own runner gates on, so this label never claims
-          // "Active" when nothing is actually being generated. Error/
-          // Warning (critical/warning) still win over this - RowStatusBadge
-          // only falls back to this for the "nothing wrong" case.
-          statusLabel={(process, { status, simulationTargetSimulated }) =>
-            status === 'on' && simulationTargetSimulated
+          // No separate "Power" column - the Status column below already
+          // folds the switch's own on/off into Off/Sleep/Active/Error
+          // (AGENTS_TO_DO.md, 2026-08-29), the ON/OFF badge would just
+          // repeat it.
+          showPower={false}
+          // Off / Sleep / Active - three states, not the generic "OK"
+          // (AGENTS_TO_DO.md, 2026-08-29, corrected spec): Off is the
+          // operator's own switch turned off, full stop - Sleep and Active
+          // only apply while the operator has it ON, split further by
+          // whether the target Node/Device is currently in simulated mode
+          // (simulationTargetSimulated, apps/api's simulationTarget.ts) -
+          // matches exactly what the orchestrator's own runner gates on,
+          // so "Active" never claims something is running when it isn't.
+          // Error/Warning (critical/warning) still win over Sleep/Active -
+          // RowStatusBadge only falls back to this for the "nothing
+          // wrong" case - but never over Off, see overrideRowColor below.
+          statusLabel={(process, { status, simulationTargetSimulated }) => {
+            if (status !== 'on') return { text: 'Off', color: 'secondary' }
+            return simulationTargetSimulated
               ? { text: 'Active', color: 'success' }
               : { text: 'Sleep', color: 'secondary' }
+          }}
+          // "Off means fully inert" (AGENTS_TO_DO.md, 2026-08-29: "процес
+          // і його статус не реагують на інші процеси і статуси ніяк") -
+          // an operator-off process shows neither a leftover error tint
+          // nor label from before it was switched off; forces no row
+          // color while off, otherwise leaves the computed value (still
+          // respects critical/warning while genuinely running) untouched.
+          overrideRowColor={(process, { status, rowColor }) =>
+            status !== 'on' ? undefined : rowColor
           }
           emptyMessage={
             processes.length === 0

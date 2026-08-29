@@ -150,6 +150,14 @@ const ProcessSettingsModal = ({ visible, onClose, process, tabGroups, messageGro
   const ExtraSection = process && processSettingsSections[process.kind]
   const extraConfigField = process && processSettingsConfigFields[process.kind]
   const settingsTabs = ExtraSection?.settingsTabs
+  // Tab Groups are a Processes-page navigation concept (dynamic tabs on
+  // that page's own Dashboard/All/Controllable/etc strip) - meaningless
+  // for a `simulation`-type process, which only ever appears on the
+  // Simulator page's own flat, tab-less list (AGENTS_TO_DO.md, 2026-08-29:
+  // "Tabs видали, Message Casting Groups залиш"). Message Casting Groups
+  // stays for every process type - it's how a simulation process's own
+  // error casting (setCritical/syncMessages) actually gets routed.
+  const isSimulation = process?.type === 'simulation'
 
   const handleClose = () => {
     extraConfigRef.current = null
@@ -161,10 +169,14 @@ const ProcessSettingsModal = ({ visible, onClose, process, tabGroups, messageGro
     setBusy(true)
     setError(null)
     try {
-      const writes = [
-        api.setProcessTabGroups(process.id, [...selectedTabGroupIds]),
-        api.setProcessMessageGroups(process.id, [...selectedMessageGroupIds]),
-      ]
+      const writes = [api.setProcessMessageGroups(process.id, [...selectedMessageGroupIds])]
+      // No tab-group write for a simulation process - the section above is
+      // never shown to edit it, so `selectedTabGroupIds` would otherwise
+      // always be the empty Set it starts as, silently wiping out any
+      // existing membership on every save.
+      if (!isSimulation) {
+        writes.push(api.setProcessTabGroups(process.id, [...selectedTabGroupIds]))
+      }
       if (ExtraSection && extraConfigField === '*') {
         writes.push(api.setProcessConfig(process.id, extraConfigRef.current ?? {}))
       } else if (ExtraSection && extraConfigField) {
@@ -186,14 +198,16 @@ const ProcessSettingsModal = ({ visible, onClose, process, tabGroups, messageGro
 
   const groupSections = (
     <>
-      <GroupCheckboxSection
-        title="Tabs"
-        items={tabGroups}
-        fetchSelected={() => api.getProcessTabGroups(process.id)}
-        selectedIds={selectedTabGroupIds}
-        onChange={setSelectedTabGroupIds}
-        busy={busy}
-      />
+      {!isSimulation && (
+        <GroupCheckboxSection
+          title="Tabs"
+          items={tabGroups}
+          fetchSelected={() => api.getProcessTabGroups(process.id)}
+          selectedIds={selectedTabGroupIds}
+          onChange={setSelectedTabGroupIds}
+          busy={busy}
+        />
+      )}
       <GroupCheckboxSection
         title="Message Casting Groups"
         items={messageGroups}

@@ -59,6 +59,8 @@ const ProcessRow = ({
   extraAction,
   registeredKinds,
   statusLabel,
+  showPower = true,
+  overrideRowColor,
 }) => {
   const live = useProcessLiveState(process.id)
   // `status` is a deliberately non-urgent, timer-only broadcast field
@@ -104,6 +106,15 @@ const ProcessRow = ({
       : pendingRestart
         ? 'warning'
         : undefined
+  // Simulator.jsx's own "Off means fully inert" rule (AGENTS_TO_DO.md,
+  // 2026-08-29: "процес і його статус не реагують на інші процеси і
+  // статуси ніяк") - an operator-off simulation process shows neither a
+  // leftover error tint from before it was switched off nor the label
+  // that would come with it. No-op (returns `rowColor` unchanged) unless
+  // a caller actually supplies this.
+  const effectiveRowColor = overrideRowColor
+    ? overrideRowColor(process, { status, rowColor })
+    : rowColor
   const [deleteBusy, setDeleteBusy] = useState(false)
   const handleDelete = async () => {
     setDeleteBusy(true)
@@ -150,23 +161,12 @@ const ProcessRow = ({
 
   return (
     <>
-      <CTableRow color={rowColor}>
+      <CTableRow color={effectiveRowColor}>
         <CTableDataCell className={noBorderWhenExpanded}>
           <RowStatusBadge
-            rowColor={rowColor}
+            rowColor={effectiveRowColor}
             defaultLabel={statusLabel?.(process, { status, simulationTargetSimulated })}
           />
-        </CTableDataCell>
-        <CTableDataCell className={noBorderWhenExpanded}>
-          {status ? (
-            <CBadge color={statusColor(status)} className="mb-1">
-              {status.toUpperCase()}
-            </CBadge>
-          ) : (
-            <CBadge color="info" className="mb-1">
-              Running
-            </CBadge>
-          )}
           {pendingRestart && (
             <CBadge
               color="warning"
@@ -177,6 +177,19 @@ const ProcessRow = ({
             </CBadge>
           )}
         </CTableDataCell>
+        {showPower && (
+          <CTableDataCell className={noBorderWhenExpanded}>
+            {status ? (
+              <CBadge color={statusColor(status)} className="mb-1">
+                {status.toUpperCase()}
+              </CBadge>
+            ) : (
+              <CBadge color="info" className="mb-1">
+                Running
+              </CBadge>
+            )}
+          </CTableDataCell>
+        )}
         <CTableDataCell className={noBorderWhenExpanded}>{process.name}</CTableDataCell>
         <CTableDataCell className={noBorderWhenExpanded}>{process.group_name}</CTableDataCell>
         <CTableDataCell className={`text-end ${noBorderWhenExpanded ?? ''}`}>
@@ -233,8 +246,8 @@ const ProcessRow = ({
         </CTableDataCell>
       </CTableRow>
       {expanded && Panel && (
-        <CTableRow color={rowColor}>
-          <CTableDataCell colSpan={5} className="p-0">
+        <CTableRow color={effectiveRowColor}>
+          <CTableDataCell colSpan={showPower ? 5 : 4} className="p-0">
             <Panel process={process} onConfigChange={onReload} />
             <WemRow messages={messages} />
           </CTableDataCell>
@@ -326,6 +339,8 @@ const ProcessesTable = ({
   emptyMessage = 'No processes match this filter.',
   registeredKinds = null,
   statusLabel,
+  showPower = true,
+  overrideRowColor,
 }) => {
   const { isExpanded, toggleOne } = useExpandableRows(expandedIds, setExpandedIds)
 
@@ -439,9 +454,13 @@ const ProcessesTable = ({
                     ON/OFF/Running) - named "Power" rather than a second
                     "Status" to avoid the obvious collision, matching this
                     file's own existing `power` terminology (see the
-                    ON/OFF Switch's own `ariaLabel` below). */}
+                    ON/OFF Switch's own `ariaLabel` below). Simulator.jsx
+                    hides this column (AGENTS_TO_DO.md, 2026-08-29) - its
+                    own Status column already folds the switch's raw on/off
+                    into Off/Sleep/Active/Error, making the separate ON/OFF
+                    badge redundant there. */}
                 <CTableHeaderCell scope="col">Status</CTableHeaderCell>
-                <CTableHeaderCell scope="col">Power</CTableHeaderCell>
+                {showPower && <CTableHeaderCell scope="col">Power</CTableHeaderCell>}
                 <CTableHeaderCell scope="col">Name</CTableHeaderCell>
                 <CTableHeaderCell scope="col">Group</CTableHeaderCell>
                 <CTableHeaderCell scope="col" className="text-end">
@@ -471,6 +490,8 @@ const ProcessesTable = ({
                   extraAction={renderExtraRowAction}
                   registeredKinds={registeredKinds}
                   statusLabel={statusLabel}
+                  showPower={showPower}
+                  overrideRowColor={overrideRowColor}
                 />
               ))}
             </CTableBody>

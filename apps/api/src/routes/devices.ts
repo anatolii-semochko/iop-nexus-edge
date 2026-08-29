@@ -8,7 +8,6 @@ import { logReading } from "../deviceLog.js";
 import * as dataLoggerControl from "../dataLoggerControl.js";
 import { EdgeXError, listEdgeXDevices, readValue, writeValue, type EdgeXDeviceStatus } from "../edgex.js";
 import { publishDeviceEvent } from "../messaging.js";
-import * as processRegistry from "../processRegistry.js";
 import { devicesNeededFor, validateWrite, type ForbiddenRule } from "../validator.js";
 
 /**
@@ -667,14 +666,11 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
         [request.body.simulated, request.params.id],
       );
       if (!result.rows[0]) return reply.code(404).send({ error: "device not found" });
-      // Only on an actual transition - same fix and reasoning as
-      // routes/nodes.ts's own PATCH /:id/simulated (2026-08-29): `device`
-      // above is the pre-UPDATE row, so a re-PATCH to the same value must
-      // not re-arm a simulation process a human just manually turned off
-      // via the Simulator page.
-      if (device.simulated !== request.body.simulated) {
-        await syncDeviceSimulationProcesses(device.id, request.body.simulated);
-      }
+      // No auto-activation of an attached simulation process here anymore
+      // (2026-08-29, reversed from an earlier design) - same reasoning as
+      // routes/nodes.ts's own PATCH /:id/simulated: a simulation process's
+      // ON/OFF is exclusively operator-controlled, never written by this
+      // route.
       await publishDeviceMetadata(result.rows[0].id, "device-simulated-changed");
       return findDeviceListRow(request.params.id);
     },
@@ -766,21 +762,6 @@ function isUniqueViolation(err: unknown): boolean {
   return err instanceof Error && "code" in err && (err as { code: string }).code === "23505";
 }
 
-// Auto-activation for Simulation processes (AGENTS_TO_DO.md, 2026-08-29) -
-// same idea as routes/nodes.ts's own syncNodeSimulationProcesses (hand-kept
-// in sync, no shared types package yet - same known duplication every
-// other cross-service/cross-route DTO in this app already has), just keyed
-// by `processes.device_id` instead of `node_id` for a standalone device's
-// own simulated toggle below.
-async function syncDeviceSimulationProcesses(deviceId: number, active: boolean): Promise<void> {
-  const result = await pool.query<{ id: number }>(
-    "SELECT id FROM processes WHERE type = 'simulation' AND device_id = $1",
-    [deviceId],
-  );
-  await Promise.all(
-    result.rows.map((row) => processRegistry.setStatus(row.id, active ? "on" : "off", "device-simulated")),
-  );
-}
 
 async function findDeviceListRow(id: string): Promise<DeviceListRow | undefined> {
   const result = await pool.query<DeviceListRow>(
