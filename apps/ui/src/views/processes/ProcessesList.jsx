@@ -271,7 +271,12 @@ const ProcessesList = () => {
         </CToaster>
       )}
       <CCardHeader>
-        <strong>Processes</strong> <LiveBadge />
+        {/* Flex, not just LiveBadge's own align-middle (AGENTS_TO_DO.md,
+            2026-08-30) - see Simulator.jsx's own identical comment. */}
+        <div className="d-flex align-items-center gap-2">
+          <strong>Processes</strong>
+          <LiveBadge />
+        </div>
       </CCardHeader>
       <CCardBody>
         <CTabs activeItemKey={activeTab} onChange={setActiveTab}>

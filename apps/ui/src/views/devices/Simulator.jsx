@@ -110,7 +110,15 @@ const Simulator = () => {
         </CToaster>
       )}
       <CCardHeader>
-        <strong>Simulator</strong> <LiveBadge />
+        {/* Flex, not just LiveBadge's own align-middle (AGENTS_TO_DO.md,
+            2026-08-30) - vertical-align: middle centers against a point
+            derived from x-height, not the bold heading's actual visual
+            box, so it still measured ~1.5px low against "Simulator".
+            Flex align-items: center is pixel-exact. */}
+        <div className="d-flex align-items-center gap-2">
+          <strong>Simulator</strong>
+          <LiveBadge />
+        </div>
       </CCardHeader>
       <CCardBody>
         <ProcessesTable
