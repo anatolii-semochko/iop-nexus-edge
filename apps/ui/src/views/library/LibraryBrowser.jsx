@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   CAlert,
   CBadge,
@@ -236,7 +237,19 @@ const RowIcon = ({ iconPath }) => {
  * with its own breadcrumb-driven browse state.
  */
 const LibraryBrowser = () => {
-  const [kind, setKind] = useState('device')
+  const [searchParams, setSearchParams] = useSearchParams()
+  // Type-column deep link (AGENTS_TO_DO.md, 2026-08-30) - a Devices/Nodes/
+  // ProcessesTable row's "link" cell opens #/library?kind=X&type=Y in a
+  // new tab. Read once on mount (a later in-page kind switch clears these,
+  // see handleKindChange) rather than kept in sync with the URL bar - this
+  // page has never round-tripped its browse state through the URL before,
+  // and doing that for every click/search here would be unrelated scope.
+  const [kind, setKind] = useState(() => {
+    const fromUrl = searchParams.get('kind')
+    return KINDS.some((k) => k.value === fromUrl) ? fromUrl : 'device'
+  })
+  const [typeFilter, setTypeFilter] = useState(() => searchParams.get('type'))
+  const [filteredItem, setFilteredItem] = useState(null)
   const [categoryId, setCategoryId] = useState(null)
   const [breadcrumb, setBreadcrumb] = useState([])
   const [children, setChildren] = useState(null)
@@ -269,12 +282,31 @@ const LibraryBrowser = () => {
   }
 
   useEffect(() => {
+    // Skipped while a type-filter deep link is active - that mode fetches
+    // its own single item below instead of a category listing.
+    if (typeFilter) return
     // Fetching on kind/categoryId change, not deriving state from props -
     // same accepted pattern as ResourceMonitorPanel.jsx's own history
     // accumulation.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadBrowse(kind, categoryId)
-  }, [kind, categoryId])
+  }, [kind, categoryId, typeFilter])
+
+  useEffect(() => {
+    if (!typeFilter) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setFilteredItem(null)
+      return
+    }
+    setError(null)
+    api
+      .getLibraryItemByType(kind, typeFilter)
+      .then(setFilteredItem)
+      .catch((err) => {
+        setError(err.message)
+        setFilteredItem(null)
+      })
+  }, [kind, typeFilter])
 
   useEffect(() => {
     if (!search) {
@@ -296,6 +328,20 @@ const LibraryBrowser = () => {
     setCategoryId(null)
     setSearch('')
     setExpandedIds([])
+    if (typeFilter) {
+      setTypeFilter(null)
+      setSearchParams({}, { replace: true })
+    }
+  }
+
+  // Exits the type-filter deep-link view back into normal category
+  // browsing, landing on the filtered item's own category rather than the
+  // tree root.
+  const handleClearTypeFilter = () => {
+    setTypeFilter(null)
+    setSearchParams({}, { replace: true })
+    const trail = filteredItem?.breadcrumb ?? []
+    setCategoryId(trail.length ? trail[trail.length - 1].id : null)
   }
 
   const handleNavigate = (nextCategoryId) => {
@@ -351,7 +397,15 @@ const LibraryBrowser = () => {
   }
 
   const showingSearch = Boolean(search)
-  const rows = showingSearch ? searchResults : children
+  const rows = typeFilter
+    ? filteredItem
+      ? [filteredItem.item]
+      : error
+        ? []
+        : null
+    : showingSearch
+      ? searchResults
+      : children
 
   return (
     <CCard className="mb-4">
@@ -376,31 +430,44 @@ const LibraryBrowser = () => {
           </CAlert>
         )}
 
-        <CRow className="mb-3 g-2 align-items-center">
-          <CCol xs="auto">
-            <CButtonGroup size="sm">
-              {KINDS.map((k) => (
-                <CButton
-                  key={k.value}
-                  color="primary"
-                  variant={kind === k.value ? undefined : 'outline'}
-                  onClick={() => handleKindChange(k.value)}
-                >
-                  {k.label}
-                </CButton>
-              ))}
-            </CButtonGroup>
-          </CCol>
-          <CCol xs="auto">
-            <TableSearchInput
-              value={search}
-              onSearch={setSearch}
-              placeholder={`Search ${kind === 'device' ? 'devices' : kind === 'node' ? 'nodes' : 'processes'} by name or description...`}
-            />
-          </CCol>
-        </CRow>
+        {typeFilter ? (
+          <CAlert color="info" className="d-flex justify-content-between align-items-center">
+            <span>
+              Showing only <strong>{typeFilter}</strong>.
+            </span>
+            <CButton size="sm" color="info" variant="outline" onClick={handleClearTypeFilter}>
+              Clear filter
+            </CButton>
+          </CAlert>
+        ) : (
+          <>
+            <CRow className="mb-3 g-2 align-items-center">
+              <CCol xs="auto">
+                <CButtonGroup size="sm">
+                  {KINDS.map((k) => (
+                    <CButton
+                      key={k.value}
+                      color="primary"
+                      variant={kind === k.value ? undefined : 'outline'}
+                      onClick={() => handleKindChange(k.value)}
+                    >
+                      {k.label}
+                    </CButton>
+                  ))}
+                </CButtonGroup>
+              </CCol>
+              <CCol xs="auto">
+                <TableSearchInput
+                  value={search}
+                  onSearch={setSearch}
+                  placeholder={`Search ${kind === 'device' ? 'devices' : kind === 'node' ? 'nodes' : 'processes'} by name or description...`}
+                />
+              </CCol>
+            </CRow>
 
-        {!showingSearch && <Breadcrumb trail={breadcrumb} onNavigate={handleNavigate} />}
+            {!showingSearch && <Breadcrumb trail={breadcrumb} onNavigate={handleNavigate} />}
+          </>
+        )}
 
         {!rows ? (
           <CSpinner size="sm" />

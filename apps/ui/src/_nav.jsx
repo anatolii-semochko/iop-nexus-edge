@@ -15,6 +15,7 @@ import CIcon from '@coreui/icons-react'
 import {
   cilBell,
   cilBug,
+  cilCog,
   cilDescription,
   cilDevices,
   cilHistory,
@@ -66,12 +67,6 @@ const _nav = [
     icon: <CIcon icon={cilBug} customClassName="nav-icon" />,
   },
   {
-    component: CNavItem,
-    name: 'Library',
-    to: '/library',
-    icon: <CIcon icon={cilLibrary} customClassName="nav-icon" />,
-  },
-  {
     component: CNavTitle,
     name: 'Orchestration',
   },
@@ -103,6 +98,17 @@ const _nav = [
   },
   {
     component: CNavItem,
+    name: 'Service',
+    to: '/service',
+    icon: <CIcon icon={cilCog} customClassName="nav-icon" />,
+    // Filtered out for non-admins in AppSidebar.jsx (AGENTS.md section 13) -
+    // the server-side requireAdmin hook on its own routes is the real
+    // guard (same pattern as Users below) - this Commands tab can shut
+    // down or restart the host.
+    adminOnly: true,
+  },
+  {
+    component: CNavItem,
     name: 'Users',
     to: '/users',
     icon: <CIcon icon={cilPeople} customClassName="nav-icon" />,
@@ -110,6 +116,12 @@ const _nav = [
     // the server-side 403 on /users is the real guard, this just avoids
     // showing a link that would fail for most signed-in users.
     adminOnly: true,
+  },
+  {
+    component: CNavItem,
+    name: 'Library',
+    to: '/library',
+    icon: <CIcon icon={cilLibrary} customClassName="nav-icon" />,
   },
   {
     component: CNavItem,

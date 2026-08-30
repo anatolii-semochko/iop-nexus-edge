@@ -86,4 +86,13 @@ export const config = {
   // orchestrator restart" signal, nothing else reaches into orchestrator
   // from this service.
   orchestratorUrl: process.env.ORCHESTRATOR_URL ?? `http://orchestrator:${process.env.ORCHESTRATOR_PORT ?? 3000}`,
+  // Service->Commands (AGENTS_TO_DO.md, 2026-08-30) - host power commands
+  // (systemCommands.ts, routes/service.ts) via a D-Bus systemd-logind call.
+  // Both default false: a fresh checkout, or a target project that hasn't
+  // mounted /run/dbus/system_bus_socket into the api container, must not
+  // show or allow these even though the routes/UI exist unconditionally.
+  service: {
+    shutdownEnabled: process.env.SHUTDOWN_ENABLE === "true",
+    restartEnabled: process.env.RESTART_ENABLE === "true",
+  },
 };

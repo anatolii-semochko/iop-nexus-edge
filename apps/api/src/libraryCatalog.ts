@@ -15,12 +15,17 @@
 // device/node types, just sourced from a third folder; a process kind's
 // library.json is the same {id, name, description} shape). Private
 // plugins/ (a target project's own DNPs, AGENTS.md section 31) mirrors
-// this with its own `plugins/devices/` (kind "device") and
-// `plugins/nodes/` (kind "node") subtrees, added 2026-08-24 once a real
-// consumer needed a fully private node type (not just a private device
-// type) - no private "processes" tree yet, since a process *kind*'s own
-// registration already happens at runtime via `plugins/<name>/process.ts`,
-// not through this design-time catalog.
+// this with its own `plugins/devices/` (kind "device"), `plugins/nodes/`
+// (kind "node"), and `plugins/processes/` (kind "process", added
+// 2026-08-30 once the Type-column deep link - AGENTS_TO_DO.md same date -
+// needed every process kind, not just device/node types, to actually
+// resolve to something) subtrees. `plugins/processes/<kind>/library.json`
+// is deliberately a SEPARATE location from where that kind's own
+// `process.ts` actually lives (`plugins/<kind>/process.ts`, scanned by
+// the orchestrator's own processPlugins.ts) - this tree only ever holds
+// library.json/docs/icon, the same "design-time catalog is independent of
+// runtime registration" split the public `devices/processes/` tree above
+// already has.
 //
 // A folder is either:
 // - a leaf item (`library.json` present) - not recursed into further,
@@ -423,6 +428,7 @@ export async function syncLibrary(): Promise<{ categories: number; items: number
   if (config.apiPlugins.extraDir) {
     await walk(path.join(config.apiPlugins.extraDir, "devices"), "private/devices", "device", null, state);
     await walk(path.join(config.apiPlugins.extraDir, "nodes"), "private/nodes", "node", null, state);
+    await walk(path.join(config.apiPlugins.extraDir, "processes"), "private/processes", "process", null, state);
   }
 
   // Delete rows for folders that no longer exist (moved/renamed/removed

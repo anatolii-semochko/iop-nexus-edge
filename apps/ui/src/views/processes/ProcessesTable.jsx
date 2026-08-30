@@ -23,6 +23,7 @@ import RowStatusBadge from '../../components/table/RowStatusBadge'
 import Switch from '../../components/Switch'
 import ExpandAllToggleButton from '../../components/table/ExpandAllToggleButton'
 import ExpandToggleButton from '../../components/table/ExpandToggleButton'
+import LibraryTypeLink from '../../components/table/LibraryTypeLink'
 import TablePagination from '../../components/table/TablePagination'
 import TableSearchInput from '../../components/table/TableSearchInput'
 import { useExpandableRows } from '../../hooks/useExpandableRows'
@@ -192,6 +193,9 @@ const ProcessRow = ({
         )}
         <CTableDataCell className={noBorderWhenExpanded}>{process.name}</CTableDataCell>
         <CTableDataCell className={noBorderWhenExpanded}>{process.group_name}</CTableDataCell>
+        <CTableDataCell className={noBorderWhenExpanded}>
+          <LibraryTypeLink kind="process" typeName={process.kind} />
+        </CTableDataCell>
         <CTableDataCell className={`text-end ${noBorderWhenExpanded ?? ''}`}>
           {/* Single row, right-aligned, left-to-right: on/off, settings,
               remove-from-dashboard, expand toggle - i.e. right-to-left
@@ -247,7 +251,7 @@ const ProcessRow = ({
       </CTableRow>
       {expanded && Panel && (
         <CTableRow color={effectiveRowColor}>
-          <CTableDataCell colSpan={showPower ? 5 : 4} className="p-0">
+          <CTableDataCell colSpan={showPower ? 6 : 5} className="p-0">
             <Panel process={process} onConfigChange={onReload} />
             <WemRow messages={messages} />
           </CTableDataCell>
@@ -463,6 +467,7 @@ const ProcessesTable = ({
                 {showPower && <CTableHeaderCell scope="col">Power</CTableHeaderCell>}
                 <CTableHeaderCell scope="col">Name</CTableHeaderCell>
                 <CTableHeaderCell scope="col">Group</CTableHeaderCell>
+                <CTableHeaderCell scope="col">Type</CTableHeaderCell>
                 <CTableHeaderCell scope="col" className="text-end">
                   <div className="d-flex justify-content-end align-items-center gap-2">
                     <span>Actions</span>

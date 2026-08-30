@@ -126,6 +126,48 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
     return getLibraryItemDetail(rows[0].folder_path, rows[0].kind, rows[0].type_name);
   });
 
+  // Type-column deep link (AGENTS_TO_DO.md, 2026-08-30) - resolves a
+  // Node/Device/Process row's own type/kind column (type_name in Library
+  // terms) straight to its Library item, for the "link" cell opened in a
+  // new tab from DevicesList/NodesList/ProcessesTable. Same row shape as
+  // /library/browse's own item rows (plus breadcrumb) so LibraryBrowser.jsx
+  // can render it without a second round trip - unlike /location, which
+  // only resolves an id to a place to browse, this resolves a (kind,
+  // typeName) pair straight to the item itself since the caller never had
+  // a library_items.id to begin with, only the type name shown in the row.
+  app.get<{ Querystring: { kind: Kind; typeName?: string } }>("/library/items/by-type", async (request, reply) => {
+    const { kind, typeName } = request.query;
+    if (kind !== "device" && kind !== "node" && kind !== "process") {
+      return reply.code(400).send({ error: "kind must be 'device', 'node', or 'process'" });
+    }
+    if (!typeName) return reply.code(400).send({ error: "typeName is required" });
+
+    const [used, { rows }] = await Promise.all([
+      usedTypeNames(kind),
+      pool.query<ItemRow>(
+        `SELECT id, category_id, kind, name, description, icon_path, type_name, supports FROM library_items
+         WHERE kind = $1 AND type_name = $2 LIMIT 1`,
+        [kind, typeName],
+      ),
+    ]);
+    if (!rows[0]) return reply.code(404).send({ error: "not found" });
+    const item = rows[0];
+
+    return {
+      breadcrumb: await breadcrumbFor(item.category_id),
+      item: {
+        type: "item" as const,
+        id: item.id,
+        name: item.name,
+        description: item.description,
+        iconPath: item.icon_path,
+        typeName: item.type_name,
+        supports: item.supports,
+        usedInProject: used.has(item.type_name),
+      },
+    };
+  });
+
   // Cross-item doc-link navigation (AGENTS_TO_DO.md, 2026-08-27 markdown-
   // viewer follow-up) - the Documentation tab's `library-item://<id>`
   // links (rewritten server-side by libraryCatalog.ts's own

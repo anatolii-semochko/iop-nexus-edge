@@ -32,6 +32,7 @@ import ResetFiltersButton from '../../components/ResetFiltersButton'
 import Switch from '../../components/Switch'
 import ExpandAllToggleButton from '../../components/table/ExpandAllToggleButton'
 import ExpandToggleButton from '../../components/table/ExpandToggleButton'
+import LibraryTypeLink from '../../components/table/LibraryTypeLink'
 import { useExpandableRows } from '../../hooks/useExpandableRows'
 import { useNow } from '../../hooks/useNow'
 import { usePagination } from '../../hooks/usePagination'
@@ -595,7 +596,9 @@ const DeviceRow = ({
         </CTableDataCell>
         <CTableDataCell className={noBorderWhenExpanded}>{device.name}</CTableDataCell>
         <CTableDataCell className={noBorderWhenExpanded}>{device.node_name ?? '-'}</CTableDataCell>
-        <CTableDataCell className={noBorderWhenExpanded}>{device.type}</CTableDataCell>
+        <CTableDataCell className={noBorderWhenExpanded}>
+          <LibraryTypeLink kind="device" typeName={device.type} />
+        </CTableDataCell>
         <CTableDataCell className={`text-end ${noBorderWhenExpanded ?? ''}`}>
           <div className="d-flex justify-content-end align-items-center gap-1 flex-nowrap">
             <IconButton

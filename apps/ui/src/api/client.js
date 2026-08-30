@@ -302,6 +302,12 @@ export const api = {
   // LibraryBrowser.jsx to re-navigate to a `library-item://` link's
   // target before expanding it.
   getLibraryItemLocation: (id) => request(`/library/items/${encodeURIComponent(id)}/location`),
+  // Type-column deep link (see routes/library.ts's own comment) - resolves
+  // a (kind, typeName) pair straight to its Library item + breadcrumb.
+  getLibraryItemByType: (kind, typeName) =>
+    request(
+      `/library/items/by-type?kind=${encodeURIComponent(kind)}&typeName=${encodeURIComponent(typeName)}`,
+    ),
   // Auth (AGENTS.md section 13 - UI login only, not per-endpoint API
   // authorization).
   login: (username, password) =>
@@ -321,4 +327,7 @@ export const api = {
     return request(`/users/${id}/avatar`, { method: 'POST', body: formData })
   },
   deleteAvatar: (id) => request(`/users/${id}/avatar`, { method: 'DELETE' }),
+  // Service->Commands (admin-only server-side - see apps/api/src/routes/service.ts).
+  listSystemCommands: () => request('/service/commands'),
+  runSystemCommand: (id) => request(`/service/commands/${id}/run`, { method: 'POST' }),
 }

@@ -73,6 +73,16 @@ services:
       dockerfile: apps/api/Dockerfile
     container_name: nexus-edge-api
     restart: unless-stopped
+    # Service->Commands (AGENTS_TO_DO.md, 2026-08-30) - Docker's own
+    # default AppArmor profile ("docker-default") blocks a container from
+    # sending ANY D-Bus method call, even a harmless read-only query,
+    # regardless of the /run/dbus/system_bus_socket mount below (confirmed
+    # live via dmesg: apparmor="DENIED" operation="dbus_method_call"
+    # label="docker-default"). Same tradeoff Home Assistant's own
+    # Supervisor container accepts for the identical reason - this
+    # container loses AppArmor confinement entirely, not just for D-Bus.
+    security_opt:
+      - apparmor:unconfined
     env_file: .env
     # Live-debugged 2026-08-14 (process management's registered-kinds
     # proxy, routes/processes.ts): Node's default libuv threadpool (4
@@ -98,6 +108,14 @@ services:
       - "${API_PORT}:${API_PORT}"
     volumes:
       - api-avatars:${AVATAR_UPLOAD_DIR}
+      # Service->Commands (AGENTS_TO_DO.md, 2026-08-30) - lets systemCommands.ts
+      # call org.freedesktop.login1 (systemd-logind) on the HOST bus to
+      # power off/reboot the actual machine this stack runs on. Harmless
+      # to mount even with SHUTDOWN_ENABLE/RESTART_ENABLE both false (the
+      # route stays 403'd) - only omit this on a host with no D-Bus system
+      # bus (rare; the mount then just fails to appear and the route's own
+      # connect-time check reports the commands unavailable).
+      - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
     networks:
       - nexus-edge-network
 

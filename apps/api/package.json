@@ -25,6 +25,7 @@
     "amqp-connection-manager": "^4.1.15",
     "amqplib": "^0.10.9",
     "bcryptjs": "^2.4.3",
+    "dbus-next": "^0.10.2",
     "fastify": "^5.2.0",
     "ioredis": "^5.11.1",
     "node-pg-migrate": "^9.0.0",

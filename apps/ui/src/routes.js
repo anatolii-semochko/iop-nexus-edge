@@ -36,6 +36,9 @@ const LogsList = React.lazy(() => import('./views/logs/LogsList'))
 // Users
 const UsersList = React.lazy(() => import('./views/users/UsersList'))
 
+// Service
+const Service = React.lazy(() => import('./views/service/Service'))
+
 /**
  * Array of route configuration objects
  *
@@ -65,6 +68,7 @@ export const routes = [
   { path: '/live-events', name: 'Live Events', element: LiveEvents },
   { path: '/logs', name: 'Logs', element: LogsList },
   { path: '/users', name: 'Users', element: UsersList },
+  { path: '/service', name: 'Service', element: Service },
 ]
 
 export default routes

@@ -24,6 +24,7 @@ import Switch from '../../components/Switch'
 import ResetFiltersButton from '../../components/ResetFiltersButton'
 import ExpandAllToggleButton from '../../components/table/ExpandAllToggleButton'
 import ExpandToggleButton from '../../components/table/ExpandToggleButton'
+import LibraryTypeLink from '../../components/table/LibraryTypeLink'
 import TablePagination from '../../components/table/TablePagination'
 import TableSearchInput from '../../components/table/TableSearchInput'
 import { useExpandableRows } from '../../hooks/useExpandableRows'
@@ -326,7 +327,7 @@ const NodesList = () => {
                               {node.location ?? '-'}
                             </CTableDataCell>
                             <CTableDataCell className={noBorderWhenExpanded}>
-                              {node.type}
+                              <LibraryTypeLink kind="node" typeName={node.type} />
                             </CTableDataCell>
                             <CTableDataCell className={noBorderWhenExpanded}>
                               {formatRelativeTime(node.last_heartbeat_at)}
