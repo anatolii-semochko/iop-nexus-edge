@@ -34,10 +34,19 @@ const TABS = [
 
 const PLACEHOLDER_TABS = new Set(['config'])
 
+// Table-grid layout (row/col-3/col-8, AGENTS_TO_DO.md 2026-08-30) - same
+// pattern as DatabaseTab.jsx's own action rows: every button is exactly
+// col-3 wide (w-100) regardless of label length, so Shutdown/Restart line
+// up identically instead of each sizing to its own text. The "disabled"
+// badge moved into the description column (prefixing the text) rather
+// than sitting next to the button - keeping it in col-3 would have made
+// the button narrower on rows that have a badge than rows that don't,
+// breaking the "all buttons the same width" ask.
 const CommandRow = ({ command, onRun }) => (
-  <div className="d-flex align-items-center justify-content-between py-2 border-bottom">
-    <div>
+  <div className="row pb-3 align-items-center">
+    <div className="col-3">
       <CButton
+        className="w-100"
         color={command.enabled ? 'danger' : 'secondary'}
         variant="outline"
         disabled={!command.enabled}
@@ -45,13 +54,15 @@ const CommandRow = ({ command, onRun }) => (
       >
         {command.label}
       </CButton>
+    </div>
+    <div className="col-8 text-body-secondary small">
       {!command.enabled && (
-        <CBadge color="secondary" className="ms-2">
+        <CBadge color="secondary" className="me-4">
           disabled
         </CBadge>
       )}
+      {command.description}
     </div>
-    <div className="text-body-secondary small text-end ms-3">{command.description}</div>
   </div>
 )
 
