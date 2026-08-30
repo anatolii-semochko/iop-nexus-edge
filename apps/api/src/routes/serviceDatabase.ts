@@ -5,6 +5,7 @@ import { requireAdmin } from "../auth.js";
 import { logCommand } from "../commandLog.js";
 import { config } from "../config.js";
 import { pool } from "../db.js";
+import { broadcastForced } from "../processBroadcast.js";
 import {
   applyStampDump,
   buildLogsDump,
@@ -186,6 +187,13 @@ export async function serviceDatabaseRoutes(app: FastifyInstance): Promise<void>
       source: "service-database",
       actorUserId: request.user.sub,
     });
+    // clearLogTables() already resynced the Redis unread counters - this
+    // pushes that fresh state to every connected client right away rather
+    // than waiting up to PROCESS_STATE_BROADCAST_INTERVAL_MS (5s) for the
+    // next periodic tick, same "user asked for this specific broadcast"
+    // pattern routes/processes.ts's own action/forced-broadcast/dashboard-
+    // flag-cleared routes already use.
+    await broadcastForced("clear-logs");
     return reply.code(204).send();
   });
 }
