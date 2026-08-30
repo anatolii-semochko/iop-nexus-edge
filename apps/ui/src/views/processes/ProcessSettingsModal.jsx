@@ -261,7 +261,26 @@ const ProcessSettingsModal = ({ visible, onClose, process, tabGroups, messageGro
             </div>
           </>
         )}
-        {visible && process && !settingsTabs && (
+        {visible && process && !settingsTabs && isSimulation && (
+          // Side by side (AGENTS_TO_DO.md, 2026-08-30) - Message Casting
+          // Groups left, the kind's own config form right. Scoped to
+          // `isSimulation` specifically, not every non-tabbed ExtraSection
+          // kind (e.g. WeatherZonesSection/AnnunciatorSlotsSection) - those
+          // still stack top-to-bottom as before, unaffected.
+          <CRow>
+            <CCol md={6}>{groupSections}</CCol>
+            <CCol md={6}>
+              {ExtraSection && (
+                <ExtraSection
+                  process={process}
+                  groups={messageGroups}
+                  extraConfigRef={extraConfigRef}
+                />
+              )}
+            </CCol>
+          </CRow>
+        )}
+        {visible && process && !settingsTabs && !isSimulation && (
           <>
             {groupSections}
             {ExtraSection && (

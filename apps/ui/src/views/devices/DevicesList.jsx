@@ -45,7 +45,7 @@ import { useNodesLiveState } from '../../api/useLiveNode'
 import RowStatusBadge from '../../components/table/RowStatusBadge'
 import TablePagination from '../../components/table/TablePagination'
 import TableSearchInput from '../../components/table/TableSearchInput'
-import { formatRelativeTime } from '../../utils/format'
+import { formatRelativeTime, formatSmartDateTime } from '../../utils/format'
 import DeviceSettingsModal from './DeviceSettingsModal'
 import NumericStepper from './NumericStepper'
 
@@ -165,10 +165,6 @@ const formatFieldValue = (value) => {
   }
   return String(value)
 }
-
-// Accepts either an epoch-ms number (readingOrigin) or an ISO string
-// (created_at/updated_at) - both are already Date-constructible as-is.
-const formatDate = (value) => (value ? new Date(value).toLocaleString() : undefined)
 
 // Borderless label/value table, one per side of the expand row (below).
 // Was a flexbox item with a fixed `flex: '0 1 420px'` basis (2026-08-15,
@@ -312,6 +308,8 @@ const DeviceValueEditor = ({ device, value, mode, onWrite, onSimulate, onRelease
           <NumericStepper
             value={value}
             step={device.capabilities?.step ?? (/^u?int/i.test(device.valueType ?? '') ? 1 : 0.5)}
+            min={device.capabilities?.min}
+            max={device.capabilities?.max}
             editable
             busy={busy}
             onCommit={(next) => (readOnly ? handleSimulate(next) : handleWrite(next))}
@@ -341,6 +339,7 @@ const ValueTab = ({
   valueAuto,
   valueManual,
   expiresAt,
+  effectivelySimulated,
   onWrite,
   onSimulate,
   onRelease,
@@ -371,7 +370,14 @@ const ValueTab = ({
         { label: 'Expires', value: expiresAt ? formatRelativeTime(expiresAt) : undefined },
       ]}
     />
-    {device.backend === 'virtual' && (
+    {/* A readOnly device's Override only makes sense while it's actually
+        simulated - it writes straight through EdgeX (routes/devices.ts's
+        own PUT .../simulate), and a physical sensor can never really be
+        "overridden" (AGENTS_TO_DO.md, 2026-08-30: "фізично ми на нього
+        впливати не можемо"). A writable device's Override is a real
+        production MANUAL-mode control regardless of simulated state, so
+        stays unconditional here (backend === 'virtual' only, as before). */}
+    {device.backend === 'virtual' && (!device.capabilities?.readOnly || effectivelySimulated) && (
       <DeviceValueEditor
         device={device}
         value={value}
@@ -405,8 +411,8 @@ const InfoTab = ({ device }) => (
         { label: 'Type', value: device.type },
         { label: 'Node', value: device.node_name },
         { label: 'Backend', value: device.backend },
-        { label: 'Created', value: formatDate(device.created_at) },
-        { label: 'Updated', value: formatDate(device.updated_at) },
+        { label: 'Created', value: formatSmartDateTime(device.created_at) },
+        { label: 'Updated', value: formatSmartDateTime(device.updated_at) },
       ]}
     />
     <KeyValueTable
@@ -443,6 +449,7 @@ const DeviceDetailRow = ({
   valueAuto,
   valueManual,
   expiresAt,
+  effectivelySimulated,
   onWrite,
   onSimulate,
   onRelease,
@@ -468,6 +475,7 @@ const DeviceDetailRow = ({
           valueAuto={valueAuto}
           valueManual={valueManual}
           expiresAt={expiresAt}
+          effectivelySimulated={effectivelySimulated}
           onWrite={onWrite}
           onSimulate={onSimulate}
           onRelease={onRelease}
@@ -628,6 +636,7 @@ const DeviceRow = ({
               valueAuto={valueAuto}
               valueManual={valueManual}
               expiresAt={expiresAt}
+              effectivelySimulated={effectivelySimulated}
               onWrite={onWriteValue}
               onSimulate={onSimulateValue}
               onRelease={onReleaseValue}
