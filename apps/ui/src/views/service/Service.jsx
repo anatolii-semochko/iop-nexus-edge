@@ -14,6 +14,10 @@ import {
   CSpinner,
   CTab,
   CTabList,
+  CTable,
+  CTableBody,
+  CTableDataCell,
+  CTableRow,
   CTabs,
 } from '@coreui/react'
 import { api } from '../../api/client'
@@ -34,19 +38,22 @@ const TABS = [
 
 const PLACEHOLDER_TABS = new Set(['config'])
 
-// Table-grid layout (row/col-3/col-8, AGENTS_TO_DO.md 2026-08-30) - same
-// pattern as DatabaseTab.jsx's own action rows: every button is exactly
-// col-3 wide (w-100) regardless of label length, so Shutdown/Restart line
-// up identically instead of each sizing to its own text. The "disabled"
-// badge moved into the description column (prefixing the text) rather
-// than sitting next to the button - keeping it in col-3 would have made
-// the button narrower on rows that have a badge than rows that don't,
-// breaking the "all buttons the same width" ask.
+// A real <table> (AGENTS_TO_DO.md, 2026-08-30 correction: the earlier
+// row/col-3/col-8 grid pinned the button column to a fixed 25% of the
+// container regardless of what the labels actually needed - "Shutdown"/
+// "Restart" ended up disproportionately wide with dead space, not sized
+// to their own content) - a table's own column-width behavior sizes the
+// button column to its widest cell and every row shares that width, so
+// buttons come out consistently sized without a hardcoded fraction. The
+// "disabled" badge stays in the description cell (prefixing the text)
+// rather than the button cell - keeping it there would make the button
+// column's own auto-width fight between rows that have a badge and rows
+// that don't.
 const CommandRow = ({ command, onRun }) => (
-  <div className="row pb-3 align-items-center">
-    <div className="col-3">
+  <CTableRow>
+    <CTableDataCell>
       <CButton
-        className="w-100"
+        className={'w-100'}
         color={command.enabled ? 'danger' : 'secondary'}
         variant="outline"
         disabled={!command.enabled}
@@ -54,16 +61,16 @@ const CommandRow = ({ command, onRun }) => (
       >
         {command.label}
       </CButton>
-    </div>
-    <div className="col-8 text-body-secondary small">
+    </CTableDataCell>
+    <CTableDataCell className="text-body-secondary small align-middle w-100">
       {!command.enabled && (
-        <CBadge color="secondary" className="me-4">
+        <CBadge color="secondary" className="me-3">
           disabled
         </CBadge>
       )}
       {command.description}
-    </div>
-  </div>
+    </CTableDataCell>
+  </CTableRow>
 )
 
 const CommandsTab = () => {
@@ -114,9 +121,13 @@ const CommandsTab = () => {
             : `${result.label} command failed: ${result.message}`}
         </CAlert>
       )}
-      {commands.map((command) => (
-        <CommandRow key={command.id} command={command} onRun={setPending} />
-      ))}
+      <CTable borderless>
+        <CTableBody>
+          {commands.map((command) => (
+            <CommandRow key={command.id} command={command} onRun={setPending} />
+          ))}
+        </CTableBody>
+      </CTable>
 
       <CModal visible={pending !== null} onClose={() => setPending(null)}>
         <CModalHeader>
