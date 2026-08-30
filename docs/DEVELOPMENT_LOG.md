@@ -393,3 +393,57 @@ verify against: working `eslint.config.*` for the three backend services
 just silenced), the first real test file in the repo
 (`alarmPolicy.test.ts`), and a GitHub Actions CI workflow, verified to
 actually pass end-to-end before being considered done.
+
+## 2026-08-29 to 2026-08-30 - Simulation processes, and a new admin Service page
+
+A large amount of intervening work (target-project extensibility,
+Control Node/Weather Node hardware bring-up, the Aquarium Light Control
+domain, UI/live-push redesigns) is chronicled in
+`../AGENTS_TO_DO.md`'s own linked `archive-development/AGENTS_DEV_*.md`
+files rather than distilled here - this entry picks back up with the
+two features `AGENTS.md` sections 72-76 now document in full.
+
+**Simulation processes** - a third `processes.type` (alongside
+controllable/permanent) that generates a plausible value for a readOnly
+device over time instead of reading real hardware, built as the
+smallest possible extension of the existing schema (no new table, no
+new Redis keys - `status`, `device_id`/`node_id`, and `config` already
+covered everything needed). The interesting design problem turned out
+not to be the ramping logic itself but the control model around it: an
+operator's own ON/OFF switch and the target device's own simulated-mode
+flag are two genuinely independent gates, and an early draft that
+auto-flipped a simulation process's status whenever a node's simulated
+flag changed caused it to silently override an operator's own explicit
+OFF the next time anything touched that flag. The fix was to remove
+every auto-activation path entirely - the switch is now the *only*
+writer of a simulation process's status, full stop - which also
+resolved a related "why does the panel keep flickering" bug in the
+unrelated live-device WebSocket merge it happened to be stress-testing
+for the first time.
+
+**Service->Database** followed the same "verify by actually doing the
+destructive thing safely" discipline that's shaped this log before:
+rather than trust a config-restore endpoint's own `{ok: true}`
+response, the actual test was applying a saved snapshot back onto
+itself (identical data, so before/after row counts and sequence values
+can be diffed with zero real risk) - which is exactly what caught three
+bugs that a shallower test would have shipped silently: a jsonb column
+storing a JSON array got mis-serialized as a Postgres array literal by
+the driver's own default parameter handling, restoring a snapshot never
+advanced the Postgres sequences those rows' own ids came from (so the
+very next normal insert would have collided with existing data), and a
+database-level CHECK constraint - completely separate from the
+TypeScript type that was actually widened - silently rejected the new
+audit-log entries this same feature was supposed to write. None of the
+three were reachable by unit-testing the restore logic in isolation;
+all three needed a real Postgres instance and a real round trip.
+
+**Host Shutdown/Restart**, added alongside, needed two infrastructure
+decisions neither party had reason to expect going in: the API
+container has no path to the real host by default (fixed with a D-Bus
+socket mount to `systemd-logind`, not a raw `shutdown` command that
+would only ever reach the container's own PID namespace), and Docker's
+own default AppArmor profile turned out to block that socket mount from
+working at all, requiring an explicit, consciously-made tradeoff
+(`apparmor:unconfined` on that one container) rather than a silent
+workaround.

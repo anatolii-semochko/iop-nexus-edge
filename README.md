@@ -65,6 +65,17 @@ end-to-end today, verified live in a running container stack (see
   EdgeX device profile, safety rules, and both a production and a
   dev-simulator UI component, the convention every device type since
   has followed.
+- **Simulation processes** — a third process type that generates a
+  plausible value for a readOnly device over time (e.g. ramping a
+  simulated sensor toward its target), gated behind two independent
+  switches (an operator's own ON/OFF plus the target device's own
+  simulated-mode flag) so a simulation can never run against what looks
+  like live hardware.
+- **Admin Service page** — System Stamps (snapshot/restore the whole
+  device/node/process/user configuration as a file, with a
+  compatibility check before ever applying one), log download/clear,
+  and host Shutdown/Restart over D-Bus (`systemd-logind`), all
+  admin-gated and env-flagged off by default.
 
 Deliberately **not** done yet, and documented as such rather than left
 quiet: per-endpoint API authorization (today only the UI login and the

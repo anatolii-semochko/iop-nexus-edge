@@ -6692,3 +6692,284 @@ none of this had ever been exercised by a real file before**:
   resolution problem here, since `process.ts` already received
   `apiClient` as a function argument rather than importing it (the
   precedent the two fixes above both cite).
+
+## 72. Simulation processes (`processes.type = 'simulation'`) - a third process type alongside controllable/permanent
+
+2026-08-29. A process kind that generates a plausible value for a
+readOnly device over time (e.g. ramping a simulated actual power toward
+its target, PT4115 soft-start style) rather than reading real hardware.
+Scoped as a third `processes.type` CHECK value, not a new table - the
+existing `status` (Redis, `processRegistry.setStatus/getStatus`,
+already used by Active Buzzer/Alarm Annunciator), `device_id`/`node_id`
+(nullable FKs, either covers the "one process per device" and "one
+process serving several devices on one node" cases - `config.channels`,
+same array-of-target/actual-pairs shape `aquarium-light-control`'s own
+`mainChannels` already established), and `config` jsonb were already
+everything a simulation process needed. `routes/processes.ts`'s
+`withLiveState()` (the `GET /processes` live-status read, already
+covering `type === "controllable"`) was widened to include
+`"simulation"` too, so a simulation process's on/off reaches the
+orchestrator through the exact same per-tick `GET /processes` poll the
+tick loop already does for every other kind.
+
+**Two independent gates, both required, before a simulation process's
+runner does any work** - found live as a real gap, not a design
+choice: an operator's own ON/OFF switch (`process.status`, written
+*exclusively* via `POST /processes/:id/action`) is NOT enough on its
+own, because it kept ramping even while the target node/device's own
+"simulated" flag was off. `apps/api/src/simulationTarget.ts`'s
+`isSimulationTargetSimulated()` computes the second gate fresh on every
+`GET /processes` and every live broadcast (`processBroadcast.ts`'s
+`assembleSnapshot()`) - a simulation process's own runner (the
+`process.ts` plugin, via `apiClient`) must see BOTH `status === "on"`
+AND `simulationTargetSimulated` before writing anything; either one
+false means sleep. These two toggles are deliberately kept as two
+separate concepts sharing no code path: the operator switch never
+auto-flips (an earlier draft had `PATCH /nodes/:id/simulated`
+unconditionally re-syncing every attached simulation process's status
+on every call, including no-op PATCHes with an unchanged value - fixed
+by only syncing on a real transition), and a node/device's own
+`simulated` toggle never reads or writes `process.status` at all.
+
+**UI status label - four states, not the generic OK/Warning/Error a
+controllable/permanent process shows**: Off (operator switch is off -
+the row's label AND background color deliberately do not react to
+`critical`/`warning` at all, even a stale one from before the switch
+was flipped off - `ProcessesTable.jsx`'s `overrideRowColor` prop, only
+supplied by the Simulator page), Sleep (on, but
+`simulationTargetSimulated` is false), Active (on and target is
+simulated), Error/Warning (as usual, `critical`/`warning` flags win
+over Sleep/Active exactly like they do everywhere else).
+`RowStatusBadge`'s new optional `defaultLabel` prop only overrides the
+"OK" fallback - it never touches the danger/warning label lookup, so
+the plain Processes page keeps its own "OK"/"Error" unchanged. The
+Simulator page (renamed from the old Dev Simulator, `Simulator.jsx`)
+also hides the redundant raw ON/OFF badge entirely (`showPower={false}`
+prop) since its own status column already folds that into the four
+labels above.
+
+**Error casting** - a simulation process is still just a process: if
+what it depends on goes wrong (a target/actual device deleted, EdgeX
+unreachable, a target value outside the target device's own
+`capabilities.min/max`), it casts an error through the exact same
+`setCritical`/`syncMessages` pair every other process kind's own
+health check already uses - row background, a WemRow message, casting
+into whatever Message Casting Groups it's a member of, all for free.
+The range check deliberately reads the target device's OWN
+`capabilities.min/max` (`devices.capabilities`, already fetched via the
+normal `apiClient.getDevice()` call) rather than a redundant separate
+config field, so the same check works for any future simulation kind
+driven off a target device with its own min/max, not just this one.
+
+**Settings popup** - a `type: 'simulation'` process's own
+`ProcessSettingsModal.jsx` drops the generic Tabs section entirely (the
+`isSimulation` guard covers both the render AND `handleSave`, so Save
+doesn't wipe out nonexistent Tab Group membership) but keeps Message
+Casting Groups, laid out side-by-side (`CRow`/`CCol`) with a kind-
+specific config form on the right - `aquarium-light-simulation`'s own
+`AquariumLightSimulationSettingsSection.jsx` exposes only its ramp
+rate; the channel target/actual device-id pairs are deliberately NOT
+editable there (they're already visible with live values on the
+Simulator panel - making them a raw editable id list would just invite
+misconfiguration).
+
+## 73. Settings reorg: new `/service` page, Library moved out of Devices
+
+2026-08-30. Library Catalog moved from the DEVICES nav group into a
+new SETTINGS group (`_nav.jsx`), which now reads Service, Users,
+Library, Docs in that order. `Service` (`/service`, admin-only -
+`adminOnly: true` in `_nav.jsx`, `requireAdmin` on every `/service/*`
+API route, same pattern `routes/users.ts` already established) is a
+new tabbed page (`apps/ui/src/views/service/Service.jsx`) - Config
+(placeholder, "буде розширюватися"), Database (section 76 below),
+Commands (section 75 below). The page remembers its own last-open tab
+(`usePersistedState`, cookie `nexusedge.servicePage`) - falls back to
+the first tab in the list on a fresh visit or if the saved key no
+longer matches any tab, rather than hardcoding a default.
+
+## 74. Type-column Library deep links, private `plugins/processes/` tree
+
+2026-08-30. Every Nodes/Devices/Processes list row's own "type"/"kind"
+column is now a link (`LibraryTypeLink.jsx` - plain blue, no
+underline, literal text "link", `title` = the real type name) that
+opens `#/library?kind=X&type=Y` in a new tab, filtered down to just
+that one Library item. Processes previously had no Type column at all
+(`process.kind`, not `processes.type` - a different, unrelated concept
+with no Library correspondence) - added as a new last-column-before-
+Actions, matching Devices/Nodes' own existing convention.
+
+Backend: `GET /library/items/by-type?kind&typeName` (`routes/
+library.ts`) resolves a (kind, typeName) pair straight to its Library
+item + breadcrumb - the existing `/library/items/:id/location` only
+resolves an id (which a Type-column click never has) to a place to
+browse. Frontend: `LibraryBrowser.jsx` gained a "single-item filter"
+mode driven by the URL's own `kind`/`type` query params (read once on
+mount) - a banner ("Showing only X" + Clear filter) replaces the normal
+category browser entirely while filtered, distinct from the pre-
+existing `handleNavigateToItem` (a `library-item://` doc link) which
+scrolls to an item within its full category listing instead of hiding
+everything else.
+
+**Private process kinds had never had a Library entry at all** - found
+live the moment this feature's own by-type lookup 404'd for a private
+target project's own custom process kinds. `libraryCatalog.ts`'s
+private-plugin scan only ever walked `plugins/devices/` and
+`plugins/nodes/` (its own header comment used to say "no private
+processes tree yet, since a process kind's own registration already
+happens at runtime via `plugins/<name>/process.ts`, not through this
+design-time catalog" - true, but meant the Library Catalog simply had
+nothing to resolve a private process kind to). Fixed generically, not
+per-project: `syncLibrary()` now also walks `extraDir/processes` (kind
+`"process"`) - deliberately a SEPARATE location from where a kind's own
+`process.ts` actually lives, the same "design-time catalog independent
+of runtime registration" split the public `devices/processes/` tree
+already has. A target project adds one `plugins/processes/<kind>/
+library.json` per private process kind it wants resolvable; nothing
+else about how that kind's `process.ts` is loaded changes.
+
+## 75. Service->Commands: host Shutdown/Restart via D-Bus/systemd-logind
+
+2026-08-30. `apps/api/src/systemCommands.ts` + `routes/service.ts`
+(`GET /service/commands`, `POST /service/commands/:id/run`, both
+`requireAdmin`) - calls `org.freedesktop.login1.Manager`'s
+`PowerOff`/`Reboot` over D-Bus (`dbus-next`), not
+`child_process.exec('shutdown -h now')`, which would at most affect the
+container's own PID namespace, never the real host machine it runs on.
+Gated behind `SHUTDOWN_ENABLE`/`RESTART_ENABLE` (both default `false`)
+- the route and UI exist unconditionally on every deployment, but stay
+403'd/disabled until an operator opts in on a deployment where powering
+off the host is actually intended (a Raspberry Pi, not a shared dev
+box). The UI (`Service.jsx`'s `CommandsTab`) renders its command rows
+as a real `<CTable>`, not a fixed-fraction Bootstrap grid (`row`/
+`col-3`) - a table's own column-width behavior sizes the button column
+to its widest cell and every row shares that width, so "Shutdown"/
+"Restart" come out consistently sized without hardcoding a guessed
+fraction of the container.
+
+**Two infrastructure gaps found live, neither in the original plan**:
+
+1. The `api` container has zero host-level privileges by default
+   (confirmed by grepping `docker-compose.yml` for `privileged`,
+   `pid:`, `cap_add` - all absent) - a bind mount of
+   `/run/dbus/system_bus_socket:/run/dbus/system_bus_socket` (read-
+   write) into the container is the chosen mechanism, avoiding
+   `--privileged`/`pid: host` entirely, the same general approach Home
+   Assistant's own Supervisor uses.
+2. The socket mount alone was NOT sufficient - Docker's own default
+   AppArmor profile (`docker-default`, applied to every container on a
+   host unless overridden) blocks a container from sending ANY D-Bus
+   method call at all, even a harmless read-only one (confirmed via the
+   kernel audit log: `apparmor="DENIED" operation="dbus_method_call"
+   ... label="docker-default"`). Fixed with `security_opt:
+   [apparmor:unconfined]` on the `api` service in both `docker-
+   compose.yml` files - the same tradeoff Home Assistant's Supervisor
+   container accepts for the identical reason. This container loses
+   AppArmor confinement entirely, not just for D-Bus - a real security
+   posture change, done only after the user explicitly chose it over
+   two other options.
+
+Verified without ever calling a real `PowerOff`/`Reboot`: `CanPowerOff`/
+`CanReboot` (read-only D-Bus queries logind exposes for exactly this
+kind of dry-run check) returned `yes` once both fixes above landed,
+proving the whole chain works; `SHUTDOWN_ENABLE`/`RESTART_ENABLE`
+stayed `false` throughout, so `GET /service/commands` reports both
+commands disabled and `POST .../run` 403s regardless.
+
+## 76. Service->Database: System Stamps (config backup/restore) and Logs management
+
+2026-08-30. `apps/api/src/systemStamps.ts` + `routes/serviceDatabase.ts`
+(all `requireAdmin`) split the schema into two buckets: 15 "config"
+tables (`devices`, `nodes`, `processes`, `users`, every `*_groups`
+table, `message_*`, `light_templates` - `CONFIG_TABLES`, kept in a
+topological/FK-safe order for INSERT after TRUNCATE) and 3 "logs"
+tables (`log_command`/`log_device`/`log_messages` -
+`LOG_TABLES`), managed independently. `library_categories`/
+`library_items` (re-derived from disk on every Library sync - restoring
+stale rows would fight the live sync) and `pgmigrations` (schema-
+version bookkeeping) are outside both buckets on purpose.
+
+**A "System Stamp"** is a JSON snapshot of every config table,
+deliberately saved as a plain file (`config.systemStamps.dir`, a new
+`api-system-stamps` Docker volume mirroring the existing `api-avatars`
+pattern) rather than a row in the very database it snapshots. Each
+dump embeds `projectName` (`config.postgres.database`) and the full
+list of currently-applied migration names - `applyStampDump()` rejects
+(409, `StampCompatibilityError`) a stamp from a different project or a
+schema that doesn't exactly match, before touching any data ("the
+compatibility check" the feature was built to have). It also validates
+every dumped row's own column names against `information_schema` for
+the actual table - the real defense against a crafted/malformed
+uploaded dump reaching raw SQL as an interpolated column list, not just
+a stricter compatibility check.
+
+Five top-level actions (`DatabaseTab.jsx`, rendered as a real `<CTable>`
+donut chart hand-rolled in SVG - no new chart-library dependency - on
+the left, height-matched to the action table via a `CRow`'s own default
+`align-items: stretch`): **Save State** (snapshot now, persisted as a
+file, appears in the CRUD list below), **Download State** (an ad-hoc
+snapshot streamed straight to the client via `Content-Disposition:
+attachment`, never written to disk server-side), **Upload State**
+(pick a file, validate, apply directly), **Download Logs** (the same
+ad-hoc-download shape as Download State, but for the 3 log tables - a
+deliberately simpler envelope with no `migrations`/`formatVersion`,
+since logs are never uploaded back, only downloaded or cleared), and
+**Clear Logs** (`TRUNCATE` the 3 log tables). **Apply** exists ONLY as
+a per-row action in the CRUD list of saved stamps below both blocks,
+never as a top-level button - a saved stamp needs to be picked before
+"apply" means anything.
+
+**Three real bugs, all caught only by live-testing "apply a stamp back
+onto itself"** (safe - it restores identical data, so before/after row
+counts and sequence values can be diffed with zero risk) rather than
+trusting a bare `{ok: true}` response:
+
+1. `light_templates.channel_spectrum` is a jsonb column whose value is
+   a top-level JSON ARRAY, not an object. `pg`'s own automatic
+   parameter serialization checks `Array.isArray` before checking "is
+   this an object" - a JS array bound as a query parameter gets
+   formatted as a Postgres ARRAY literal (`{a,b}`), which is exactly
+   correct for `processes.actions` (a real `text[]` column) but wrong
+   for a jsonb column storing an array, and Postgres rejected it
+   ("invalid input syntax for type json"). Fixed by reading each
+   column's real `data_type` from `information_schema` and explicitly
+   `JSON.stringify`-ing only json/jsonb columns before binding them.
+2. `TRUNCATE ... RESTART IDENTITY` resets every SERIAL sequence to 1,
+   but every row is then re-inserted with its own explicit `id`
+   (preserved from the dump) - which never advances a sequence. After
+   one Apply, `devices_id_seq` sat at 1 while real ids ran into the
+   hundreds; the very next auto-generated insert (a device created
+   normally through the UI) would have collided with an existing row.
+   Fixed with a per-table `setval(pg_get_serial_sequence(...), max(id),
+   ...)` after that table's inserts - guarded in TypeScript (checking
+   `information_schema` for an `id` column), not in the SQL itself,
+   because `pg_get_serial_sequence` raises a hard error rather than
+   returning NULL for a table with no `id` column at all (every
+   composite-PK join table, `message_levels`), as opposed to a column
+   that exists but has no sequence (`message_signal_timing`'s fixed
+   singleton row) - a SQL-side `IF ... IS NOT NULL` guard never gets a
+   chance to catch the former case.
+3. `log_command.action` has its own Postgres CHECK constraint,
+   completely separate from the TypeScript `DeviceCommandAction` union
+   in `commandLog.ts` - widening the TS type to add `'set-state'`/
+   `'clear-logs'` did nothing to the actual database constraint, and
+   `logCommand()` is deliberately best-effort (swallows its own
+   errors), so every `set-state`/`clear-logs` audit insert failed
+   completely silently - zero rows, zero visible errors anywhere.
+   Migration `1690000000055` widens the constraint to match.
+
+Apply/Upload log a `set-state` command, Clear Logs logs `clear-logs`
+(`log_command`, both device_id/process_id absent - "System" is the
+target shown in `CommandLogsTab.jsx`'s own fallback) - the only two
+Database actions the feature was asked to audit; Save/Download aren't
+destructive to live data, so they aren't logged. Clear Logs also calls
+`broadcastForced("clear-logs")` (`processBroadcast.ts`, the same helper
+`routes/processes.ts`'s own ON/OFF actions and forced-broadcast route
+already use) right after truncating - `clearLogTables()` itself already
+resyncs the header's own Redis-cached unread-warning/error counters
+(`processMessages.ts`'s `wem:unread:*`, incrementally maintained on
+every hide/create, NOT derived fresh from `log_messages` on read - a
+raw `TRUNCATE` alone left them showing stale pre-clear numbers, making
+the whole action look like it silently did nothing even though the
+rows were genuinely gone) via `initUnreadCounts()`, but without the
+forced broadcast a client only found out on the next periodic tick (up
+to `PROCESS_STATE_BROADCAST_INTERVAL_MS`, 5s later).
