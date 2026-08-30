@@ -12,6 +12,7 @@ import path from "node:path";
 
 import { config } from "./config.js";
 import { pool } from "./db.js";
+import { initUnreadCounts } from "./processMessages.js";
 
 // Topological (parent-before-child) order for the tables that make up a
 // System Stamp - matches this project's own FK graph, checked live
@@ -315,7 +316,19 @@ export async function applyStampDump(dump: StampDump): Promise<void> {
   }
 }
 
-/** Clear Logs - the 3 log_* tables only, never touches CONFIG_TABLES. */
+/** Clear Logs - the 3 log_* tables only, never touches CONFIG_TABLES.
+ *
+ * Found live (2026-08-30, reported as "Clear Logs doesn't work"): the
+ * header's own "unread warnings/errors" badges are NOT derived from
+ * `log_messages` on every render - they're cached counters in Redis
+ * (processMessages.ts's `wem:unread:*` keys, incrementally maintained by
+ * `bumpUnreadCount()` on every hide/create). A raw TRUNCATE here deletes
+ * the rows but never touches those counters, so the badges kept showing
+ * their pre-clear numbers even though the table was genuinely empty -
+ * looked exactly like the whole action silently did nothing.
+ * `initUnreadCounts()` resyncs them from the table's real (now empty)
+ * state, the same call server.ts already makes once at boot. */
 export async function clearLogTables(): Promise<void> {
   await pool.query(`TRUNCATE ${LOG_TABLES.join(", ")} RESTART IDENTITY`);
+  await initUnreadCounts();
 }
