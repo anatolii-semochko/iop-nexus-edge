@@ -102,6 +102,26 @@ export async function buildStampDump(name: string): Promise<StampDump> {
   };
 }
 
+export interface LogsDump {
+  projectName: string;
+  createdAt: string;
+  tables: Record<string, Record<string, unknown>[]>;
+}
+
+/** Download Logs - an ad-hoc dump of the 3 log_* tables, streamed straight
+ * to the client (routes/serviceDatabase.ts), never written to disk here.
+ * Deliberately a separate, simpler shape from StampDump - logs are never
+ * uploaded/applied back (only Download + Clear exist for them), so there's
+ * no migrations/formatVersion compatibility envelope to carry. */
+export async function buildLogsDump(): Promise<LogsDump> {
+  const tables: Record<string, Record<string, unknown>[]> = {};
+  for (const table of LOG_TABLES) {
+    const { rows } = await pool.query(`SELECT * FROM ${table}`);
+    tables[table] = rows;
+  }
+  return { projectName: config.postgres.database, createdAt: new Date().toISOString(), tables };
+}
+
 /** Save State - snapshot now, persisted as a file. */
 export async function createStampFile(name: string): Promise<StampListEntry> {
   await ensureDir();

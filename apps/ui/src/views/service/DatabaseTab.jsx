@@ -137,6 +137,11 @@ const ACTION_ROWS = [
       'Upload a previously downloaded snapshot and apply it, replacing the current configuration.',
   },
   {
+    key: 'download-logs',
+    label: 'Download Logs',
+    description: 'Download the command/device/message logs as a file - not saved on the server.',
+  },
+  {
     key: 'clear-logs',
     label: 'Clear Logs',
     description: 'Permanently delete command/device/message logs. Configuration is not affected.',
@@ -336,6 +341,8 @@ const DatabaseTab = () => {
       triggerDownload('/api/service/database/download')
     } else if (key === 'upload') {
       fileInputRef.current?.click()
+    } else if (key === 'download-logs') {
+      triggerDownload('/api/service/database/download-logs')
     } else if (key === 'clear-logs') {
       setClearLogsConfirm(true)
     }

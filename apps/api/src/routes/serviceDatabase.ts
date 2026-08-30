@@ -7,6 +7,7 @@ import { config } from "../config.js";
 import { pool } from "../db.js";
 import {
   applyStampDump,
+  buildLogsDump,
   buildStampDump,
   clearLogTables,
   CONFIG_TABLES,
@@ -133,6 +134,18 @@ export async function serviceDatabaseRoutes(app: FastifyInstance): Promise<void>
   app.get("/service/database/download", async (request, reply) => {
     const dump = await buildStampDump(`download-${new Date().toISOString()}`);
     reply.header("Content-Disposition", `attachment; filename="${dump.projectName}-${dump.createdAt}.json"`);
+    reply.type("application/json");
+    return dump;
+  });
+
+  // Ad-hoc dump of the 3 log_* tables, streamed straight to the client -
+  // same "never touches disk server-side" shape as /download above, just
+  // for logs instead of config (AGENTS_TO_DO.md, 2026-08-30: "Логи
+  // Download" was its own separate spec point from the config Download/
+  // Upload pair).
+  app.get("/service/database/download-logs", async (request, reply) => {
+    const dump = await buildLogsDump();
+    reply.header("Content-Disposition", `attachment; filename="${dump.projectName}-logs-${dump.createdAt}.json"`);
     reply.type("application/json");
     return dump;
   });
