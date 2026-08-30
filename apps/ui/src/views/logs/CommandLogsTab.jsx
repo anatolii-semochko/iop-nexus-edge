@@ -23,7 +23,19 @@ import TableSearchInput from '../../components/table/TableSearchInput'
 import { useServerPaginatedList } from '../../hooks/useServerPaginatedList'
 import { formatSmartDateTime, localDateTimeToIso, userInitials } from '../../utils/format'
 
-const ACTIONS = ['write', 'auto', 'release', 'simulate', 'on', 'off', 'config', 'simulated-on', 'simulated-off']
+const ACTIONS = [
+  'write',
+  'auto',
+  'release',
+  'simulate',
+  'on',
+  'off',
+  'config',
+  'simulated-on',
+  'simulated-off',
+  'set-state',
+  'clear-logs',
+]
 const PAGE_SIZE_OPTIONS = [20, 50, 100]
 
 const formatValue = (value) => {
@@ -204,9 +216,14 @@ const CommandLogsTab = ({
                     {formatSmartDateTime(item.created_at)}
                   </CTableDataCell>
                   <CTableDataCell>
+                    {/* Service->Database's set-state/clear-logs (AGENTS_TO_DO.md,
+                        2026-08-30) target neither a device nor a process -
+                        a system-wide action, not "#?" . */}
                     {item.device_name ??
                       item.process_name ??
-                      `#${item.device_id ?? item.process_id ?? '?'}`}
+                      ((item.device_id ?? item.process_id)
+                        ? `#${item.device_id ?? item.process_id}`
+                        : 'System')}
                   </CTableDataCell>
                   <CTableDataCell>{item.action}</CTableDataCell>
                   <CTableDataCell>{formatValue(item.value)}</CTableDataCell>

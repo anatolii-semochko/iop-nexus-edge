@@ -330,4 +330,20 @@ export const api = {
   // Service->Commands (admin-only server-side - see apps/api/src/routes/service.ts).
   listSystemCommands: () => request('/service/commands'),
   runSystemCommand: (id) => request(`/service/commands/${id}/run`, { method: 'POST' }),
+  // Service->Database (admin-only server-side - see
+  // apps/api/src/routes/serviceDatabase.ts).
+  getDatabaseStats: () => request('/service/database/stats'),
+  listDatabaseStamps: () => request('/service/database/stamps'),
+  saveDatabaseStamp: (name) =>
+    request('/service/database/stamps', { method: 'POST', body: JSON.stringify({ name }) }),
+  deleteDatabaseStamp: (filename) =>
+    request(`/service/database/stamps/${encodeURIComponent(filename)}`, { method: 'DELETE' }),
+  applyDatabaseStamp: (filename) =>
+    request(`/service/database/stamps/${encodeURIComponent(filename)}/apply`, { method: 'POST' }),
+  uploadDatabaseStamp: (file) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return request('/service/database/upload', { method: 'POST', body: formData })
+  },
+  clearDatabaseLogs: () => request('/service/database/logs', { method: 'DELETE' }),
 }

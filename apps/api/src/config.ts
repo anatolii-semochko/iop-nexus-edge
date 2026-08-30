@@ -95,4 +95,12 @@ export const config = {
     shutdownEnabled: process.env.SHUTDOWN_ENABLE === "true",
     restartEnabled: process.env.RESTART_ENABLE === "true",
   },
+  // Service->Database (AGENTS_TO_DO.md, 2026-08-30) - System Stamps
+  // (config-table snapshots) saved as files here, not a DB table ("стани
+  // в файлах" - restoring FROM the very database being restored would be
+  // an awkward dependency). Same volume-mount pattern as uploads.avatarsDir.
+  systemStamps: {
+    dir: process.env.SYSTEM_STAMPS_DIR ?? "/workspace/apps/api/uploads/system-stamps",
+    maxUploadSizeBytes: Number(process.env.SYSTEM_STAMP_MAX_SIZE_BYTES ?? 50 * 1024 * 1024),
+  },
 };

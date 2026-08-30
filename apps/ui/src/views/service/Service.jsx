@@ -17,20 +17,22 @@ import {
   CTabs,
 } from '@coreui/react'
 import { api } from '../../api/client'
+import { usePersistedState } from '../../hooks/usePersistedState'
+import DatabaseTab from './DatabaseTab'
 
 // Service page (AGENTS_TO_DO.md, 2026-08-30) - admin-only (server-side
 // requireAdmin on every /service/* route, same pattern as UsersList.jsx's
 // own /users routes - this page has no extra client-side guard beyond
 // that, it trusts the 403). Tabs will grow (user's own "буде
-// розширюватися") - Config/Database are placeholders for now, Commands is
-// the first real one.
+// розширюватися") - Config is still a placeholder, Database and Commands
+// are both real now.
 const TABS = [
   { key: 'config', label: 'Config' },
   { key: 'database', label: 'Database' },
   { key: 'commands', label: 'Commands' },
 ]
 
-const PLACEHOLDER_TABS = new Set(['config', 'database'])
+const PLACEHOLDER_TABS = new Set(['config'])
 
 const CommandRow = ({ command, onRun }) => (
   <div className="d-flex align-items-center justify-content-between py-2 border-bottom">
@@ -135,8 +137,18 @@ const PlaceholderTab = ({ label }) => (
   <div className="pt-2 text-body-secondary">{label} is not configured yet.</div>
 )
 
+// Registration for usePersistedState (AGENTS.md section 22) - remembers
+// the last tab across visits; a saved key that no longer matches any TABS
+// entry (a tab removed later) falls back to the first tab in the list
+// rather than rendering nothing.
+const PERSISTED_DEFAULTS = { activeTab: TABS[0].key }
+
 const Service = () => {
-  const [activeTab, setActiveTab] = useState('commands')
+  const [pageState, setPageState] = usePersistedState('nexusedge.servicePage', PERSISTED_DEFAULTS)
+  const activeTab = TABS.some((t) => t.key === pageState.activeTab)
+    ? pageState.activeTab
+    : TABS[0].key
+  const setActiveTab = (key) => setPageState({ activeTab: key })
 
   return (
     <CCard className="mb-4">
@@ -156,6 +168,7 @@ const Service = () => {
         {PLACEHOLDER_TABS.has(activeTab) && (
           <PlaceholderTab label={TABS.find((t) => t.key === activeTab).label} />
         )}
+        {activeTab === 'database' && <DatabaseTab />}
         {activeTab === 'commands' && <CommandsTab />}
       </CCardBody>
     </CCard>

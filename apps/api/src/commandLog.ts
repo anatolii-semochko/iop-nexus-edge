@@ -27,7 +27,14 @@ export type DeviceCommandAction =
   // Process management (AGENTS_TO_DO.md, 2026-08-14) - live create/delete
   // of a `processes` row through routes/processes.ts's new POST/DELETE.
   | "create"
-  | "delete";
+  | "delete"
+  // Service->Database (AGENTS_TO_DO.md, 2026-08-30) - the only two Database
+  // actions the user asked to be audited ("Команди SetState, ClearLogs
+  // логаються в LogsCommands"): Save/Download aren't destructive to live
+  // data, so they aren't logged. Both deviceId/processId are absent for
+  // these - a system-wide action, not device/process-scoped.
+  | "set-state"
+  | "clear-logs";
 
 export interface CommandLogEntry {
   // Exactly one of deviceId/processId in practice (device actions vs

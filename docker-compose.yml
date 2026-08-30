@@ -108,6 +108,7 @@ services:
       - "${API_PORT}:${API_PORT}"
     volumes:
       - api-avatars:${AVATAR_UPLOAD_DIR}
+      - api-system-stamps:${SYSTEM_STAMPS_DIR}
       # Service->Commands (AGENTS_TO_DO.md, 2026-08-30) - lets systemCommands.ts
       # call org.freedesktop.login1 (systemd-logind) on the HOST bus to
       # power off/reboot the actual machine this stack runs on. Harmless
@@ -157,3 +158,4 @@ volumes:
   redis-data:
   rabbitmq-data:
   api-avatars:
+  api-system-stamps:

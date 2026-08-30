@@ -92,6 +92,21 @@ export function localDateTimeToIso(value) {
 // section 25, and the Logs page's processes tab, section 29) - `user` is
 // `{display_name, username}`, falling back to username when no display
 // name is set.
+// Service->Database's size chart/table (AGENTS_TO_DO.md, 2026-08-30) - the
+// one place table/category byte counts get turned into a human string.
+export function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes < 0) return '-'
+  if (bytes < 1024) return `${bytes} B`
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let value = bytes / 1024
+  let unitIndex = 0
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024
+    unitIndex += 1
+  }
+  return `${value.toFixed(value < 10 ? 2 : 1)} ${units[unitIndex]}`
+}
+
 export function userInitials(user) {
   return (user.display_name ?? user.username)
     .split(/\s+/)
